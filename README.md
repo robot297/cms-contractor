@@ -7,11 +7,11 @@ A simple customer management system for contractors to manage their clients and 
 - **Dashboard**: Overview of clients, projects, and key metrics
 - **Client Management**: Create, view, and manage client information
 - **Project Tracking**: Organize projects by client with status tracking
-- **Simple & Customizable**: Built with Vue.js for easy customization
+- **Simple & Customizable**: Built with Vue.js + Vite for easy customization and fast development
 
 ## Tech Stack
 
-- **Frontend**: Vue.js 3
+- **Frontend**: Vue.js 3 + Vite
 - **Backend**: Node.js + Express
 - **Database**: SQLite
 
@@ -40,22 +40,28 @@ npm install
 mkdir data
 ```
 
-4. Start the server:
+### Development
+
+Run both frontend (Vite) and backend (Express) in development mode:
+```bash
+npm run dev
+```
+
+This will:
+- Start Vite dev server on `http://localhost:5173` with hot module replacement (HMR)
+- Start Express server on `http://localhost:3000`
+- Proxy API calls from frontend to backend
+
+### Production
+
+Build and start the production server:
 ```bash
 npm start
 ```
 
-5. Open your browser and navigate to:
-```
-http://localhost:3000
-```
-
-### Development
-
-For development with auto-reload:
-```bash
-npm run dev
-```
+This will:
+- Build the Vue.js frontend with Vite
+- Serve the production build from Express on `http://localhost:3000`
 
 ## Project Structure
 
@@ -63,12 +69,15 @@ npm run dev
 .
 ├── server.js           # Express server & API routes
 ├── package.json        # Dependencies
-├── public/
-│   ├── index.html      # Main HTML file
-│   ├── app.js          # Vue.js application
-│   └── styles.css      # Styling
-├── data/               # SQLite database (created on first run)
-└── README.md           # This file
+├── vite.config.js      # Vite configuration
+├── index.html          # Main HTML file
+├── src/
+│   ├── main.js        # Vue app entry point
+│   ├── App.vue        # Root Vue component
+│   └── style.css      # Global styles
+├── dist/              # Built frontend (production)
+├── data/              # SQLite database
+└── README.md          # This file
 ```
 
 ## Usage
@@ -88,6 +97,13 @@ See a quick overview of your business:
 - Create projects and link them to clients
 - Track project status (Not Started, In Progress, Completed)
 - Set project dates
+
+## Development Benefits with Vite
+
+- ⚡ **Instant HMR**: See changes instantly while developing
+- 🚀 **Fast Build**: Lightning-quick production builds
+- 📦 **Optimized Output**: Smaller bundle sizes
+- 🔧 **Easy Customization**: Modify components, styles, and logic instantly
 
 ## Future Enhancements
 
