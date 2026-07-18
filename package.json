@@ -51,5 +51,8 @@
 	},
 	"dependencies": {
 		"better-sqlite3": "^12.10.0"
-	}
+	},
+  "engines": {
+		"node": ">=22"
+  }
 }

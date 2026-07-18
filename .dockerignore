@@ -1,0 +1,11 @@
+.git
+.github
+.vscode
+.devcontainer
+node_modules
+.svelte-kit
+build
+.env
+.env.*
+!.env.example
+Dockerfile*
