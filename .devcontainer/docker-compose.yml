@@ -1,1 +1,0 @@
-version: '3.8'\n\nservices:\n  app:\n    build:\n      context: .\n      dockerfile: Dockerfile\n    volumes:\n      - ..:/workspace:cached\n      - /workspace/node_modules\n    ports:\n      - \"3000:3000\"\n      - \"5173:5173\"\n    environment:\n      - NODE_ENV=development\n    command: /bin/bash -c \"npm install && npm run dev\"\n"
