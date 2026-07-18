@@ -18,7 +18,9 @@
 	},
 	"mounts": [
 		"source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,type=bind,consistency=cached",
-		"source=${localEnv:HOME}/.ssh/id_ed25519,target=/home/node/.ssh/id_ed25519,type=bind,consistency=cached"
+		"source=${localEnv:HOME}/.ssh/id_ed25519,target=/home/node/.ssh/id_ed25519,type=bind,consistency=cached",
+		"source=pnpm-store,target=/home/node/.local/share/pnpm/store,type=volume",
+		"source=node_modules_volume,target=${containerWorkspaceFolder}/node_modules,type=volume"
 	],
 	"remoteUser": "root"
 }
