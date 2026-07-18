@@ -1,4 +1,16 @@
-# CMS Contractor
+# ConActFor
+
+Contractor CRM to help enable better customer transparency for contractors who maybe prefer a sleek, streamlined mobile-first experience over all else.
+
+## Tech Stack
+
+- SvelteKit (Framework)
+- Better Auth (Authentication)
+- Drizzle (Database ORM)
+- Varlock (Secure .env variable handling)
+- Prettier and ESLint (Style and format)
+- Vite (build)
+- Coolify (uses Nix for deployment)
 
 ## Local Development
 
@@ -18,4 +30,6 @@ pnpm dev
 
 ## Deployment
 
-[crm.upliftcollective.dev](https://crm.upliftcollective.dev)
+Deployed via Coolify in the `crm` namespace of my `uplift-collective.dev` domain.
+
+- [crm.upliftcollective.dev](https://crm.upliftcollective.dev)
