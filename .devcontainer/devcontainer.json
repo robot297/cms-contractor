@@ -28,7 +28,8 @@
 				"esbenp.prettier-vscode",
 				"Ionut-Bdin.magic-css",
 				"bradlc.vscode-tailwindcss",
-				"Anthropic.claude-code"
+				"Anthropic.claude-code",
+				"vivaxy.vscode-conventional-commits"
 			],
             "settings": {
                 "editor.formatOnSave": true,
@@ -44,7 +45,7 @@
     },
     "mounts": [
         "source=claude-code-config,target=/home/node/.claude,type=volume",
-        "source=dev-container-ssh,target=/home/node/.ssh,type=volume"
+  		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh/,target=/home/node/.ssh,type=bind,consistency=cached"
     ]
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
