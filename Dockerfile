@@ -20,8 +20,6 @@ FROM base AS runtime
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATABASE_URL=postgresql://postgres:postgres@postgres:5432/app
-ENV ORIGIN="http://localhost:3000"
-ENV BETTER_AUTH_SECRET="development-secret-change-me"
 
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
