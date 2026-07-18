@@ -51,9 +51,10 @@
 	},
 	"dependencies": {
 		"better-sqlite3": "^12.10.0",
-		"postgres": "^3.2.4"
+		"postgres": "^3.2.4",
+		"varlock": "^1.11.0"
 	},
-  "engines": {
+	"engines": {
 		"node": ">=22"
-  }
+	}
 }

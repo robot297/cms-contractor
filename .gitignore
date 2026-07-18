@@ -110,3 +110,4 @@ pnpm/npm/napi/*.node
 pnpm/npm/napi.*/
 /pnpm-napi.*.node
 pnpr-bins-*
+!.env.schema
