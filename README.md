@@ -1,42 +1,21 @@
-# sv
+# CMS Contractor
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+## Local Development
 
-## Creating a project
+> Note: This project includes an optional Dev Container pattern.
 
-If you're seeing this, you've probably already done this step. Congrats!
+Installing dependencies:
 
-```sh
-# create a new project
-npx sv create my-app
+```bash
+pnpm install
 ```
 
-To recreate this project with the same configuration:
+Serve the application:
 
-```sh
-# recreate this project
-pnpm dlx sv@0.16.3 create --template minimal --types ts --add prettier eslint vitest="usages:unit,component" playwright sveltekit-adapter="adapter:node" drizzle="database:sqlite+sqlite:better-sqlite3" better-auth="demo:password,github" --install pnpm contractor-crm
+```bash
+pnpm dev
 ```
 
-## Developing
+## Deployment
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+[crm.upliftcollective.dev](https://crm.upliftcollective.dev)

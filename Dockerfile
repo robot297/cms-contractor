@@ -29,4 +29,4 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
 COPY --from=build /app/static ./static
 EXPOSE 3000
-CMD ["node", "build/index.js"]
+ENTRYPOINT ["node", "build/index.js"]
