@@ -1,6 +1,6 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 
-export const task = sqliteTable('task', {
+export const task = pgTable('task', {
 	id: text('id')
 		.primaryKey()
 		.$defaultFn(() => crypto.randomUUID()),
