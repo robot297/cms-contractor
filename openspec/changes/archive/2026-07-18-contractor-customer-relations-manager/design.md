@@ -10,7 +10,7 @@ The product should be built as two coordinated experiences:
 ## Authentication and Access
 
 - Contractors should use Better Auth for sign-in.
-- Contractor sign-in should support email/password and GitLab as an optional provider.
+- Contractor sign-in should support email/password and GitHub as an optional provider.
 - Customers should access the portal through a contractor-issued magic-link invite.
 - Customer invites should expire automatically after 24 hours and be resendable or revocable by the contractor.
 

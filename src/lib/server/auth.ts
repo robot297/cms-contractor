@@ -5,15 +5,28 @@ import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { getRequestEvent } from '$app/server';
 import { db } from '$lib/server/db';
 
+const githubClientId = env.GITHUB_CLIENT_ID ?? '';
+const githubClientSecret = env.GITHUB_CLIENT_SECRET ?? '';
+
 export const auth = betterAuth({
-	baseURL: env.ORIGIN,
-	secret: env.BETTER_AUTH_SECRET,
+	baseURL: env.ORIGIN ?? 'http://localhost:5173',
+	secret: env.BETTER_AUTH_SECRET ?? 'dev-secret',
 	database: drizzleAdapter(db, { provider: 'pg' }),
 	emailAndPassword: { enabled: true },
+	user: {
+		additionalFields: {
+			role: {
+				type: 'string',
+				required: false,
+				defaultValue: 'customer',
+				input: true // allow the value to be set from the sign-up form
+			}
+		}
+	},
 	socialProviders: {
 		github: {
-			clientId: env.GITHUB_CLIENT_ID,
-			clientSecret: env.GITHUB_CLIENT_SECRET
+			clientId: githubClientId,
+			clientSecret: githubClientSecret
 		}
 	},
 	plugins: [
