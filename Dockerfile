@@ -26,5 +26,9 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
 COPY --from=build /app/static ./static
+# Migrations + runtime migrator (drizzle-orm only — no drizzle-kit/config needed).
+COPY --from=build /app/drizzle ./drizzle
+COPY --from=build /app/scripts ./scripts
 EXPOSE 3000
-ENTRYPOINT ["node", "build/index.js"]
+# Apply pending migrations, then start the server. Fails fast if migrations fail.
+ENTRYPOINT ["sh", "-c", "node scripts/migrate.mjs && node build/index.js"]

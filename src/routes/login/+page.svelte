@@ -97,19 +97,6 @@
 					style="padding: 0.6rem; border-radius: 8px; border: 1px solid #d0d7de;"
 				/>
 			</label>
-			<fieldset
-				style="border: 1px solid #d0d7de; border-radius: 8px; padding: 0.6rem; display: grid; gap: 0.4rem;"
-			>
-				<legend style="font-size: 0.9rem; padding: 0 0.35rem;">I am a…</legend>
-				<label style="display: flex; gap: 0.5rem; align-items: center;">
-					<input type="radio" name="role" value="contractor" required />
-					<span>Contractor / service provider</span>
-				</label>
-				<label style="display: flex; gap: 0.5rem; align-items: center;">
-					<input type="radio" name="role" value="customer" checked />
-					<span>Customer</span>
-				</label>
-			</fieldset>
 			<button
 				type="submit"
 				style="padding: 0.7rem; border-radius: 999px; border: none; background: #0969da; color: #fff; cursor: pointer;"

@@ -1,17 +1,12 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { APIError } from 'better-auth/api';
 import { auth } from '$lib/server/auth';
-import type { UserRole } from '$lib/crm';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) redirect(302, '/');
 	return {};
 };
-
-function readRole(value: FormDataEntryValue | null): UserRole {
-	return value === 'contractor' ? 'contractor' : 'customer';
-}
 
 export const actions: Actions = {
 	signIn: async (event) => {
@@ -36,10 +31,11 @@ export const actions: Actions = {
 		const email = form.get('email')?.toString() ?? '';
 		const password = form.get('password')?.toString() ?? '';
 		const name = form.get('name')?.toString() ?? '';
-		const role = readRole(form.get('role'));
 		try {
+			// Self-signup on the login page is always a contractor; customers are
+			// created by contractors and join via an invite link.
 			await auth.api.signUpEmail({
-				body: { email, password, name, role },
+				body: { email, password, name, role: 'contractor' },
 				headers: event.request.headers
 			});
 		} catch (error) {
