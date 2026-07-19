@@ -1,6 +1,44 @@
 import { relations } from 'drizzle-orm';
-import { boolean, index, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { boolean, index, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { user } from './auth.schema';
+
+// A first-class, contractor-scoped customer record. Exists independently of any
+// order. Optionally links to a login (`userId`) once an invite is accepted.
+export const customer = pgTable(
+	'customer',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		contractorId: text('contractor_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		email: text('email').notNull(),
+		phone: text('phone'),
+		// Service / mailing address, free-form for the MVP.
+		address: text('address'),
+		// Project details and any other free-form context about this customer.
+		notes: text('notes'),
+		// Free-form labels the contractor applies to organize customers.
+		tags: text('tags').array().notNull().default([]),
+		// Set when an invited customer accepts and binds their login (by token).
+		userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+		// Soft-archive marker: archived customers drop out of the directory.
+		archivedAt: timestamp('archived_at'),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+		updatedAt: timestamp('updated_at')
+			.defaultNow()
+			.$onUpdate(() => new Date())
+			.notNull()
+	},
+	(table) => [
+		// A contractor cannot hold two customers with the same email.
+		uniqueIndex('customer_contractor_email_idx').on(table.contractorId, table.email),
+		index('customer_contractorId_idx').on(table.contractorId),
+		index('customer_userId_idx').on(table.userId)
+	]
+);
 
 export const order = pgTable(
 	'order',
@@ -11,10 +49,8 @@ export const order = pgTable(
 		contractorId: text('contractor_id')
 			.notNull()
 			.references(() => user.id, { onDelete: 'cascade' }),
-		// Set once the invited customer signs up with a matching email.
-		customerId: text('customer_id').references(() => user.id, { onDelete: 'set null' }),
-		customerName: text('customer_name').notNull(),
-		customerEmail: text('customer_email').notNull(),
+		// The linked customer record — single source of truth for name/email.
+		customerId: text('customer_id').references(() => customer.id, { onDelete: 'set null' }),
 		state: text('state').notNull().default('Inquiry'),
 		createdAt: timestamp('created_at').defaultNow().notNull(),
 		updatedAt: timestamp('updated_at')
@@ -24,8 +60,7 @@ export const order = pgTable(
 	},
 	(table) => [
 		index('order_contractorId_idx').on(table.contractorId),
-		index('order_customerId_idx').on(table.customerId),
-		index('order_customerEmail_idx').on(table.customerEmail)
+		index('order_customerId_idx').on(table.customerId)
 	]
 );
 
@@ -72,9 +107,10 @@ export const customerInvite = pgTable(
 		id: text('id')
 			.primaryKey()
 			.$defaultFn(() => crypto.randomUUID()),
-		orderId: text('order_id')
-			.notNull()
-			.references(() => order.id, { onDelete: 'cascade' }),
+		// The customer this invite binds a login to on acceptance.
+		customerId: text('customer_id').references(() => customer.id, { onDelete: 'cascade' }),
+		// Optional order context; directory-level invites have no order.
+		orderId: text('order_id').references(() => order.id, { onDelete: 'cascade' }),
 		contractorId: text('contractor_id')
 			.notNull()
 			.references(() => user.id, { onDelete: 'cascade' }),
@@ -86,13 +122,21 @@ export const customerInvite = pgTable(
 	},
 	(table) => [
 		index('invite_contractorId_idx').on(table.contractorId),
+		index('invite_customerId_idx').on(table.customerId),
 		index('invite_orderId_idx').on(table.orderId)
 	]
 );
 
+export const customerRelations = relations(customer, ({ one, many }) => ({
+	contractor: one(user, { fields: [customer.contractorId], references: [user.id] }),
+	account: one(user, { fields: [customer.userId], references: [user.id] }),
+	orders: many(order),
+	invites: many(customerInvite)
+}));
+
 export const orderRelations = relations(order, ({ one, many }) => ({
 	contractor: one(user, { fields: [order.contractorId], references: [user.id] }),
-	customer: one(user, { fields: [order.customerId], references: [user.id] }),
+	customer: one(customer, { fields: [order.customerId], references: [customer.id] }),
 	timeline: many(timelineEntry),
 	invites: many(customerInvite)
 }));
@@ -102,7 +146,8 @@ export const timelineEntryRelations = relations(timelineEntry, ({ one }) => ({
 }));
 
 export const customerInviteRelations = relations(customerInvite, ({ one }) => ({
-	order: one(order, { fields: [customerInvite.orderId], references: [order.id] })
+	order: one(order, { fields: [customerInvite.orderId], references: [order.id] }),
+	customer: one(customer, { fields: [customerInvite.customerId], references: [customer.id] })
 }));
 
 export * from './auth.schema';

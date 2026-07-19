@@ -16,7 +16,7 @@ _Avoid_: Client (used loosely in older docs), buyer, contact-as-a-separate-thing
 A Customer is _Linked_ once someone accepts its Invite and a User binds to it; _Unlinked_ before that. An Unlinked Customer's email is editable (and editing revokes pending Invites); a Linked Customer's email is read-only.
 
 **Archived Customer**:
-A soft-deleted Customer — removed from the Directory and "select existing" but still referenced by its Orders so history survives. Hard deletion is allowed only for a Customer with no Orders and no link.
+A Customer whose state has been set to archived — removed from the Directory and "select existing" but never deleted; the record and its Orders are preserved. Archiving always updates state (reversible), never deletes, and is confirmed before it takes effect.
 
 **User**:
 A login identity (a `user` row / better-auth account) with a `role` of `contractor` or `customer`. Distinct from a Customer record.

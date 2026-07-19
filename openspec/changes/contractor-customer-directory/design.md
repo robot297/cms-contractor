@@ -46,10 +46,10 @@ Replace the email-only `linkCustomerByEmail` path (`crm.server.ts:112-122`) with
 - **Why:** OAuth sign-in can carry a different email than the invited address, so an email-only match silently fails and yields an empty portal. The token is the contractor's explicit "this person = this customer" assertion.
 - **Alternative considered:** Keep email matching. Rejected — the silent-empty-portal failure mode; recorded in `docs/adr/0001-bind-customer-to-user-by-invite-token.md`.
 
-### Decision 4b: Deletion is a soft-archive
-A `customer` carries an `archivedAt` (or `status`) column. Deleting a customer with orders soft-archives it (excluded from directory and order-time selection; orders still reference it). Hard delete is allowed only when the customer has no orders and no linked user.
+### Decision 4b: Archiving is always a soft-archive (never a delete)
+A `customer` carries an `archivedAt` column. Archiving only sets `archivedAt`; it never deletes the record. Archived customers are excluded from the directory and order-time selection, but the record and its orders are preserved. The contractor confirms in the UI (inline "are you sure?") before the archive is submitted.
 
-- **Why:** Preserves order history while removing the customer from active use.
+- **Why:** Deletion is destructive and surprising; contractors expect archive to hide, not erase. Keeping the record also keeps order history and any future un-archive trivial.
 
 ### Decision 5: New route `contractor/customers` with load + form actions
 Add `src/routes/contractor/customers/+page.server.ts` (guarded by the existing `requireContractor`) with a `load` returning `{ customers }` and actions `addCustomer`, `editCustomer`, `archiveCustomer`, `sendInvite` (or reuse the existing invite action), plus search via client-side filter or a server action over the loaded list. Update the new-order form on `contractor/+page.svelte` to pick one of the contractor's own customers or add one inline. All new DB operations live in `crm.server.ts` (`listCustomers`, `createCustomer`, `editCustomer`, `archiveCustomer`, `bindInviteToken`) and stay scoped by `contractorId`.

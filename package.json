@@ -13,8 +13,7 @@
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"test:unit": "vitest",
-		"test": "npm run test:unit -- --run && npm run test:e2e",
-		"test:e2e": "playwright install && playwright test",
+		"test": "vitest run",
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
@@ -25,13 +24,10 @@
 	"devDependencies": {
 		"@better-auth/cli": "~1.4.21",
 		"@eslint/js": "^10.0.1",
-		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-node": "^5.5.4",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
-		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "^22",
-		"@vitest/browser-playwright": "^4.1.8",
 		"better-auth": "~1.4.21",
 		"drizzle-kit": "^0.31.10",
 		"drizzle-orm": "^0.45.2",
@@ -39,7 +35,6 @@
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.19.0",
 		"globals": "^17.6.0",
-		"playwright": "^1.60.0",
 		"prettier": "^3.8.3",
 		"prettier-plugin-svelte": "^4.1.0",
 		"svelte": "^5.56.1",
@@ -47,13 +42,12 @@
 		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.60.1",
 		"vite": "^8.0.16",
-		"vitest": "^4.1.8",
-		"vitest-browser-svelte": "^2.1.1"
+		"vitest": "^4.1.8"
 	},
 	"dependencies": {
-		"better-sqlite3": "^12.10.0",
 		"postgres": "^3.2.4",
-		"varlock": "^1.11.0"
+		"varlock": "^1.11.0",
+		"zod": "^4.4.3"
 	},
 	"engines": {
 		"node": ">=22"

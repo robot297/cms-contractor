@@ -24,6 +24,25 @@ The system SHALL represent a customer as a first-class record that exists indepe
 - **WHEN** a contractor attempts to create a customer with an email that already exists among that contractor's customers
 - **THEN** the system rejects the creation and reports a duplicate-email error
 
+### Requirement: Customer contact details
+
+A customer record SHALL support optional contact and organization details in addition to name and email: phone, address, free-form notes (project details), and tags. Contact fields SHALL be validated by a shared schema used on both client and server; when a phone number is provided it SHALL contain ten digits and be stored in a normalized display format, and tags SHALL be a de-duplicated list.
+
+#### Scenario: Optional details are saved
+
+- **WHEN** a contractor provides phone, address, notes, or tags for a customer
+- **THEN** the system saves those details with the customer record
+
+#### Scenario: Invalid phone is rejected
+
+- **WHEN** a contractor submits a phone number that does not contain ten digits
+- **THEN** the system rejects the submission and reports an invalid-phone error
+
+#### Scenario: Details are optional
+
+- **WHEN** a contractor provides only a valid name and email
+- **THEN** the system creates the customer with no phone, address, or notes and an empty tag list
+
 ### Requirement: Contractor views their customer directory
 
 The system SHALL provide a contractor-only route that lists all non-archived customer records belonging to the signed-in contractor, regardless of whether any order references them and regardless of order state. The directory SHALL be reachable from the contractor's main navigation. The directory's only source is customers the contractor created — it SHALL NOT surface customers of other contractors or self-registered accounts.
@@ -118,30 +137,25 @@ The system SHALL allow editing a customer's email only while the customer is unl
 - **WHEN** a contractor attempts to change the email of a customer already linked to a user
 - **THEN** the system rejects the change
 
-### Requirement: Customer deletion is a soft-archive
+### Requirement: Archiving a customer is a reversible state change
 
-The system SHALL soft-archive a customer rather than hard-deleting it when the customer has any orders. An archived customer SHALL be excluded from the directory and from order-time selection, while orders SHALL continue to reference it so history is preserved. A hard delete SHALL be permitted only for a customer with no orders and no linked user.
+Archiving a customer SHALL always be a soft-archive that updates the record's state; it SHALL NOT delete the record. An archived customer SHALL be excluded from the directory and from order-time selection, while the record and its orders are preserved. The contractor SHALL confirm the action before it takes effect.
 
-#### Scenario: Archive a customer with orders
+#### Scenario: Archive updates state without deleting
 
-- **WHEN** a contractor deletes a customer that has one or more orders
-- **THEN** the system archives the customer, removes it from the directory and selection, and leaves its orders intact and still referencing it
+- **WHEN** a contractor confirms archiving a customer
+- **THEN** the system marks the customer archived, removes it from the directory and order-time selection, and preserves the record and any orders that reference it
 
-#### Scenario: Hard delete only when unreferenced
+#### Scenario: Archiving requires confirmation
 
-- **WHEN** a contractor deletes a customer that has no orders and no linked user
-- **THEN** the system removes the customer record entirely
+- **WHEN** a contractor initiates archiving a customer
+- **THEN** the system asks the contractor to confirm before the customer is archived
 
 ### Requirement: Orders link to a customer record as the single source of truth
 
-The system SHALL let a contractor associate an order with a customer record by selecting an existing customer or creating one inline during order creation. The linked customer record SHALL be the single source of truth for the order's customer name and email; the system SHALL NOT maintain a separate denormalized copy of name/email on the order.
+The system SHALL let a contractor create an order for one of their existing directory customers, linking the order to that customer record. The linked customer record SHALL be the single source of truth for the order's customer name and email; the system SHALL NOT maintain a separate denormalized copy of name/email on the order. Contractors create customers in the directory, not inline during order creation.
 
-#### Scenario: Create order for an existing customer
+#### Scenario: Create order for a directory customer
 
-- **WHEN** a contractor creates an order and selects a customer from the directory
+- **WHEN** a contractor creates an order for one of their directory customers
 - **THEN** the order is linked to that customer record and its customer name/email are read through that record
-
-#### Scenario: Create order with an inline new customer
-
-- **WHEN** a contractor creates an order and enters a new customer inline
-- **THEN** the system creates the customer record in the contractor's directory (or reuses the existing one on duplicate email) and links the order to it

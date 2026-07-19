@@ -1,10 +1,12 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { auth } from '$lib/server/auth';
 import { isContractorOrderState } from '$lib/crm';
 import {
 	createInvite,
 	createOrder,
+	deleteInvite,
+	deleteOrder,
 	listContractorOrders,
+	listCustomers,
 	listInvites,
 	listNotifications,
 	markAllNotificationsRead,
@@ -23,15 +25,25 @@ function requireContractor(locals: App.Locals) {
 
 export const load: PageServerLoad = async ({ locals }) => {
 	const user = requireContractor(locals);
-	const [orders, notifications, invites] = await Promise.all([
+	const [orders, customers, notifications, invites] = await Promise.all([
 		listContractorOrders(user.id),
+		listCustomers(user.id),
 		listNotifications(user.id),
 		listInvites(user.id)
 	]);
-	return { orders, notifications, invites, userName: user.name };
+	return { orders, customers, notifications, invites, userName: user.name };
 };
 
 export const actions: Actions = {
+	createOrder: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const customerId = form.get('customerId')?.toString() ?? '';
+		if (!customerId) return fail(400, { message: 'Pick a customer for the order' });
+		await createOrder(user.id, { customerId });
+		return { success: true };
+	},
+
 	quickUpdate: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
@@ -43,23 +55,19 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
-	createOrder: async ({ request, locals }) => {
-		const user = requireContractor(locals);
-		const form = await request.formData();
-		const customerName = form.get('customerName')?.toString().trim() ?? '';
-		const customerEmail = form.get('customerEmail')?.toString().trim() ?? '';
-		if (!customerName || !customerEmail) return fail(400, { message: 'Name and email are required' });
-		await createOrder(user.id, { customerName, customerEmail });
-		return { success: true };
-	},
-
 	sendInvite: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
-		const orderId = form.get('orderId')?.toString() ?? '';
-		const customerEmail = form.get('customerEmail')?.toString().trim() ?? '';
-		if (!orderId || !customerEmail) return fail(400, { message: 'Order and email are required' });
-		await createInvite(user.id, orderId, customerEmail);
+		const customerId = form.get('customerId')?.toString() ?? '';
+		if (!customerId) return fail(400, { message: 'A customer is required' });
+		await createInvite(user.id, customerId);
+		return { success: true };
+	},
+
+	deleteOrder: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		await deleteOrder(form.get('orderId')?.toString() ?? '', user.id);
 		return { success: true };
 	},
 
@@ -67,6 +75,13 @@ export const actions: Actions = {
 		const user = requireContractor(locals);
 		const form = await request.formData();
 		await resendInvite(form.get('inviteId')?.toString() ?? '', user.id);
+		return { success: true };
+	},
+
+	deleteInvite: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		await deleteInvite(form.get('inviteId')?.toString() ?? '', user.id);
 		return { success: true };
 	},
 
@@ -88,10 +103,5 @@ export const actions: Actions = {
 		const user = requireContractor(locals);
 		await markAllNotificationsRead(user.id);
 		return { success: true };
-	},
-
-	signOut: async (event) => {
-		await auth.api.signOut({ headers: event.request.headers });
-		redirect(302, '/login');
 	}
 };

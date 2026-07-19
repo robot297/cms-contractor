@@ -23,7 +23,10 @@ export const actions: Actions = {
 		} catch (error) {
 			if (error instanceof APIError) return fail(400, { mode: 'signIn', message: error.message });
 			console.error('[login] signIn failed:', error);
-			return fail(500, { mode: 'signIn', message: `Unexpected error: ${(error as Error)?.message ?? error}` });
+			return fail(500, {
+				mode: 'signIn',
+				message: `Unexpected error: ${(error as Error)?.message ?? error}`
+			});
 		}
 		redirect(302, '/');
 	},
@@ -42,7 +45,10 @@ export const actions: Actions = {
 		} catch (error) {
 			if (error instanceof APIError) return fail(400, { mode: 'signUp', message: error.message });
 			console.error('[login] signUp failed:', error);
-			return fail(500, { mode: 'signUp', message: `Unexpected error: ${(error as Error)?.message ?? error}` });
+			return fail(500, {
+				mode: 'signUp',
+				message: `Unexpected error: ${(error as Error)?.message ?? error}`
+			});
 		}
 		redirect(302, '/');
 	},
@@ -57,7 +63,10 @@ export const actions: Actions = {
 		} catch (error) {
 			if (error instanceof APIError) return fail(400, { mode: 'signIn', message: error.message });
 			console.error('[login] GitHub sign-in failed:', error);
-			return fail(500, { mode: 'signIn', message: `GitHub sign-in error: ${(error as Error)?.message ?? error}` });
+			return fail(500, {
+				mode: 'signIn',
+				message: `GitHub sign-in error: ${(error as Error)?.message ?? error}`
+			});
 		}
 		if (result.url) redirect(302, result.url);
 		return fail(400, { mode: 'signIn', message: 'GitHub sign-in unavailable' });
