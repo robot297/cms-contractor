@@ -63,6 +63,27 @@ migration errors, so the server never boots against an out-of-sync schema.
   only apply new ones.
 - To migrate a database manually: `DATABASE_URL='<prod-url>' pnpm migrate`.
 
+### ⚠️ Don't mix `db:push` and `db:migrate` on the same database
+
+Pick one lane per database:
+
+- **Migrations (use this for prod, and locally to mirror prod):** after a schema
+  change run `pnpm db:generate`, then `pnpm db:migrate`. This is what the deploy
+  runs on startup, and every change is recorded in `__drizzle_migrations`.
+- **Push (fast, throwaway local only):** `pnpm db:push` force-syncs the schema
+  but does **not** advance the migration ledger — and it produces no migration
+  files for deploy.
+
+Mixing them breaks migrations: `db:push` applies a column/table that a later
+migration also tries to create, so `db:migrate` then fails with
+`relation/column … already exists`. If a database gets tangled this way, reset it
+(throwaway data) and re-run migrations:
+
+```sql
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+```
+
 ### First-time / reset
 
 The migrations use plain `CREATE TABLE`, so they must run against an **empty**
