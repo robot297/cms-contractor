@@ -8,6 +8,7 @@
 
 	const path = $derived(page.url.pathname);
 	const onDashboard = $derived(path === '/contractor');
+	const onOrders = $derived(path.startsWith('/contractor/orders'));
 	const onCustomers = $derived(path.startsWith('/contractor/customers'));
 
 	const linkBase =
@@ -25,6 +26,9 @@
 			<div style="display: flex; gap: 0.25rem;">
 				<a href={resolve('/contractor')} style="{linkBase} {onDashboard ? active : inactive}"
 					>Dashboard</a
+				>
+				<a href={resolve('/contractor/orders')} style="{linkBase} {onOrders ? active : inactive}"
+					>Orders</a
 				>
 				<a
 					href={resolve('/contractor/customers')}

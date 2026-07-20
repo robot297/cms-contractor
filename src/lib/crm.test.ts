@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+	defaultFollowUp,
 	digitsOnly,
 	formatPhone,
 	getVisibleCustomerState,
 	isCustomerLinked,
+	isFollowUpDue,
+	isValidAvatarDataUrl,
 	normalizeEmail,
 	parseTags,
-	validateCustomerContact
+	snoozeDate,
+	validateCustomerContact,
+	validateOrderSetup
 } from './crm';
 
 describe('customer-visible state mapping', () => {
@@ -98,5 +103,80 @@ describe('customer link state', () => {
 	it('treats a customer with a bound login as linked', () => {
 		expect(isCustomerLinked({ userId: 'user-1' })).toBe(true);
 		expect(isCustomerLinked({ userId: null })).toBe(false);
+	});
+});
+
+describe('order setup validation', () => {
+	it('requires a customer, name, and type', () => {
+		expect(validateOrderSetup({}).ok).toBe(false);
+		expect(validateOrderSetup({ customerId: 'c1' })).toMatchObject({
+			ok: false,
+			field: 'projectName'
+		});
+		expect(validateOrderSetup({ customerId: 'c1', projectName: 'Backyard' })).toMatchObject({
+			ok: false,
+			field: 'projectType'
+		});
+	});
+
+	it('accepts a known project type', () => {
+		expect(
+			validateOrderSetup({ customerId: 'c1', projectName: 'Backyard', projectType: 'Gazebo' })
+		).toEqual({
+			ok: true,
+			value: { customerId: 'c1', projectName: 'Backyard', projectType: 'Gazebo' }
+		});
+	});
+
+	it('uses the custom text when Other is chosen', () => {
+		expect(
+			validateOrderSetup({
+				customerId: 'c1',
+				projectName: 'Backyard',
+				projectType: 'Other',
+				projectTypeOther: '  Yurt  '
+			})
+		).toEqual({
+			ok: true,
+			value: { customerId: 'c1', projectName: 'Backyard', projectType: 'Yurt' }
+		});
+	});
+
+	it('rejects Other without custom text', () => {
+		expect(
+			validateOrderSetup({ customerId: 'c1', projectName: 'x', projectType: 'Other' })
+		).toMatchObject({ ok: false, field: 'projectType' });
+	});
+});
+
+describe('follow-ups', () => {
+	const now = new Date('2026-07-19T00:00:00.000Z');
+
+	it('defaults a new follow-up to 3 days out', () => {
+		expect(defaultFollowUp(now).toISOString()).toBe('2026-07-22T00:00:00.000Z');
+	});
+
+	it('is due when set on or before now', () => {
+		expect(isFollowUpDue(new Date('2026-07-18T00:00:00.000Z'), now)).toBe(true);
+		expect(isFollowUpDue(new Date('2026-07-20T00:00:00.000Z'), now)).toBe(false);
+		expect(isFollowUpDue(null, now)).toBe(false);
+	});
+
+	it('snoozes by preset', () => {
+		expect(snoozeDate('1d', now).toISOString()).toBe('2026-07-20T00:00:00.000Z');
+		expect(snoozeDate('3d', now).toISOString()).toBe('2026-07-22T00:00:00.000Z');
+		expect(snoozeDate('1w', now).toISOString()).toBe('2026-07-26T00:00:00.000Z');
+	});
+});
+
+describe('avatar data url', () => {
+	it('accepts a small image data url', () => {
+		expect(isValidAvatarDataUrl('data:image/jpeg;base64,' + 'A'.repeat(1000))).toBe(true);
+	});
+
+	it('rejects non-image or oversized data', () => {
+		expect(isValidAvatarDataUrl('data:text/plain;base64,AAAA')).toBe(false);
+		expect(isValidAvatarDataUrl('https://example.com/x.png')).toBe(false);
+		expect(isValidAvatarDataUrl('data:image/png;base64,' + 'A'.repeat(400_000))).toBe(false);
 	});
 });

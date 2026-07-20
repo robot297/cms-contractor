@@ -22,6 +22,8 @@ export const customer = pgTable(
 		notes: text('notes'),
 		// Free-form labels the contractor applies to organize customers.
 		tags: text('tags').array().notNull().default([]),
+		// A downscaled photo of the customer, stored as a bounded data URL.
+		avatar: text('avatar'),
 		// Set when an invited customer accepts and binds their login (by token).
 		userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
 		// Soft-archive marker: archived customers drop out of the directory.
@@ -51,7 +53,12 @@ export const order = pgTable(
 			.references(() => user.id, { onDelete: 'cascade' }),
 		// The linked customer record — single source of truth for name/email.
 		customerId: text('customer_id').references(() => customer.id, { onDelete: 'set null' }),
+		// What the job is and the kind of structure being built.
+		projectName: text('project_name'),
+		projectType: text('project_type'),
 		state: text('state').notNull().default('Inquiry'),
+		// Contractor-set date for the next follow-up (defaults to +3 days on create).
+		nextFollowUpAt: timestamp('next_follow_up_at'),
 		createdAt: timestamp('created_at').defaultNow().notNull(),
 		updatedAt: timestamp('updated_at')
 			.defaultNow()
@@ -73,10 +80,12 @@ export const timelineEntry = pgTable(
 		orderId: text('order_id')
 			.notNull()
 			.references(() => order.id, { onDelete: 'cascade' }),
-		kind: text('kind').notNull(), // status | invoice | message | milestone | issue
+		kind: text('kind').notNull(), // status | invoice | message | milestone | issue | note
 		title: text('title').notNull(),
 		detail: text('detail').notNull().default(''),
 		authorRole: text('author_role').notNull(), // contractor | customer
+		// Internal entries (contractor notes) are never shown in the customer portal.
+		internal: boolean('internal').notNull().default(false),
 		createdAt: timestamp('created_at').defaultNow().notNull()
 	},
 	(table) => [index('timeline_orderId_idx').on(table.orderId)]

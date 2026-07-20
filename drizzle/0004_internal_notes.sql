@@ -1,0 +1,1 @@
+ALTER TABLE "timeline_entry" ADD COLUMN "internal" boolean DEFAULT false NOT NULL;

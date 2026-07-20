@@ -2,11 +2,16 @@ import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { db } from './db';
 import { customer, customerInvite, notification, order, timelineEntry } from './db/schema';
 import {
+	defaultFollowUp,
 	getVisibleCustomerState,
 	isActiveState,
 	isCustomerLinked,
+	isFollowUpDue,
+	isValidAvatarDataUrl,
 	normalizeEmail,
+	snoozeDate,
 	type ContractorOrderState,
+	type SnoozePreset,
 	type TimelineKind
 } from '$lib/crm';
 
@@ -23,14 +28,8 @@ export type ContractorOrderView = OrderRow & {
 	customerName: string;
 	customerEmail: string;
 	customerVisibleState: string;
-	needsAttention: boolean;
+	followUpDue: boolean;
 };
-
-const ATTENTION_STATES: ReadonlySet<string> = new Set([
-	'Inquiry',
-	'Deposit Pending',
-	'Final Payment Pending'
-]);
 
 /** Typed errors so route actions can render friendly messages. */
 export class DuplicateCustomerEmailError extends Error {
@@ -58,7 +57,7 @@ function toContractorView(row: OrderRow, cust: CustomerRow | null): ContractorOr
 		customerName: cust?.name ?? 'Unknown customer',
 		customerEmail: cust?.email ?? '',
 		customerVisibleState: getVisibleCustomerState(row.state as ContractorOrderState),
-		needsAttention: ATTENTION_STATES.has(row.state)
+		followUpDue: isFollowUpDue(row.nextFollowUpAt)
 	};
 }
 
@@ -174,6 +173,25 @@ export async function archiveCustomer(contractorId: string, id: string): Promise
 	await db.update(customer).set({ archivedAt: new Date() }).where(eq(customer.id, id));
 }
 
+export class InvalidAvatarError extends Error {
+	constructor() {
+		super('That photo could not be saved (not an image or too large)');
+		this.name = 'InvalidAvatarError';
+	}
+}
+
+/** Set or clear (null) a customer's avatar. Validates the data URL + size. */
+export async function setCustomerAvatar(
+	contractorId: string,
+	customerId: string,
+	dataUrl: string | null
+): Promise<void> {
+	const owned = await ownedCustomer(contractorId, customerId);
+	if (!owned) throw new Error('Customer not found');
+	if (dataUrl !== null && !isValidAvatarDataUrl(dataUrl)) throw new InvalidAvatarError();
+	await db.update(customer).set({ avatar: dataUrl }).where(eq(customer.id, customerId));
+}
+
 // ---------------------------------------------------------- Invite binding
 
 /** The customer a user is already linked to for a given contractor, if any. */
@@ -269,27 +287,10 @@ export async function listContractorOrders(contractorId: string): Promise<Contra
 	return rows.map((r) => toContractorView(r.order, r.customer));
 }
 
-/** Select the contractor's existing customer by email, or create one inline. */
-async function selectOrCreateCustomer(
-	contractorId: string,
-	name: string,
-	email: string
-): Promise<CustomerRow> {
-	const normalized = normalizeEmail(email);
-	const [existing] = await db
-		.select()
-		.from(customer)
-		.where(and(eq(customer.contractorId, contractorId), eq(customer.email, normalized)))
-		.limit(1);
-	if (existing) return existing;
-	const [row] = await db
-		.insert(customer)
-		.values({ contractorId, name: name.trim(), email: normalized })
-		.returning();
-	return row;
-}
-
-export type CreateOrderInput = ({ customerId: string } | { name: string; email: string }) & {
+export type CreateOrderInput = {
+	customerId: string;
+	projectName?: string;
+	projectType?: string;
 	state?: ContractorOrderState;
 };
 
@@ -297,19 +298,41 @@ export async function createOrder(
 	contractorId: string,
 	input: CreateOrderInput
 ): Promise<OrderRow> {
-	let customerId: string;
-	if ('customerId' in input) {
-		const owned = await ownedCustomer(contractorId, input.customerId);
-		if (!owned) throw new Error('Customer not found');
-		customerId = owned.id;
-	} else {
-		customerId = (await selectOrCreateCustomer(contractorId, input.name, input.email)).id;
-	}
+	const owned = await ownedCustomer(contractorId, input.customerId);
+	if (!owned) throw new Error('Customer not found');
 	const [row] = await db
 		.insert(order)
-		.values({ contractorId, customerId, state: input.state ?? 'Inquiry' })
+		.values({
+			contractorId,
+			customerId: owned.id,
+			projectName: input.projectName ?? null,
+			projectType: input.projectType ?? null,
+			state: input.state ?? 'Inquiry',
+			// New orders get a default follow-up 3 days out.
+			nextFollowUpAt: defaultFollowUp()
+		})
 		.returning();
 	return row;
+}
+
+/** Set (or clear, with null) an order's next follow-up date. */
+export async function setFollowUp(
+	orderId: string,
+	contractorId: string,
+	date: Date | null
+): Promise<void> {
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+	await db.update(order).set({ nextFollowUpAt: date }).where(eq(order.id, orderId));
+}
+
+/** Snooze an order's follow-up forward by a preset, from now. */
+export async function snoozeFollowUp(
+	orderId: string,
+	contractorId: string,
+	preset: SnoozePreset
+): Promise<void> {
+	await setFollowUp(orderId, contractorId, snoozeDate(preset));
 }
 
 /** Returns the order only if it belongs to the given contractor. */
@@ -334,34 +357,64 @@ export async function updateOrderState(
 	const existing = await contractorOrder(orderId, contractorId);
 	if (!existing) throw new Error('Order not found');
 
-	await db.update(order).set({ state: newState }).where(eq(order.id, orderId));
-
-	const milestone = newState === 'Work Complete' || newState === 'Work Cancelled';
-	await db.insert(timelineEntry).values({
-		orderId,
-		kind: milestone ? 'milestone' : 'status',
-		title: newState,
-		detail: note ?? '',
-		authorRole: 'contractor'
-	});
-
-	// App-first notification to the customer, if their record has a linked login.
-	if (existing.customerId) {
-		const [cust] = await db
-			.select()
-			.from(customer)
-			.where(eq(customer.id, existing.customerId))
-			.limit(1);
-		if (cust?.userId) {
-			await createNotification({
-				userId: cust.userId,
-				orderId,
-				title: `Order update: ${getVisibleCustomerState(newState)}`,
-				detail: note ?? '',
-				priority: milestone ? 'high' : 'standard'
-			});
+	// A status change is customer-visible and notifies them; the note (if any) is
+	// recorded separately as an internal, timestamped entry the customer never sees.
+	if (newState !== existing.state) {
+		await db.update(order).set({ state: newState }).where(eq(order.id, orderId));
+		const milestone = newState === 'Work Complete' || newState === 'Work Cancelled';
+		await db.insert(timelineEntry).values({
+			orderId,
+			kind: milestone ? 'milestone' : 'status',
+			title: newState,
+			detail: '',
+			authorRole: 'contractor',
+			internal: false
+		});
+		if (existing.customerId) {
+			const [cust] = await db
+				.select()
+				.from(customer)
+				.where(eq(customer.id, existing.customerId))
+				.limit(1);
+			if (cust?.userId) {
+				await createNotification({
+					userId: cust.userId,
+					orderId,
+					title: `Order update: ${getVisibleCustomerState(newState)}`,
+					priority: milestone ? 'high' : 'standard'
+				});
+			}
 		}
 	}
+
+	const trimmedNote = note?.trim();
+	if (trimmedNote) {
+		await db.insert(timelineEntry).values({
+			orderId,
+			kind: 'note',
+			title: 'Note',
+			detail: trimmedNote,
+			authorRole: 'contractor',
+			internal: true
+		});
+	}
+}
+
+export type OrderNote = { id: string; orderId: string; detail: string; createdAt: Date };
+
+/** Internal contractor notes across all of the contractor's orders, newest first. */
+export async function listOrderNotes(contractorId: string): Promise<OrderNote[]> {
+	return db
+		.select({
+			id: timelineEntry.id,
+			orderId: timelineEntry.orderId,
+			detail: timelineEntry.detail,
+			createdAt: timelineEntry.createdAt
+		})
+		.from(timelineEntry)
+		.innerJoin(order, eq(timelineEntry.orderId, order.id))
+		.where(and(eq(order.contractorId, contractorId), eq(timelineEntry.internal, true)))
+		.orderBy(desc(timelineEntry.createdAt));
 }
 
 /** Permanently delete an order (cascades its timeline, notifications, and invites). */
@@ -402,7 +455,7 @@ export async function getCustomerPortal(userId: string): Promise<CustomerPortal>
 	const timeline = await db
 		.select()
 		.from(timelineEntry)
-		.where(eq(timelineEntry.orderId, active.order.id))
+		.where(and(eq(timelineEntry.orderId, active.order.id), eq(timelineEntry.internal, false)))
 		.orderBy(desc(timelineEntry.createdAt));
 
 	return {

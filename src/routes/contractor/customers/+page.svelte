@@ -1,11 +1,123 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { customerContactSchema, formatPhone } from '$lib/crm';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const isLinked = (c: { userId: string | null }) => c.userId != null;
+
+	const AVATAR_MAX = 256;
+
+	let savingAvatarId: string | null = $state(null);
+
+	// --- Camera capture ----------------------------------------------------
+	let cameraDialog: HTMLDialogElement | undefined = $state();
+	let cameraVideo: HTMLVideoElement | undefined = $state();
+	let cameraCustomerId: string | null = $state(null);
+	let cameraError = $state('');
+	let cameraStream: MediaStream | undefined;
+
+	/** Downscale a source (image or video frame) to a small JPEG data URL. */
+	function toAvatarDataUrl(source: HTMLImageElement | HTMLVideoElement): string | null {
+		const sw = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
+		const sh = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+		if (!sw || !sh) return null;
+		const scale = Math.min(1, AVATAR_MAX / Math.max(sw, sh));
+		const canvas = document.createElement('canvas');
+		canvas.width = Math.max(1, Math.round(sw * scale));
+		canvas.height = Math.max(1, Math.round(sh * scale));
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return null;
+		ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+		return canvas.toDataURL('image/jpeg', 0.8);
+	}
+
+	async function saveAvatar(customerId: string, dataUrl: string) {
+		savingAvatarId = customerId;
+		try {
+			const body = new FormData();
+			body.set('id', customerId);
+			body.set('avatar', dataUrl);
+			const res = await fetch('?/setAvatar', {
+				method: 'POST',
+				headers: { 'x-sveltekit-action': 'true' },
+				body
+			});
+			if (!res.ok) throw new Error('Upload failed');
+			await invalidateAll();
+		} catch {
+			alert('Sorry — that photo could not be saved.');
+		} finally {
+			savingAvatarId = null;
+		}
+	}
+
+	function loadImage(file: File): Promise<HTMLImageElement> {
+		return new Promise((resolve, reject) => {
+			const img = new Image();
+			img.onload = () => {
+				URL.revokeObjectURL(img.src);
+				resolve(img);
+			};
+			img.onerror = () => {
+				URL.revokeObjectURL(img.src);
+				reject(new Error('Could not read image'));
+			};
+			img.src = URL.createObjectURL(file);
+		});
+	}
+
+	/** File-picker fallback (desktop, or when the camera is unavailable). */
+	async function onAvatarPick(customerId: string, e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+		closeCamera();
+		const img = await loadImage(file);
+		const dataUrl = toAvatarDataUrl(img);
+		if (dataUrl) await saveAvatar(customerId, dataUrl);
+	}
+
+	async function openCamera(customerId: string) {
+		cameraCustomerId = customerId;
+		cameraError = '';
+		cameraDialog?.showModal();
+		if (!navigator.mediaDevices?.getUserMedia) {
+			cameraError = 'This device has no camera access. Upload a photo instead.';
+			return;
+		}
+		try {
+			cameraStream = await navigator.mediaDevices.getUserMedia({
+				video: { facingMode: 'environment' },
+				audio: false
+			});
+			if (cameraVideo) cameraVideo.srcObject = cameraStream;
+		} catch {
+			cameraError = 'Camera permission was denied or unavailable. Upload a photo instead.';
+		}
+	}
+
+	function stopCamera() {
+		cameraStream?.getTracks().forEach((t) => t.stop());
+		cameraStream = undefined;
+		if (cameraVideo) cameraVideo.srcObject = null;
+	}
+
+	function closeCamera() {
+		stopCamera();
+		cameraDialog?.close();
+	}
+
+	async function capturePhoto() {
+		if (!cameraVideo || !cameraCustomerId) return;
+		const dataUrl = toAvatarDataUrl(cameraVideo);
+		const customerId = cameraCustomerId;
+		closeCamera();
+		if (dataUrl) await saveAvatar(customerId, dataUrl);
+	}
 
 	// --- Add modal ---------------------------------------------------------
 	let addDialog: HTMLDialogElement | undefined = $state();
@@ -131,7 +243,38 @@
 				style="border: 1px solid #d0d7de; border-radius: 16px; padding: 1rem; display: grid; gap: 0.6rem;"
 			>
 				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: center;">
-					<strong>{c.name}</strong>
+					<div style="display: flex; gap: 0.65rem; align-items: center; min-width: 0;">
+						<button
+							type="button"
+							onclick={() => openCamera(c.id)}
+							title="Take or upload a photo"
+							aria-label="Set customer photo"
+							style="border: none; background: none; padding: 0; cursor: pointer; flex-shrink: 0; position: relative;"
+						>
+							{#if c.avatar}
+								<img
+									src={c.avatar}
+									alt={c.name}
+									style="width: 44px; height: 44px; border-radius: 999px; object-fit: cover; border: 1px solid #d0d7de; display: block; opacity: {savingAvatarId ===
+									c.id
+										? '0.5'
+										: '1'};"
+								/>
+							{:else}
+								<span
+									style="width: 44px; height: 44px; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: #57606a; display: flex; align-items: center; justify-content: center; font-weight: 600; opacity: {savingAvatarId ===
+									c.id
+										? '0.5'
+										: '1'};">{c.name.charAt(0).toUpperCase()}</span
+								>
+							{/if}
+							<span
+								style="position: absolute; right: -2px; bottom: -2px; width: 18px; height: 18px; border-radius: 999px; background: #0969da; color: #fff; font-size: 0.6rem; display: flex; align-items: center; justify-content: center; border: 1px solid #fff;"
+								>📷</span
+							>
+						</button>
+						<strong style="overflow: hidden; text-overflow: ellipsis;">{c.name}</strong>
+					</div>
 					<div style="display: flex; gap: 0.5rem; align-items: center;">
 						{#if isLinked(c)}
 							<span
@@ -407,4 +550,57 @@
 			>
 		</div>
 	</form>
+</dialog>
+
+<!-- Camera capture modal -->
+<dialog
+	bind:this={cameraDialog}
+	onclose={stopCamera}
+	style="border: none; border-radius: 16px; padding: 0; max-width: 460px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
+>
+	<div style="display: grid; gap: 0.75rem; padding: 1.25rem;">
+		<div style="display: flex; justify-content: space-between; align-items: center;">
+			<h2 style="margin: 0; font-size: 1.1rem;">Customer photo</h2>
+			<button
+				type="button"
+				onclick={closeCamera}
+				style="border: none; background: none; font-size: 1.2rem; cursor: pointer; color: #57606a;"
+				>✕</button
+			>
+		</div>
+
+		{#if cameraError}
+			<p style="margin: 0; color: #cf222e; font-size: 0.9rem;">{cameraError}</p>
+		{:else}
+			<video
+				bind:this={cameraVideo}
+				autoplay
+				playsinline
+				muted
+				style="width: 100%; max-height: 60vh; border-radius: 12px; background: #000;"
+			></video>
+		{/if}
+
+		<div style="display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap;">
+			<label
+				style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+			>
+				Upload instead
+				<input
+					type="file"
+					accept="image/*"
+					onchange={(e) => cameraCustomerId && onAvatarPick(cameraCustomerId, e)}
+					style="display: none;"
+				/>
+			</label>
+			{#if !cameraError}
+				<button
+					type="button"
+					onclick={capturePhoto}
+					style="padding: 0.55rem 1.1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600;"
+					>📸 Capture</button
+				>
+			{/if}
+		</div>
+	</div>
 </dialog>

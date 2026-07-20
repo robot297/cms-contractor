@@ -7,7 +7,9 @@ import {
 	CustomerEmailLockedError,
 	DuplicateCustomerEmailError,
 	editCustomer,
-	listCustomers
+	InvalidAvatarError,
+	listCustomers,
+	setCustomerAvatar
 } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -90,6 +92,22 @@ export const actions: Actions = {
 		const id = form.get('id')?.toString() ?? '';
 		if (!id) return fail(400, { action: 'invite', message: 'Customer is required' });
 		await createInvite(user.id, id);
+		return { success: true };
+	},
+
+	setAvatar: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const id = form.get('id')?.toString() ?? '';
+		const avatar = form.get('avatar')?.toString() ?? '';
+		if (!id) return fail(400, { action: 'avatar', message: 'Customer is required' });
+		try {
+			await setCustomerAvatar(user.id, id, avatar || null);
+		} catch (error) {
+			if (error instanceof InvalidAvatarError)
+				return fail(400, { action: 'avatar', id, message: error.message });
+			throw error;
+		}
 		return { success: true };
 	}
 };

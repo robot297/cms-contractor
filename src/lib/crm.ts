@@ -136,6 +136,99 @@ export function validateCustomerContact(input: {
 	};
 }
 
+// -------------------------------------------------------------------- Orders
+
+/** Shelter/structure options a contractor picks from when setting up an order. */
+export const PROJECT_TYPES = [
+	'Gazebo',
+	'Pavilion',
+	'Pergola',
+	'Carport',
+	'Pole Barn',
+	'Shed',
+	'Deck'
+] as const;
+
+export type ProjectType = (typeof PROJECT_TYPES)[number];
+
+export function isProjectType(value: string): value is ProjectType {
+	return (PROJECT_TYPES as readonly string[]).includes(value);
+}
+
+export type OrderSetup = { customerId: string; projectName: string; projectType: string };
+export type OrderSetupValidation =
+	| { ok: true; value: OrderSetup }
+	| { ok: false; field: 'customer' | 'projectName' | 'projectType'; message: string };
+
+/**
+ * Validate the New Order form. `projectType` is a known value, or `'Other'`
+ * with a non-empty `projectTypeOther` that becomes the stored type.
+ */
+export function validateOrderSetup(input: {
+	customerId?: string;
+	projectName?: string;
+	projectType?: string;
+	projectTypeOther?: string;
+}): OrderSetupValidation {
+	const customerId = (input.customerId ?? '').trim();
+	if (!customerId) return { ok: false, field: 'customer', message: 'Pick a customer' };
+	const projectName = (input.projectName ?? '').trim();
+	if (!projectName) return { ok: false, field: 'projectName', message: 'Project name is required' };
+	const rawType = (input.projectType ?? '').trim();
+	let projectType: string;
+	if (rawType === 'Other') {
+		projectType = (input.projectTypeOther ?? '').trim();
+		if (!projectType)
+			return { ok: false, field: 'projectType', message: 'Describe the project type' };
+	} else if (isProjectType(rawType)) {
+		projectType = rawType;
+	} else {
+		return { ok: false, field: 'projectType', message: 'Choose a project type' };
+	}
+	return { ok: true, value: { customerId, projectName, projectType } };
+}
+
+// ---------------------------------------------------------------- Follow-ups
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** New orders are followed up on 3 days out by default. */
+export const DEFAULT_FOLLOWUP_DAYS = 3;
+
+export type SnoozePreset = '1d' | '3d' | '1w';
+
+export function isSnoozePreset(value: string): value is SnoozePreset {
+	return value === '1d' || value === '3d' || value === '1w';
+}
+
+/** The default next-follow-up date for a freshly created order. */
+export function defaultFollowUp(from: Date = new Date()): Date {
+	return new Date(from.getTime() + DEFAULT_FOLLOWUP_DAYS * DAY_MS);
+}
+
+/** A follow-up is "due" when it is set and on or before now. */
+export function isFollowUpDue(date: Date | null, now: Date = new Date()): boolean {
+	return date != null && date.getTime() <= now.getTime();
+}
+
+/** Compute a snoozed follow-up date from a preset. */
+export function snoozeDate(preset: SnoozePreset, from: Date = new Date()): Date {
+	const days = preset === '1d' ? 1 : preset === '3d' ? 3 : 7;
+	return new Date(from.getTime() + days * DAY_MS);
+}
+
+// ------------------------------------------------------------------ Avatars
+
+/** Cap stored avatar data URLs so customer rows/queries stay small. */
+export const MAX_AVATAR_BYTES = 200 * 1024;
+
+/** True when the value is an image data URL within the size cap. */
+export function isValidAvatarDataUrl(value: string): boolean {
+	if (!/^data:image\/(png|jpe?g|webp);base64,/.test(value)) return false;
+	const b64 = value.slice(value.indexOf(',') + 1);
+	const bytes = Math.floor((b64.length * 3) / 4);
+	return bytes > 0 && bytes <= MAX_AVATAR_BYTES;
+}
+
 /** A customer's active order is anything not terminal or archived. */
 export function isActiveState(state: ContractorOrderState): boolean {
 	return state !== 'Work Complete' && state !== 'Work Cancelled' && state !== 'On Hold / Archived';
