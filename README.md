@@ -38,13 +38,15 @@ Deployed via Coolify in the `crm` namespace of my `uplift-collective.dev` domain
 
 Set these in the host (Coolify), **not** in a committed `.env`:
 
-| Variable               | Purpose                                        | Example                              |
-| ---------------------- | ---------------------------------------------- | ------------------------------------ |
-| `DATABASE_URL`         | Postgres connection string for the **prod** DB | `postgres://user:pass@host:5432/crm` |
-| `ORIGIN`               | Public URL; Better Auth rejects other origins  | `https://crm.upliftcollective.dev`   |
-| `BETTER_AUTH_SECRET`   | 32+ char secret for sessions/tokens            | (generate a random one)              |
-| `GITHUB_CLIENT_ID`     | GitHub OAuth app client id (optional)          |                                      |
-| `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret (optional)      |                                      |
+| Variable                | Purpose                                                        | Example                              |
+| ----------------------- | -------------------------------------------------------------- | ------------------------------------ |
+| `DATABASE_URL`          | Postgres connection string for the **prod** DB                 | `postgres://user:pass@host:5432/crm` |
+| `ORIGIN`                | Public URL; Better Auth rejects other origins                  | `https://crm.upliftcollective.dev`   |
+| `BETTER_AUTH_SECRET`    | 32+ char secret for sessions/tokens                            | (generate a random one)              |
+| `GITHUB_CLIENT_ID`      | GitHub OAuth app client id (optional)                          |                                      |
+| `GITHUB_CLIENT_SECRET`  | GitHub OAuth app client secret (optional)                      |                                      |
+| `SEED_ON_START`         | Set `true` for **one** deploy to load sample data, then remove | `true`                               |
+| `SEED_CONTRACTOR_EMAIL` | Which existing contractor the sample data attaches to          | `you@example.com`                    |
 
 If `ORIGIN` is unset it falls back to `http://localhost:5173` and Better Auth
 will reject sign-in/sign-up from the deployed domain. The GitHub OAuth
@@ -62,6 +64,25 @@ migration errors, so the server never boots against an out-of-sync schema.
 - Migrations are idempotent (tracked in a `__drizzle_migrations` table); redeploys
   only apply new ones.
 - To migrate a database manually: `DATABASE_URL='<prod-url>' pnpm migrate`.
+
+### Sample data (optional, opt-in)
+
+The startup sequence is **migrate → (optional seed) → start**
+(`scripts/docker-entrypoint.sh`). Seeding is off by default and is only for a
+demo phase — it is **destructive** (it deletes and re-creates that contractor's
+customers/orders on every run) and **never fatal** (a failed/skipped seed can't
+stop the server from booting).
+
+To load sample data on a deploy:
+
+1. Sign up your contractor on the deployed site first (the seed attaches to an
+   existing contractor).
+2. Set `SEED_ON_START=true` and `SEED_CONTRACTOR_EMAIL=<that email>`, deploy once.
+3. **Remove `SEED_ON_START`** — otherwise every future deploy wipes and re-seeds
+   that contractor's data.
+
+Prefer the safer one-off instead of the flag when you can:
+`DATABASE_URL='<prod-url>' SEED_CONTRACTOR_EMAIL=you@x.com pnpm db:seed`.
 
 ### ⚠️ Don't mix `db:push` and `db:migrate` on the same database
 

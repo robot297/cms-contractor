@@ -30,5 +30,5 @@ COPY --from=build /app/static ./static
 COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/scripts ./scripts
 EXPOSE 3000
-# Apply pending migrations, then start the server. Fails fast if migrations fail.
-ENTRYPOINT ["sh", "-c", "node scripts/migrate.mjs && node build/index.js"]
+# Migrate → (optional seed) → start. See scripts/docker-entrypoint.sh.
+ENTRYPOINT ["sh", "scripts/docker-entrypoint.sh"]
