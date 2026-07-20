@@ -10,8 +10,10 @@
 	<title>{mode === 'signIn' ? 'Sign in' : 'Create account'}</title>
 </svelte:head>
 
-<div style="max-width: 420px; margin: 3rem auto; padding: 1rem; display: grid; gap: 1rem;">
-	<header style="display: grid; gap: 0.35rem; text-align: center;">
+<div
+	style="max-width: 420px; margin: 3rem auto; padding: 1.75rem 1.5rem; display: grid; gap: 1rem; border: 3px solid #111; border-radius: 18px; background: #fff; box-shadow: 8px 8px 0 #111;"
+>
+	<header style="display: grid; gap: 0.5rem; text-align: center;">
 		<h1 style="margin: 0;">Contractor CRM</h1>
 		<p style="margin: 0; color: #57606a;">
 			{mode === 'signIn' ? 'Sign in to your workspace.' : 'Create your account.'}
