@@ -193,7 +193,7 @@
 					<div style="display: flex; gap: 0.4rem; align-items: center; flex-shrink: 0;">
 						{#if order.followUpDue}
 							<span
-								style="font-size: 0.72rem; color: #9a6700; background: #fff8e6; border: 1px solid #d4a72c; border-radius: 999px; padding: 0.1rem 0.55rem; white-space: nowrap;"
+								style="font-size: 0.72rem; font-weight: 700; color: #cf222e; background: #ffebe9; border: 1px solid #e5534b; border-radius: 999px; padding: 0.1rem 0.55rem; white-space: nowrap;"
 								>Due</span
 							>
 						{/if}

@@ -32,6 +32,9 @@ export const customer = pgTable(
 		name: text('name').notNull(),
 		email: text('email').notNull(),
 		phone: text('phone'),
+		// The contractor's preferred way to reach this customer: 'email' | 'phone'.
+		// Drives which contact action is highlighted as primary in the UI.
+		preferredContact: text('preferred_contact').notNull().default('email'),
 		// Service / mailing address, free-form for the MVP.
 		address: text('address'),
 		// Project details and any other free-form context about this customer.

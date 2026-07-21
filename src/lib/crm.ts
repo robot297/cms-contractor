@@ -67,6 +67,8 @@ export function parseTags(value: string): string[] {
 }
 
 /** Contact fields for a customer. Name and email are required; the rest are optional. */
+export type PreferredContact = 'email' | 'phone';
+
 export type CustomerContact = {
 	name: string;
 	email: string;
@@ -74,6 +76,7 @@ export type CustomerContact = {
 	address: string | null;
 	notes: string | null;
 	tags: string[];
+	preferredContact: PreferredContact;
 };
 
 const blankToNull = (v?: string) => {
@@ -109,7 +112,11 @@ export const customerContactSchema = z.object({
 	tags: z
 		.string()
 		.optional()
-		.transform((v) => parseTags(v ?? ''))
+		.transform((v) => parseTags(v ?? '')),
+	preferredContact: z
+		.string()
+		.optional()
+		.transform((v): PreferredContact => (v === 'phone' ? 'phone' : 'email'))
 });
 
 export type CustomerContactValidation =
@@ -124,6 +131,7 @@ export function validateCustomerContact(input: {
 	address?: string;
 	notes?: string;
 	tags?: string;
+	preferredContact?: string;
 }): CustomerContactValidation {
 	const result = customerContactSchema.safeParse(input);
 	if (result.success) return { ok: true, value: result.data };

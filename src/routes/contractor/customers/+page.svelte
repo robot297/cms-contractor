@@ -167,9 +167,12 @@
 	let confirmingArchiveId: string | null = $state(null);
 	// Which contact row is expanded to show full details + quick actions.
 	let expandedId: string | null = $state(null);
+	// Which expanded card's gear (⚙) menu is open — one at a time.
+	let gearOpenId: string | null = $state(null);
 	function toggleExpanded(id: string) {
 		expandedId = expandedId === id ? null : id;
 		confirmingArchiveId = null;
+		gearOpenId = null;
 	}
 
 	// --- Live search (debounced) + suggestions ----------------------------
@@ -266,6 +269,18 @@
 	const fieldStyle =
 		'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
+
+	// Email/Call buttons: the customer's preferred method is the primary (blue)
+	// action, the other is secondary (grey).
+	const contactPrimary =
+		'padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; text-decoration: none; font-weight: 600; font-size: 0.9rem;';
+	const contactSecondary =
+		'padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none; font-weight: 500; font-size: 0.9rem;';
+	// Gear (⚙) menu that holds Edit / Send app invite / Archive.
+	const gearBtn =
+		'width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 999px; cursor: pointer; font-size: 1rem; line-height: 1;';
+	const menuItem =
+		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
 
 <svelte:head>
@@ -297,7 +312,7 @@
 				oninput={(e) => (query = e.currentTarget.value)}
 				onfocus={() => (searchFocused = true)}
 				onblur={() => setTimeout(() => (searchFocused = false), 150)}
-				placeholder="Search by name or email"
+				placeholder="Search"
 				style="width: 100%; box-sizing: border-box; padding: 0.6rem 2.2rem 0.6rem 2.4rem; border-radius: 999px; border: 1px solid #d0d7de; background: #fff; font-size: 1rem; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05);"
 			/>
 			{#if query}
@@ -490,6 +505,13 @@
 												placeholder="Tags (comma-separated)"
 												style={fieldStyle}
 											/>
+											<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
+												Preferred contact method
+												<select name="preferredContact" style={fieldStyle}>
+													<option value="email" selected={c.preferredContact !== 'phone'}>Email</option>
+													<option value="phone" selected={c.preferredContact === 'phone'}>Phone</option>
+												</select>
+											</label>
 											<textarea
 												name="notes"
 												rows="2"
@@ -514,20 +536,24 @@
 											</div>
 										</form>
 									{:else}
-										<!-- Quick contact actions -->
-										<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+										{@const preferPhone = c.preferredContact === 'phone' && !!c.phone}
+										<!-- Quick contact actions — preferred method is highlighted -->
+										<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
 											<a
 												href={`mailto:${c.email}`}
-												style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; text-decoration: none; font-weight: 500; font-size: 0.9rem;"
-												>✉ Email</a
+												title={preferPhone ? 'Email' : 'Preferred contact method'}
+												style={preferPhone ? contactSecondary : contactPrimary}>✉ Email</a
 											>
 											{#if c.phone}
 												<a
 													href={telHref(c.phone)}
-													style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none; font-size: 0.9rem;"
-													>📞 Call</a
+													title={preferPhone ? 'Preferred contact method' : 'Call'}
+													style={preferPhone ? contactPrimary : contactSecondary}>📞 Call</a
 												>
 											{/if}
+											<span style="font-size: 0.75rem; color: #8c959f;"
+												>Prefers {preferPhone ? 'phone' : 'email'}</span
+											>
 										</div>
 
 										<!-- Contact details -->
@@ -595,39 +621,64 @@
 												>
 											</div>
 										{:else}
-											<!-- Manage actions -->
+											<!-- Manage actions live behind the gear menu -->
 											<div
-												style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; border-top: 1px solid #eef1f4; padding-top: 0.7rem;"
+												style="display: flex; justify-content: flex-end; border-top: 1px solid #eef1f4; padding-top: 0.7rem;"
 											>
-												<button
-													type="button"
-													onclick={() => {
-														editingId = c.id;
-														confirmingArchiveId = null;
-													}}
-													style="padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #0969da; color: #0969da; background: none; cursor: pointer; font-size: 0.9rem;"
-													>Edit</button
-												>
-
-												{#if !isLinked(c)}
-													<form method="POST" action="?/sendInvite" use:enhance>
-														<input type="hidden" name="id" value={c.id} />
+												<div style="position: relative;">
+													<button
+														type="button"
+														title="Manage customer"
+														aria-label="Manage customer"
+														aria-expanded={gearOpenId === c.id}
+														onclick={() => (gearOpenId = gearOpenId === c.id ? null : c.id)}
+														style={gearBtn}>⚙</button
+													>
+													{#if gearOpenId === c.id}
+														<!-- click-away backdrop -->
 														<button
-															type="submit"
-															style="padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.9rem;"
-															>Send invite</button
+															type="button"
+															aria-label="Close menu"
+															onclick={() => (gearOpenId = null)}
+															style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+														></button>
+														<div
+															style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 180px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
 														>
-													</form>
-												{/if}
-
-												<button
-													type="button"
-													title="Archive customer"
-													aria-label="Archive customer"
-													onclick={() => (confirmingArchiveId = c.id)}
-													style="margin-left: auto; padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #ffd7d5; color: #cf222e; background: none; cursor: pointer; font-size: 0.9rem;"
-													>🗑 Archive</button
-												>
+															<button
+																type="button"
+																onclick={() => {
+																	editingId = c.id;
+																	confirmingArchiveId = null;
+																	gearOpenId = null;
+																}}
+																style={menuItem}>Edit</button
+															>
+															{#if !isLinked(c)}
+																<form
+																	method="POST"
+																	action="?/sendInvite"
+																	use:enhance={() => {
+																		gearOpenId = null;
+																		return async ({ update }) => await update();
+																	}}
+																>
+																	<input type="hidden" name="id" value={c.id} />
+																	<button type="submit" style={menuItem}>Send app invite</button>
+																</form>
+															{/if}
+															<button
+																type="button"
+																onclick={() => {
+																	confirmingArchiveId = c.id;
+																	gearOpenId = null;
+																}}
+																style="{menuItem} color: #cf222e; border-top: 1px solid #eaeef2;"
+																>Archive</button
+															>
+														</div>
+													{/if}
+												</div>
 											</div>
 										{/if}
 									{/if}
@@ -732,6 +783,13 @@
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
 			Tags (comma-separated)
 			<input name="tags" placeholder="kitchen, repeat, referral" style={fieldStyle} />
+		</label>
+		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
+			Preferred contact method
+			<select name="preferredContact" style={fieldStyle}>
+				<option value="email" selected>Email</option>
+				<option value="phone">Phone</option>
+			</select>
 		</label>
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
 			Project details / notes

@@ -99,6 +99,7 @@ export type CustomerDetailsInput = {
 	address?: string | null;
 	notes?: string | null;
 	tags?: string[];
+	preferredContact?: 'email' | 'phone';
 };
 
 export async function createCustomer(
@@ -122,7 +123,8 @@ export async function createCustomer(
 			phone: input.phone ?? null,
 			address: input.address ?? null,
 			notes: input.notes ?? null,
-			tags: input.tags ?? []
+			tags: input.tags ?? [],
+			preferredContact: input.preferredContact ?? 'email'
 		})
 		.returning();
 	return row;
@@ -159,7 +161,8 @@ export async function editCustomer(
 			phone: input.phone ?? null,
 			address: input.address ?? null,
 			notes: input.notes ?? null,
-			tags: input.tags ?? []
+			tags: input.tags ?? [],
+			preferredContact: input.preferredContact ?? 'email'
 		})
 		.where(eq(customer.id, id))
 		.returning();

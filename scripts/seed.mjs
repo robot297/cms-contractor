@@ -16,6 +16,9 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
+// Single source of truth for the sample data — shared with the in-app demo
+// seeder (src/lib/server/demo.server.ts).
+import { DEMO_CUSTOMERS, DEMO_ORDERS, DEMO_NOTIFICATIONS } from './demo-fixtures.js';
 
 function resolveDatabaseUrl() {
 	if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
@@ -37,98 +40,12 @@ const contractorEmail = (
 
 const DAY = 24 * 60 * 60 * 1000;
 const days = (n) => new Date(Date.now() + n * DAY);
+// Follow-ups are stored as day offsets in the shared fixtures; resolve to a Date
+// (or null) at seed time.
+const followUpAt = (n) => (n === null ? null : days(n));
 
-// A few customers for this contractor.
-const CUSTOMERS = [
-	{
-		key: 'mina',
-		name: 'Mina Patel',
-		email: 'mina.patel@example.com',
-		phone: '(555) 201-4477',
-		address: '88 Cedar Ln, Springfield',
-		notes: 'Prefers cedar. Repeat client — third project.',
-		tags: ['repeat', 'deck'],
-		avatar: '/img/maya.png'
-	},
-	{
-		key: 'luis',
-		name: 'Luis Ortega',
-		email: 'luis.ortega@example.com',
-		phone: '(555) 332-9080',
-		address: '14 Elm St, Springfield',
-		notes: 'Referred by Mina.',
-		tags: ['referral'],
-		avatar: '/img/alex.png'
-	},
-	{
-		key: 'nina',
-		name: 'Nina Brooks',
-		email: 'nina.brooks@example.com',
-		phone: '(555) 776-1220',
-		address: '901 Oak Ave, Riverton',
-		notes: 'HOA board contact — needs itemized quotes.',
-		tags: ['commercial'],
-		avatar: '/img/mia.png'
-	},
-	{
-		key: 'sam',
-		name: 'Sam Rivera',
-		email: 'sam.rivera@example.com',
-		phone: null,
-		address: null,
-		notes: null,
-		tags: [],
-		avatar: '/img/noah.png'
-	}
-];
-
-// A couple of orders per customer, spread across lifecycle states + follow-ups.
-const ORDERS = [
-	{
-		cust: 'mina',
-		project: 'Backyard Deck Rebuild',
-		type: 'Deck',
-		state: 'In Progress',
-		followUp: days(-1), // overdue → shows as "due"
-		notes: ['Cedar posts confirmed. Deposit paid by check.']
-	},
-	{
-		cust: 'mina',
-		project: 'Poolside Pergola',
-		type: 'Pergola',
-		state: 'Quote Sent',
-		followUp: days(3)
-	},
-	{
-		cust: 'luis',
-		project: 'Driveway Carport',
-		type: 'Carport',
-		state: 'Deposit Pending',
-		followUp: days(-4), // overdue
-		notes: ['Left a voicemail about the deposit.']
-	},
-	{
-		cust: 'nina',
-		project: 'HOA Community Pavilion',
-		type: 'Pavilion',
-		state: 'Work Scheduled',
-		followUp: days(6)
-	},
-	{
-		cust: 'nina',
-		project: 'Garden Gazebo',
-		type: 'Gazebo',
-		state: 'Work Complete',
-		followUp: null // done — no follow-up
-	},
-	{
-		cust: 'sam',
-		project: 'Tool Shed',
-		type: 'Shed',
-		state: 'Inquiry',
-		followUp: days(0) // due today
-	}
-];
+const CUSTOMERS = DEMO_CUSTOMERS;
+const ORDERS = DEMO_ORDERS;
 
 const sql = postgres(resolveDatabaseUrl(), { max: 1 });
 
@@ -156,8 +73,8 @@ async function main() {
 		if (account) await sql`update "user" set role = 'customer' where id = ${account.id}`;
 		const id = randomUUID();
 		await sql`
-			insert into customer (id, contractor_id, name, email, phone, address, notes, tags, avatar, user_id)
-			values (${id}, ${contractor.id}, ${c.name}, ${c.email}, ${c.phone}, ${c.address}, ${c.notes}, ${c.tags}, ${c.avatar ?? null}, ${account?.id ?? null})
+			insert into customer (id, contractor_id, name, email, phone, address, notes, tags, avatar, preferred_contact, user_id)
+			values (${id}, ${contractor.id}, ${c.name}, ${c.email}, ${c.phone}, ${c.address}, ${c.notes}, ${c.tags}, ${c.avatar ?? null}, ${c.preferredContact ?? 'email'}, ${account?.id ?? null})
 		`;
 		customerIds[c.key] = { id, userId: account?.id ?? null };
 	}
@@ -168,7 +85,7 @@ async function main() {
 		const orderId = randomUUID();
 		await sql`
 			insert into "order" (id, contractor_id, customer_id, project_name, project_type, state, next_follow_up_at)
-			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.state}, ${o.followUp})
+			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.state}, ${followUpAt(o.followUpDays)})
 		`;
 		await sql`
 			insert into timeline_entry (id, order_id, kind, title, detail, author_role, internal)
@@ -192,12 +109,12 @@ async function main() {
 	}
 
 	// A couple of contractor notifications for the bell.
-	await sql`
-		insert into notification (id, user_id, title, detail, priority, unread)
-		values
-			(${randomUUID()}, ${contractor.id}, 'Question from customer: Mina Patel', 'Can we start a week earlier?', 'standard', true),
-			(${randomUUID()}, ${contractor.id}, 'Issue reported: Nina Brooks', 'Gazebo trim needs a touch-up.', 'high', true)
-	`;
+	for (const n of DEMO_NOTIFICATIONS) {
+		await sql`
+			insert into notification (id, user_id, title, detail, priority, unread)
+			values (${randomUUID()}, ${contractor.id}, ${n.title}, ${n.detail}, ${n.priority}, true)
+		`;
+	}
 
 	const linked = Object.values(customerIds).filter((c) => c.userId).length;
 	console.log(

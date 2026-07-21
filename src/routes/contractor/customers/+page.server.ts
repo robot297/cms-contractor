@@ -36,7 +36,8 @@ export const actions: Actions = {
 			phone: form.get('phone')?.toString(),
 			address: form.get('address')?.toString(),
 			notes: form.get('notes')?.toString(),
-			tags: form.get('tags')?.toString()
+			tags: form.get('tags')?.toString(),
+			preferredContact: form.get('preferredContact')?.toString()
 		});
 		if (!contact.ok)
 			return fail(400, { action: 'add', field: contact.field, message: contact.message });
@@ -61,7 +62,8 @@ export const actions: Actions = {
 			phone: form.get('phone')?.toString(),
 			address: form.get('address')?.toString(),
 			notes: form.get('notes')?.toString(),
-			tags: form.get('tags')?.toString()
+			tags: form.get('tags')?.toString(),
+			preferredContact: form.get('preferredContact')?.toString()
 		});
 		if (!contact.ok)
 			return fail(400, { action: 'edit', id, field: contact.field, message: contact.message });
