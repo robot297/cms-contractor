@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
-	import { PROJECT_TYPES, QUICK_UPDATE_STATES } from '$lib/crm';
+	import { PROJECT_TYPES } from '$lib/crm';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -15,6 +15,31 @@
 	const dueCount = $derived(data.orders.filter((o) => o.followUpDue).length);
 
 	let confirmingDeleteOrderId: string | null = $state(null);
+	// Which order's follow-up "Snooze" menu is expanded (one at a time).
+	let snoozeOpenId: string | null = $state(null);
+	// Which order's overflow (⋯) menu is open, and which has its note field open.
+	let menuOpenId: string | null = $state(null);
+	let noteOpenId: string | null = $state(null);
+	// Close the snooze menu once a follow-up change is submitted.
+	const snoozeThenClose = () =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			snoozeOpenId = null;
+			await update();
+		};
+	// Close & reset the note field after it's submitted.
+	const noteThenClose = () =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			noteOpenId = null;
+			await update();
+		};
+
+	// Customer details dialog, driven off the already-loaded customer directory.
+	let customerDialog: HTMLDialogElement | undefined = $state();
+	let customerDetail: (typeof data.customers)[number] | null = $state(null);
+	function openCustomer(id: string | null) {
+		customerDetail = id ? (data.customers.find((c) => c.id === id) ?? null) : null;
+		if (customerDetail) customerDialog?.showModal();
+	}
 
 	// New order modal
 	let newOrderDialog: HTMLDialogElement | undefined = $state();
@@ -40,9 +65,26 @@
 		return d ? new Date(d).toLocaleDateString() : '—';
 	}
 
+	// Read-only status badge colors, grouped by lifecycle stage.
+	const STATUS_COLORS: Record<string, { bg: string; border: string; fg: string }> = {
+		'Work Complete': { bg: '#e6f4ea', border: '#79c98d', fg: '#1a7f37' },
+		'Work Cancelled': { bg: '#f6f8fa', border: '#d0d7de', fg: '#57606a' },
+		'On Hold / Archived': { bg: '#f6f8fa', border: '#d0d7de', fg: '#57606a' },
+		'In Progress': { bg: '#ddf4ff', border: '#54aeff', fg: '#0969da' },
+		'Work Scheduled': { bg: '#ddf4ff', border: '#54aeff', fg: '#0969da' }
+	};
+	const DEFAULT_STATUS_COLOR = { bg: '#fff8e6', border: '#d4a72c', fg: '#9a6700' };
+	const statusBadge = (state: string) => STATUS_COLORS[state] ?? DEFAULT_STATUS_COLOR;
+
 	const field = 'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 	const pill =
 		'padding: 0.4rem 0.75rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.85rem;';
+	const primaryBtn =
+		'padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
+	const iconBtn =
+		'border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 8px; cursor: pointer; padding: 0.35rem 0.5rem; font-size: 0.95rem; line-height: 1;';
+	const menuItem =
+		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
 
 <svelte:head>
@@ -85,32 +127,84 @@
 		{/if}
 
 		{#each visibleOrders as order (order.id)}
+			{@const badge = statusBadge(order.state)}
 			<article
-				style="border: 1px solid #d0d7de; border-radius: 16px; padding: 1rem; display: grid; gap: 0.65rem;"
+				style="border: 1px solid #d0d7de; border-radius: 16px; padding: 1rem 1.1rem; display: grid; gap: 0.85rem;"
 			>
+				<!-- Header: project + customer on the left, status + overflow menu on the right -->
 				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start;">
-					<div>
-						<strong>{order.projectName ?? 'Untitled project'}</strong>
-						{#if order.projectType}<span style="color: #57606a;"> · {order.projectType}</span>{/if}
-						<div style="font-size: 0.9rem; color: #57606a;">
-							{order.customerName} · {order.state} · customer sees “{order.customerVisibleState}”
-						</div>
+					<div style="display: grid; gap: 0.2rem; min-width: 0;">
+						<a
+							href={`/contractor/orders/${order.id}`}
+							style="font-size: 1.05rem; font-weight: 600; color: inherit; text-decoration: none;"
+						>
+							{order.projectName ?? 'Untitled project'}{#if order.projectType}<span
+									style="color: #57606a; font-weight: 400;"> · {order.projectType}</span
+								>{/if}
+						</a>
+						<button
+							type="button"
+							onclick={() => openCustomer(order.customerId)}
+							style="justify-self: start; border: none; background: none; padding: 0; cursor: pointer; font-size: 0.9rem; color: #0969da;"
+							>{order.customerName}</button
+						>
 					</div>
+
 					<div style="display: flex; gap: 0.5rem; align-items: center;">
 						{#if order.followUpDue}
 							<span
-								style="font-size: 0.75rem; color: #9a6700; border: 1px solid #d4a72c; border-radius: 999px; padding: 0.05rem 0.5rem;"
-								>Follow up</span
+								style="font-size: 0.72rem; color: #9a6700; background: #fff8e6; border: 1px solid #d4a72c; border-radius: 999px; padding: 0.1rem 0.55rem; white-space: nowrap;"
+								>Due</span
 							>
 						{/if}
-						<button
-							type="button"
-							title="Delete order"
-							aria-label="Delete order"
-							onclick={() => (confirmingDeleteOrderId = order.id)}
-							style="border: none; background: none; cursor: pointer; font-size: 1rem; line-height: 1; color: #cf222e; padding: 0.2rem 0.35rem;"
-							>🗑</button
+						<span
+							style="font-size: 0.78rem; font-weight: 600; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.15rem 0.6rem;"
+							>{order.state}</span
 						>
+						<div style="position: relative;">
+							<button
+								type="button"
+								aria-label="Order actions"
+								aria-expanded={menuOpenId === order.id}
+								onclick={() => (menuOpenId = menuOpenId === order.id ? null : order.id)}
+								style="border: none; background: none; cursor: pointer; font-size: 1.1rem; line-height: 1; color: #57606a; padding: 0.15rem 0.35rem;"
+								>⋯</button
+							>
+							{#if menuOpenId === order.id}
+								<!-- click-away backdrop -->
+								<button
+									type="button"
+									aria-label="Close menu"
+									onclick={() => (menuOpenId = null)}
+									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+								></button>
+								<div
+									style="position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 180px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
+								>
+									<a
+										href={`/contractor/orders/${order.id}`}
+										style="{menuItem} text-decoration: none;">View details</a
+									>
+									{#if order.customerId}
+										<form method="POST" action="?/sendInvite" use:enhance={() => {
+												menuOpenId = null;
+												return async ({ update }) => await update();
+											}}>
+											<input type="hidden" name="customerId" value={order.customerId} />
+											<button type="submit" style={menuItem}>Invite customer</button>
+										</form>
+									{/if}
+									<button
+										type="button"
+										onclick={() => {
+											confirmingDeleteOrderId = order.id;
+											menuOpenId = null;
+										}}
+										style="{menuItem} color: #cf222e; border-top: 1px solid #eaeef2;">Delete order</button
+									>
+								</div>
+							{/if}
+						</div>
 					</div>
 				</div>
 
@@ -146,68 +240,93 @@
 					</div>
 				{/if}
 
-				<!-- Follow-up -->
-				<div
-					style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.9rem;"
-				>
-					<span style="color: #57606a;"
-						>Follow-up: <strong>{fmtDate(order.nextFollowUpAt)}</strong></span
+				<!-- Follow-up + quick note -->
+				<div style="display: grid; gap: 0.5rem;">
+					<div
+						style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; justify-content: space-between; font-size: 0.9rem;"
 					>
-					<form
-						method="POST"
-						action="?/setFollowUp"
-						use:enhance
-						style="display: flex; gap: 0.35rem; align-items: center;"
-					>
-						<input type="hidden" name="orderId" value={order.id} />
-						<input
-							type="date"
-							name="date"
-							value={toDateInput(order.nextFollowUpAt)}
-							style={field}
-						/>
-						<button type="submit" style={pill}>Set</button>
-					</form>
-					<form method="POST" action="?/snoozeFollowUp" use:enhance>
-						<input type="hidden" name="orderId" value={order.id} />
-						<button type="submit" name="preset" value="1d" style={pill}>+1d</button>
-					</form>
-					<form method="POST" action="?/snoozeFollowUp" use:enhance>
-						<input type="hidden" name="orderId" value={order.id} />
-						<button type="submit" name="preset" value="3d" style={pill}>+3d</button>
-					</form>
-					<form method="POST" action="?/snoozeFollowUp" use:enhance>
-						<input type="hidden" name="orderId" value={order.id} />
-						<button type="submit" name="preset" value="1w" style={pill}>+1w</button>
-					</form>
-					{#if order.nextFollowUpAt}
-						<form method="POST" action="?/clearFollowUp" use:enhance>
+						<div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
+							<span style="color: #57606a;"
+								>Next follow-up: <strong style="color: #1f2328;"
+									>{fmtDate(order.nextFollowUpAt)}</strong
+								></span
+							>
+							<button
+								type="button"
+								aria-expanded={snoozeOpenId === order.id}
+								onclick={() => (snoozeOpenId = snoozeOpenId === order.id ? null : order.id)}
+								style={pill}>Snooze ▾</button
+							>
+						</div>
+						<button
+							type="button"
+							title="Add note"
+							aria-label="Add note"
+							aria-expanded={noteOpenId === order.id}
+							onclick={() => (noteOpenId = noteOpenId === order.id ? null : order.id)}
+							style={iconBtn}>🗒</button
+						>
+					</div>
+
+					{#if snoozeOpenId === order.id}
+						<div
+							style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; background: #f6f8fa; border: 1px solid #eaeef2; border-radius: 10px; padding: 0.55rem 0.65rem;"
+						>
+							<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+								<input type="hidden" name="orderId" value={order.id} />
+								<button type="submit" name="preset" value="1d" style={pill}>+1 day</button>
+							</form>
+							<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+								<input type="hidden" name="orderId" value={order.id} />
+								<button type="submit" name="preset" value="3d" style={pill}>+3 days</button>
+							</form>
+							<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+								<input type="hidden" name="orderId" value={order.id} />
+								<button type="submit" name="preset" value="1w" style={pill}>+1 week</button>
+							</form>
+							<span style="width: 1px; height: 20px; background: #d0d7de;"></span>
+							<form
+								method="POST"
+								action="?/setFollowUp"
+								use:enhance={snoozeThenClose}
+								style="display: flex; gap: 0.35rem; align-items: center;"
+							>
+								<input type="hidden" name="orderId" value={order.id} />
+								<input
+									type="date"
+									name="date"
+									value={toDateInput(order.nextFollowUpAt)}
+									style={field}
+								/>
+								<button type="submit" style={pill}>Set date</button>
+							</form>
+							{#if order.nextFollowUpAt}
+								<form method="POST" action="?/clearFollowUp" use:enhance={snoozeThenClose}>
+									<input type="hidden" name="orderId" value={order.id} />
+									<button type="submit" style="{pill} color: #cf222e;">Clear</button>
+								</form>
+							{/if}
+						</div>
+					{/if}
+
+					{#if noteOpenId === order.id}
+						<form
+							method="POST"
+							action="?/addNote"
+							use:enhance={noteThenClose}
+							style="display: flex; gap: 0.5rem; align-items: center;"
+						>
 							<input type="hidden" name="orderId" value={order.id} />
-							<button type="submit" style="{pill} color: #cf222e;">Clear</button>
+							<input
+								name="note"
+								placeholder="Add an internal note…"
+								required
+								style="flex: 1; min-width: 140px; {field}"
+							/>
+							<button type="submit" style={primaryBtn}>Add</button>
 						</form>
 					{/if}
 				</div>
-
-				<!-- Quick status update -->
-				<form
-					method="POST"
-					action="?/quickUpdate"
-					use:enhance
-					style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;"
-				>
-					<input type="hidden" name="orderId" value={order.id} />
-					<select name="state" style={field}>
-						{#each QUICK_UPDATE_STATES as s (s)}
-							<option value={s} selected={s === order.state}>{s}</option>
-						{/each}
-					</select>
-					<input name="note" placeholder="Add note" style="flex: 1; min-width: 120px; {field}" />
-					<button
-						type="submit"
-						style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer;"
-						>Update</button
-					>
-				</form>
 
 				{#if (data.notesByOrder[order.id] ?? []).length > 0}
 					<details style="font-size: 0.85rem;">
@@ -228,17 +347,53 @@
 						</div>
 					</details>
 				{/if}
-
-				{#if order.customerId}
-					<form method="POST" action="?/sendInvite" use:enhance>
-						<input type="hidden" name="customerId" value={order.customerId} />
-						<button type="submit" style={pill}>Invite Customer ({order.customerEmail})</button>
-					</form>
-				{/if}
 			</article>
 		{/each}
 	</section>
 </div>
+
+<!-- Customer details dialog -->
+<dialog
+	bind:this={customerDialog}
+	style="border: none; border-radius: 16px; padding: 0; max-width: 420px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
+>
+	{#if customerDetail}
+		{@const c = customerDetail}
+		<div style="display: grid; gap: 0.7rem; padding: 1.25rem;">
+			<div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+				<h2 style="margin: 0; font-size: 1.1rem;">{c.name}</h2>
+				<button
+					type="button"
+					onclick={() => customerDialog?.close()}
+					style="border: none; background: none; font-size: 1.2rem; cursor: pointer; color: #57606a;"
+					>✕</button
+				>
+			</div>
+			<div style="display: grid; gap: 0.4rem; font-size: 0.9rem;">
+				<div><span style="color: #57606a;">Email:</span> {c.email}</div>
+				{#if c.phone}<div><span style="color: #57606a;">Phone:</span> {c.phone}</div>{/if}
+				{#if c.address}<div><span style="color: #57606a;">Address:</span> {c.address}</div>{/if}
+				{#if c.tags.length > 0}
+					<div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.2rem;">
+						{#each c.tags as tag (tag)}
+							<span
+								style="font-size: 0.75rem; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 999px; padding: 0.1rem 0.55rem;"
+								>{tag}</span
+							>
+						{/each}
+					</div>
+				{/if}
+				{#if c.notes}
+					<div style="margin-top: 0.3rem; color: #57606a; white-space: pre-wrap;">{c.notes}</div>
+				{/if}
+			</div>
+			<a
+				href={resolve('/contractor/customers')}
+				style="justify-self: start; font-size: 0.85rem; color: #0969da;">Manage in customers →</a
+			>
+		</div>
+	{/if}
+</dialog>
 
 <!-- New order modal -->
 <dialog

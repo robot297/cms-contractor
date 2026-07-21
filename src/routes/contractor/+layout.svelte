@@ -16,12 +16,15 @@
 	const active =
 		'background: #ffcc00; color: #111; border-color: #111; box-shadow: 2px 2px 0 #fff;';
 	const inactive = 'background: transparent; color: #fff;';
+
+	const year = new Date().getFullYear();
 </script>
 
-<div style="background: #111;">
-	<nav
-		style="max-width: 860px; margin: 0 auto; padding: 0.7rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;"
-	>
+<div style="min-height: 100dvh; display: flex; flex-direction: column;">
+	<div style="background: #111;">
+		<nav
+			style="max-width: 860px; margin: 0 auto; padding: 0.7rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;"
+		>
 		<div style="display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;">
 			<span
 				style="font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; color: #ffcc00; text-shadow: 2px 2px 0 #000;"
@@ -50,8 +53,29 @@
 				>
 			</form>
 		</div>
-	</nav>
-</div>
-<div class="hazard"></div>
+		</nav>
+	</div>
+	<div class="hazard"></div>
 
-{@render children()}
+	<main style="flex: 1;">
+		{@render children()}
+	</main>
+
+	<footer>
+		<div class="hazard"></div>
+		<div style="background: #111;">
+			<div
+				style="max-width: 860px; margin: 0 auto; padding: 1.25rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;"
+			>
+				<span
+					style="font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; color: #ffcc00; text-shadow: 2px 2px 0 #000;"
+					>🛠 Contractor&nbsp;CRM</span
+				>
+				<span
+					style="font-size: 0.75rem; color: #fff; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;"
+					>© {year} · Built on the job site</span
+				>
+			</div>
+		</div>
+	</footer>
+</div>

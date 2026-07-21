@@ -216,6 +216,33 @@ export function snoozeDate(preset: SnoozePreset, from: Date = new Date()): Date 
 	return new Date(from.getTime() + days * DAY_MS);
 }
 
+// -------------------------------------------------------------- Attachments
+
+/** Cap on a single order attachment. Blobs live in Postgres, so keep it modest. */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/** File types a contractor may attach to an order. */
+export const ALLOWED_ATTACHMENT_TYPES = [
+	'image/png',
+	'image/jpeg',
+	'image/webp',
+	'image/gif',
+	'application/pdf'
+] as const;
+
+export function isAllowedAttachmentType(mime: string): boolean {
+	return (ALLOWED_ATTACHMENT_TYPES as readonly string[]).includes(mime);
+}
+
+/** Human-readable byte size, e.g. "2.4 MB". */
+export function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	const kb = bytes / 1024;
+	if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+	const mb = kb / 1024;
+	return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+}
+
 // ------------------------------------------------------------------ Avatars
 
 /** Cap stored avatar data URLs so customer rows/queries stay small. */

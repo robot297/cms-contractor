@@ -1,6 +1,22 @@
 import { relations } from 'drizzle-orm';
-import { boolean, index, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+	boolean,
+	customType,
+	index,
+	integer,
+	pgTable,
+	text,
+	timestamp,
+	uniqueIndex
+} from 'drizzle-orm/pg-core';
 import { user } from './auth.schema';
+
+// Postgres `bytea` for storing attachment bytes directly in the database.
+const bytea = customType<{ data: Buffer; default: false }>({
+	dataType() {
+		return 'bytea';
+	}
+});
 
 // A first-class, contractor-scoped customer record. Exists independently of any
 // order. Optionally links to a login (`userId`) once an invite is accepted.
@@ -136,6 +152,30 @@ export const customerInvite = pgTable(
 	]
 );
 
+// Files (photos, quotes, invoices) attached to an order. Bytes live in `data`;
+// size is stored separately so listings don't have to read the blob.
+export const attachment = pgTable(
+	'attachment',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		orderId: text('order_id')
+			.notNull()
+			.references(() => order.id, { onDelete: 'cascade' }),
+		// Denormalized owner for cheap ownership checks on download/delete.
+		contractorId: text('contractor_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		filename: text('filename').notNull(),
+		mimeType: text('mime_type').notNull(),
+		size: integer('size').notNull(),
+		data: bytea('data').notNull(),
+		createdAt: timestamp('created_at').defaultNow().notNull()
+	},
+	(table) => [index('attachment_orderId_idx').on(table.orderId)]
+);
+
 export const customerRelations = relations(customer, ({ one, many }) => ({
 	contractor: one(user, { fields: [customer.contractorId], references: [user.id] }),
 	account: one(user, { fields: [customer.userId], references: [user.id] }),
@@ -147,7 +187,12 @@ export const orderRelations = relations(order, ({ one, many }) => ({
 	contractor: one(user, { fields: [order.contractorId], references: [user.id] }),
 	customer: one(customer, { fields: [order.customerId], references: [customer.id] }),
 	timeline: many(timelineEntry),
-	invites: many(customerInvite)
+	invites: many(customerInvite),
+	attachments: many(attachment)
+}));
+
+export const attachmentRelations = relations(attachment, ({ one }) => ({
+	order: one(order, { fields: [attachment.orderId], references: [order.id] })
 }));
 
 export const timelineEntryRelations = relations(timelineEntry, ({ one }) => ({

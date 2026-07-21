@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { isContractorOrderState, isSnoozePreset, validateOrderSetup } from '$lib/crm';
+import { isSnoozePreset, validateOrderSetup } from '$lib/crm';
 import {
+	addOrderNote,
 	createInvite,
 	createOrder,
 	deleteOrder,
@@ -9,7 +10,6 @@ import {
 	listOrderNotes,
 	setFollowUp,
 	snoozeFollowUp,
-	updateOrderState,
 	type OrderNote
 } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
@@ -56,14 +56,14 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
-	quickUpdate: async ({ request, locals }) => {
+	addNote: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
 		const orderId = form.get('orderId')?.toString() ?? '';
-		const state = form.get('state')?.toString() ?? '';
-		const note = form.get('note')?.toString() || undefined;
-		if (!isContractorOrderState(state)) return fail(400, { message: 'Invalid state' });
-		await updateOrderState(orderId, user.id, state, note);
+		const note = form.get('note')?.toString().trim() ?? '';
+		if (!orderId) return fail(400, { message: 'Order is required' });
+		if (!note) return fail(400, { message: 'Note cannot be empty' });
+		await addOrderNote(orderId, user.id, note);
 		return { success: true };
 	},
 

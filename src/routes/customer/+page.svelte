@@ -46,7 +46,7 @@
 		>
 			<h2 style="margin: 0; font-size: 1.1rem;">{active.customerName}</h2>
 			<p style="margin: 0; color: #57606a;">
-				Current status: <strong>{active.customerVisibleState}</strong>
+				Current status: <strong>{active.state}</strong>
 			</p>
 		</section>
 
@@ -119,7 +119,7 @@
 					style="display: flex; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-top: 1px solid #eaeef2;"
 				>
 					<span>{order.customerName}</span>
-					<span style="color: #57606a;">{order.customerVisibleState}</span>
+					<span style="color: #57606a;">{order.state}</span>
 				</div>
 			{/each}
 		</section>

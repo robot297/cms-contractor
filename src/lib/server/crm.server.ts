@@ -1,6 +1,13 @@
 import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { db } from './db';
-import { customer, customerInvite, notification, order, timelineEntry } from './db/schema';
+import {
+	attachment,
+	customer,
+	customerInvite,
+	notification,
+	order,
+	timelineEntry
+} from './db/schema';
 import {
 	defaultFollowUp,
 	getVisibleCustomerState,
@@ -380,7 +387,7 @@ export async function updateOrderState(
 				await createNotification({
 					userId: cust.userId,
 					orderId,
-					title: `Order update: ${getVisibleCustomerState(newState)}`,
+					title: `Order update: ${newState}`,
 					priority: milestone ? 'high' : 'standard'
 				});
 			}
@@ -415,6 +422,120 @@ export async function listOrderNotes(contractorId: string): Promise<OrderNote[]>
 		.innerJoin(order, eq(timelineEntry.orderId, order.id))
 		.where(and(eq(order.contractorId, contractorId), eq(timelineEntry.internal, true)))
 		.orderBy(desc(timelineEntry.createdAt));
+}
+
+/** Attachment listing shape — metadata only, never the blob. */
+export type AttachmentMeta = {
+	id: string;
+	orderId: string;
+	filename: string;
+	mimeType: string;
+	size: number;
+	createdAt: Date;
+};
+
+export type OrderDetail = {
+	order: ContractorOrderView;
+	customer: CustomerRow | null;
+	timeline: TimelineRow[];
+	attachments: AttachmentMeta[];
+};
+
+/** Full detail for a single order the contractor owns, or null if not theirs. */
+export async function getOrderDetail(
+	orderId: string,
+	contractorId: string
+): Promise<OrderDetail | null> {
+	const [row] = await db
+		.select()
+		.from(order)
+		.leftJoin(customer, eq(order.customerId, customer.id))
+		.where(and(eq(order.id, orderId), eq(order.contractorId, contractorId)))
+		.limit(1);
+	if (!row) return null;
+	const [timeline, attachments] = await Promise.all([
+		db
+			.select()
+			.from(timelineEntry)
+			.where(eq(timelineEntry.orderId, orderId))
+			.orderBy(desc(timelineEntry.createdAt)),
+		listOrderAttachments(orderId, contractorId)
+	]);
+	return { order: toContractorView(row.order, row.customer), customer: row.customer, timeline, attachments };
+}
+
+/** Metadata for an order's attachments (no bytes), newest first. */
+export function listOrderAttachments(
+	orderId: string,
+	contractorId: string
+): Promise<AttachmentMeta[]> {
+	return db
+		.select({
+			id: attachment.id,
+			orderId: attachment.orderId,
+			filename: attachment.filename,
+			mimeType: attachment.mimeType,
+			size: attachment.size,
+			createdAt: attachment.createdAt
+		})
+		.from(attachment)
+		.where(and(eq(attachment.orderId, orderId), eq(attachment.contractorId, contractorId)))
+		.orderBy(desc(attachment.createdAt));
+}
+
+/** Store an uploaded file against an order the contractor owns. */
+export async function addAttachment(
+	orderId: string,
+	contractorId: string,
+	file: { filename: string; mimeType: string; size: number; data: Buffer }
+): Promise<void> {
+	const owned = await contractorOrder(orderId, contractorId);
+	if (!owned) throw new Error('Order not found');
+	await db.insert(attachment).values({
+		orderId,
+		contractorId,
+		filename: file.filename,
+		mimeType: file.mimeType,
+		size: file.size,
+		data: file.data
+	});
+}
+
+/** Fetch one attachment (including its bytes) scoped to its owning contractor. */
+export async function getAttachment(id: string, contractorId: string) {
+	const [row] = await db
+		.select()
+		.from(attachment)
+		.where(and(eq(attachment.id, id), eq(attachment.contractorId, contractorId)))
+		.limit(1);
+	return row ?? null;
+}
+
+/** Delete an attachment owned by the contractor. */
+export async function deleteAttachment(id: string, contractorId: string): Promise<void> {
+	await db
+		.delete(attachment)
+		.where(and(eq(attachment.id, id), eq(attachment.contractorId, contractorId)));
+}
+
+/** Append an internal, contractor-only note to an order's timeline. */
+export async function addOrderNote(
+	orderId: string,
+	contractorId: string,
+	detail: string
+): Promise<void> {
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+	const trimmed = detail.trim();
+	if (!trimmed) return;
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'note',
+		title: 'Note',
+		detail: trimmed,
+		authorRole: 'contractor',
+		internal: true
+	});
 }
 
 /** Permanently delete an order (cascades its timeline, notifications, and invites). */
