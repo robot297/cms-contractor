@@ -106,7 +106,7 @@
 	</header>
 
 	<!-- Follow-ups due -->
-	<a href={resolve('/contractor/orders?filter=due')} style="text-decoration: none; color: inherit;">
+	<a href={resolve('/contractor/orders')} style="text-decoration: none; color: inherit;">
 		<div
 			style="border: 1px solid {data.dueCount > 0
 				? '#d4a72c'

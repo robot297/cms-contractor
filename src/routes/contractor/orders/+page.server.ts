@@ -36,7 +36,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		notesByOrder,
 		// Optional deep-links: pre-select a customer, or open on the Due filter.
 		presetCustomerId: url.searchParams.get('customer') ?? '',
-		initialFilter: url.searchParams.get('filter') === 'due' ? 'due' : 'all'
+		initialView: ((v) => (v === 'completed' || v === 'cancelled' ? v : 'active'))(
+			url.searchParams.get('view')
+		)
 	};
 };
 

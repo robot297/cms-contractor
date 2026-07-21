@@ -7,12 +7,36 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
-	// Seed the filter from the URL once; the contractor toggles it thereafter.
-	let filter = $state<'all' | 'due'>(untrack(() => (data.initialFilter === 'due' ? 'due' : 'all')));
-	const visibleOrders = $derived(
-		filter === 'due' ? data.orders.filter((o) => o.followUpDue) : data.orders
-	);
-	const dueCount = $derived(data.orders.filter((o) => o.followUpDue).length);
+	type OrderView = (typeof data.orders)[number];
+
+	// Which lifecycle bucket is shown. Active is the working list; completed and
+	// cancelled orders move out of the way into their own views.
+	const VIEWS = ['active', 'completed', 'cancelled'] as const;
+	const VIEW_LABELS = { active: 'Active', completed: 'Completed', cancelled: 'Cancelled' } as const;
+	let view = $state<(typeof VIEWS)[number]>(untrack(() => data.initialView ?? 'active'));
+
+	// Sort by follow-up attention: overdue first, upcoming next, no-date last.
+	function byAttention(a: OrderView, b: OrderView): number {
+		const av = a.nextFollowUpAt ? new Date(a.nextFollowUpAt).getTime() : Infinity;
+		const bv = b.nextFollowUpAt ? new Date(b.nextFollowUpAt).getTime() : Infinity;
+		return av - bv;
+	}
+
+	const buckets = $derived.by(() => {
+		const active: OrderView[] = [];
+		const completed: OrderView[] = [];
+		const cancelled: OrderView[] = [];
+		for (const o of data.orders) {
+			if (o.state === 'Work Complete') completed.push(o);
+			else if (o.state === 'Work Cancelled') cancelled.push(o);
+			else active.push(o);
+		}
+		// data.orders arrives newest-first — right for the completed/cancelled
+		// archives; the active list is re-sorted by follow-up urgency instead.
+		active.sort(byAttention);
+		return { active, completed, cancelled };
+	});
+	const visibleOrders = $derived(buckets[view]);
 
 	let confirmingDeleteOrderId: string | null = $state(null);
 	// Which order's follow-up "Snooze" menu is expanded (one at a time).
@@ -33,13 +57,15 @@
 			await update();
 		};
 
-	// Customer details dialog, driven off the already-loaded customer directory.
+	// Contact dialog, driven off the already-loaded customer directory.
 	let customerDialog: HTMLDialogElement | undefined = $state();
 	let customerDetail: (typeof data.customers)[number] | null = $state(null);
-	function openCustomer(id: string | null) {
+	function openContact(id: string | null) {
 		customerDetail = id ? (data.customers.find((c) => c.id === id) ?? null) : null;
 		if (customerDetail) customerDialog?.showModal();
 	}
+	// Digits-only form of a phone number for a tel: link.
+	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 
 	// New order modal
 	let newOrderDialog: HTMLDialogElement | undefined = $state();
@@ -65,16 +91,33 @@
 		return d ? new Date(d).toLocaleDateString() : '—';
 	}
 
-	// Read-only status badge colors, grouped by lifecycle stage.
-	const STATUS_COLORS: Record<string, { bg: string; border: string; fg: string }> = {
-		'Work Complete': { bg: '#e6f4ea', border: '#79c98d', fg: '#1a7f37' },
-		'Work Cancelled': { bg: '#f6f8fa', border: '#d0d7de', fg: '#57606a' },
-		'On Hold / Archived': { bg: '#f6f8fa', border: '#d0d7de', fg: '#57606a' },
-		'In Progress': { bg: '#ddf4ff', border: '#54aeff', fg: '#0969da' },
-		'Work Scheduled': { bg: '#ddf4ff', border: '#54aeff', fg: '#0969da' }
-	};
-	const DEFAULT_STATUS_COLOR = { bg: '#fff8e6', border: '#d4a72c', fg: '#9a6700' };
-	const statusBadge = (state: string) => STATUS_COLORS[state] ?? DEFAULT_STATUS_COLOR;
+	// Show the project type only when the name doesn't already say it, so
+	// "Poolside Pergola" + type "Pergola" reads as one line, not "… · Pergola".
+	function typeSuffix(name: string | null, type: string | null): string | null {
+		if (!type) return null;
+		if (name && name.toLowerCase().includes(type.toLowerCase())) return null;
+		return type;
+	}
+
+	// Status badge colour by health: green = on track / done, amber = waiting or
+	// stuck, red = cancelled.
+	const STATUS_GO = { bg: '#e6f4ea', border: '#4ea866', fg: '#1a7f37' };
+	const STATUS_WAIT = { bg: '#fff4d6', border: '#d4a72c', fg: '#8a5a00' };
+	const STATUS_STOP = { bg: '#ffebe9', border: '#e5534b', fg: '#cf222e' };
+	function statusBadge(state: string) {
+		switch (state) {
+			case 'In Progress':
+			case 'Work Scheduled':
+			case 'Parts Ordered':
+			case 'Work Complete':
+				return STATUS_GO;
+			case 'Work Cancelled':
+				return STATUS_STOP;
+			default:
+				// Inquiry, Quote Sent, Deposit/Final Payment Pending, On Hold / Archived
+				return STATUS_WAIT;
+		}
+	}
 
 	const field = 'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 	const pill =
@@ -82,7 +125,7 @@
 	const primaryBtn =
 		'padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
 	const iconBtn =
-		'border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 8px; cursor: pointer; padding: 0.35rem 0.5rem; font-size: 0.95rem; line-height: 1;';
+		'width: 2.4rem; height: 2.4rem; display: inline-flex; align-items: center; justify-content: center; border: 2px solid #111; background: #fff; border-radius: 12px; cursor: pointer; font-size: 1.2rem; line-height: 1; box-shadow: 2px 2px 0 #111;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
@@ -102,27 +145,26 @@
 		>
 	</header>
 
-	<div style="display: flex; gap: 0.5rem;">
-		<button
-			type="button"
-			onclick={() => (filter = 'all')}
-			style="{pill} {filter === 'all'
-				? 'background: #0969da; color: #fff; border-color: #0969da;'
-				: ''}">All orders</button
-		>
-		<button
-			type="button"
-			onclick={() => (filter = 'due')}
-			style="{pill} {filter === 'due'
-				? 'background: #0969da; color: #fff; border-color: #0969da;'
-				: ''}">Follow-ups due{dueCount > 0 ? ` (${dueCount})` : ''}</button
-		>
+	<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+		{#each VIEWS as key (key)}
+			<button
+				type="button"
+				onclick={() => (view = key)}
+				style="{pill} {view === key
+					? 'background: #0969da; color: #fff; border-color: #0969da;'
+					: ''}">{VIEW_LABELS[key]} ({buckets[key].length})</button
+			>
+		{/each}
 	</div>
 
 	<section style="display: grid; gap: 0.75rem;">
 		{#if visibleOrders.length === 0}
 			<p style="color: #57606a;">
-				{filter === 'due' ? 'Nothing due right now.' : 'No orders yet — start one with New Order.'}
+				{view === 'active'
+					? 'No active orders — start one with New Order.'
+					: view === 'completed'
+						? 'No completed orders yet.'
+						: 'No cancelled orders.'}
 			</p>
 		{/if}
 
@@ -131,26 +173,24 @@
 			<article
 				style="border: 1px solid #d0d7de; border-radius: 16px; padding: 1rem 1.1rem; display: grid; gap: 0.85rem;"
 			>
-				<!-- Header: project + customer on the left, status + overflow menu on the right -->
+				<!-- Header: customer name leads, project subtitle; health badges on the right -->
 				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start;">
-					<div style="display: grid; gap: 0.2rem; min-width: 0;">
+					<div style="display: grid; gap: 0.15rem; min-width: 0;">
 						<a
 							href={`/contractor/orders/${order.id}`}
-							style="font-size: 1.05rem; font-weight: 600; color: inherit; text-decoration: none;"
+							style="font-size: 1.3rem; font-weight: 800; color: inherit; text-decoration: none; line-height: 1.15;"
 						>
-							{order.projectName ?? 'Untitled project'}{#if order.projectType}<span
-									style="color: #57606a; font-weight: 400;"> · {order.projectType}</span
-								>{/if}
+							{order.customerName}
 						</a>
-						<button
-							type="button"
-							onclick={() => openCustomer(order.customerId)}
-							style="justify-self: start; border: none; background: none; padding: 0; cursor: pointer; font-size: 0.9rem; color: #0969da;"
-							>{order.customerName}</button
-						>
+						<div style="font-size: 0.9rem; color: #57606a;">
+							{order.projectName ?? 'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)} · {typeSuffix(
+									order.projectName,
+									order.projectType
+								)}{/if}
+						</div>
 					</div>
 
-					<div style="display: flex; gap: 0.5rem; align-items: center;">
+					<div style="display: flex; gap: 0.4rem; align-items: center; flex-shrink: 0;">
 						{#if order.followUpDue}
 							<span
 								style="font-size: 0.72rem; color: #9a6700; background: #fff8e6; border: 1px solid #d4a72c; border-radius: 999px; padding: 0.1rem 0.55rem; white-space: nowrap;"
@@ -158,53 +198,9 @@
 							>
 						{/if}
 						<span
-							style="font-size: 0.78rem; font-weight: 600; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.15rem 0.6rem;"
+							style="font-size: 0.78rem; font-weight: 700; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1.5px solid {badge.border}; border-radius: 999px; padding: 0.15rem 0.65rem;"
 							>{order.state}</span
 						>
-						<div style="position: relative;">
-							<button
-								type="button"
-								aria-label="Order actions"
-								aria-expanded={menuOpenId === order.id}
-								onclick={() => (menuOpenId = menuOpenId === order.id ? null : order.id)}
-								style="border: none; background: none; cursor: pointer; font-size: 1.1rem; line-height: 1; color: #57606a; padding: 0.15rem 0.35rem;"
-								>⋯</button
-							>
-							{#if menuOpenId === order.id}
-								<!-- click-away backdrop -->
-								<button
-									type="button"
-									aria-label="Close menu"
-									onclick={() => (menuOpenId = null)}
-									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
-								></button>
-								<div
-									style="position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 180px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
-								>
-									<a
-										href={`/contractor/orders/${order.id}`}
-										style="{menuItem} text-decoration: none;">View details</a
-									>
-									{#if order.customerId}
-										<form method="POST" action="?/sendInvite" use:enhance={() => {
-												menuOpenId = null;
-												return async ({ update }) => await update();
-											}}>
-											<input type="hidden" name="customerId" value={order.customerId} />
-											<button type="submit" style={menuItem}>Invite customer</button>
-										</form>
-									{/if}
-									<button
-										type="button"
-										onclick={() => {
-											confirmingDeleteOrderId = order.id;
-											menuOpenId = null;
-										}}
-										style="{menuItem} color: #cf222e; border-top: 1px solid #eaeef2;">Delete order</button
-									>
-								</div>
-							{/if}
-						</div>
 					</div>
 				</div>
 
@@ -240,31 +236,21 @@
 					</div>
 				{/if}
 
-				<!-- Follow-up + quick note -->
+				<!-- Follow-up -->
 				<div style="display: grid; gap: 0.5rem;">
 					<div
-						style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; justify-content: space-between; font-size: 0.9rem;"
+						style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; font-size: 0.9rem;"
 					>
-						<div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
-							<span style="color: #57606a;"
-								>Next follow-up: <strong style="color: #1f2328;"
-									>{fmtDate(order.nextFollowUpAt)}</strong
-								></span
-							>
-							<button
-								type="button"
-								aria-expanded={snoozeOpenId === order.id}
-								onclick={() => (snoozeOpenId = snoozeOpenId === order.id ? null : order.id)}
-								style={pill}>Snooze ▾</button
-							>
-						</div>
+						<span style="color: #57606a;"
+							>Next follow-up: <strong style="color: #1f2328;"
+								>{fmtDate(order.nextFollowUpAt)}</strong
+							></span
+						>
 						<button
 							type="button"
-							title="Add note"
-							aria-label="Add note"
-							aria-expanded={noteOpenId === order.id}
-							onclick={() => (noteOpenId = noteOpenId === order.id ? null : order.id)}
-							style={iconBtn}>🗒</button
+							aria-expanded={snoozeOpenId === order.id}
+							onclick={() => (snoozeOpenId = snoozeOpenId === order.id ? null : order.id)}
+							style={pill}>Snooze ▾</button
 						>
 					</div>
 
@@ -347,12 +333,82 @@
 						</div>
 					</details>
 				{/if}
+
+				<!-- Action bar: chunky icon buttons, bottom-right -->
+				<div style="display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center;">
+					{#if order.customerId}
+						<button
+							type="button"
+							title="Contact customer"
+							aria-label="Contact customer"
+							onclick={() => openContact(order.customerId)}
+							style={iconBtn}>✉️</button
+						>
+					{/if}
+					<button
+						type="button"
+						title="Add note"
+						aria-label="Add note"
+						aria-expanded={noteOpenId === order.id}
+						onclick={() => (noteOpenId = noteOpenId === order.id ? null : order.id)}
+						style={iconBtn}>📝</button
+					>
+					<div style="position: relative;">
+						<button
+							type="button"
+							title="More actions"
+							aria-label="More actions"
+							aria-expanded={menuOpenId === order.id}
+							onclick={() => (menuOpenId = menuOpenId === order.id ? null : order.id)}
+							style={iconBtn}>⋯</button
+						>
+						{#if menuOpenId === order.id}
+							<!-- click-away backdrop -->
+							<button
+								type="button"
+								aria-label="Close menu"
+								onclick={() => (menuOpenId = null)}
+								style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+							></button>
+							<!-- opens upward since the bar sits at the card bottom -->
+							<div
+								style="position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; min-width: 180px; background: #fff; border: 2px solid #111; border-radius: 10px; box-shadow: 4px 4px 0 #111; overflow: hidden; display: grid;"
+							>
+								<a
+									href={`/contractor/orders/${order.id}`}
+									style="{menuItem} text-decoration: none;">View details</a
+								>
+								{#if order.customerId}
+									<form
+										method="POST"
+										action="?/sendInvite"
+										use:enhance={() => {
+											menuOpenId = null;
+											return async ({ update }) => await update();
+										}}
+									>
+										<input type="hidden" name="customerId" value={order.customerId} />
+										<button type="submit" style={menuItem}>Invite customer</button>
+									</form>
+								{/if}
+								<button
+									type="button"
+									onclick={() => {
+										confirmingDeleteOrderId = order.id;
+										menuOpenId = null;
+									}}
+									style="{menuItem} color: #cf222e; border-top: 1px solid #eaeef2;">Delete order</button
+								>
+							</div>
+						{/if}
+					</div>
+				</div>
 			</article>
 		{/each}
 	</section>
 </div>
 
-<!-- Customer details dialog -->
+<!-- Contact dialog -->
 <dialog
 	bind:this={customerDialog}
 	style="border: none; border-radius: 16px; padding: 0; max-width: 420px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
@@ -369,8 +425,24 @@
 					>✕</button
 				>
 			</div>
+			<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+				<a
+					href={`mailto:${c.email}`}
+					style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; text-decoration: none; font-weight: 500;"
+					>✉️ Email</a
+				>
+				{#if c.phone}
+					<a
+						href={telHref(c.phone)}
+						style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none;"
+						>📞 Call</a
+					>
+				{/if}
+			</div>
 			<div style="display: grid; gap: 0.4rem; font-size: 0.9rem;">
-				<div><span style="color: #57606a;">Email:</span> {c.email}</div>
+				<div style="word-break: break-word;">
+					<span style="color: #57606a;">Email:</span> {c.email}
+				</div>
 				{#if c.phone}<div><span style="color: #57606a;">Phone:</span> {c.phone}</div>{/if}
 				{#if c.address}<div><span style="color: #57606a;">Address:</span> {c.address}</div>{/if}
 				{#if c.tags.length > 0}

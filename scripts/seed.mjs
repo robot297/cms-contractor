@@ -47,7 +47,8 @@ const CUSTOMERS = [
 		phone: '(555) 201-4477',
 		address: '88 Cedar Ln, Springfield',
 		notes: 'Prefers cedar. Repeat client — third project.',
-		tags: ['repeat', 'deck']
+		tags: ['repeat', 'deck'],
+		avatar: '/img/maya.png'
 	},
 	{
 		key: 'luis',
@@ -56,7 +57,8 @@ const CUSTOMERS = [
 		phone: '(555) 332-9080',
 		address: '14 Elm St, Springfield',
 		notes: 'Referred by Mina.',
-		tags: ['referral']
+		tags: ['referral'],
+		avatar: '/img/alex.png'
 	},
 	{
 		key: 'nina',
@@ -65,7 +67,8 @@ const CUSTOMERS = [
 		phone: '(555) 776-1220',
 		address: '901 Oak Ave, Riverton',
 		notes: 'HOA board contact — needs itemized quotes.',
-		tags: ['commercial']
+		tags: ['commercial'],
+		avatar: '/img/mia.png'
 	},
 	{
 		key: 'sam',
@@ -74,7 +77,8 @@ const CUSTOMERS = [
 		phone: null,
 		address: null,
 		notes: null,
-		tags: []
+		tags: [],
+		avatar: '/img/noah.png'
 	}
 ];
 
@@ -152,8 +156,8 @@ async function main() {
 		if (account) await sql`update "user" set role = 'customer' where id = ${account.id}`;
 		const id = randomUUID();
 		await sql`
-			insert into customer (id, contractor_id, name, email, phone, address, notes, tags, user_id)
-			values (${id}, ${contractor.id}, ${c.name}, ${c.email}, ${c.phone}, ${c.address}, ${c.notes}, ${c.tags}, ${account?.id ?? null})
+			insert into customer (id, contractor_id, name, email, phone, address, notes, tags, avatar, user_id)
+			values (${id}, ${contractor.id}, ${c.name}, ${c.email}, ${c.phone}, ${c.address}, ${c.notes}, ${c.tags}, ${c.avatar ?? null}, ${account?.id ?? null})
 		`;
 		customerIds[c.key] = { id, userId: account?.id ?? null };
 	}

@@ -17,16 +17,27 @@
 	function fmtDate(d: Date | string | null): string {
 		return d ? new Date(d).toLocaleDateString() : '—';
 	}
+	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 
-	const STATUS_COLORS: Record<string, { bg: string; border: string; fg: string }> = {
-		'Work Complete': { bg: '#e6f4ea', border: '#79c98d', fg: '#1a7f37' },
-		'Work Cancelled': { bg: '#f6f8fa', border: '#d0d7de', fg: '#57606a' },
-		'On Hold / Archived': { bg: '#f6f8fa', border: '#d0d7de', fg: '#57606a' },
-		'In Progress': { bg: '#ddf4ff', border: '#54aeff', fg: '#0969da' },
-		'Work Scheduled': { bg: '#ddf4ff', border: '#54aeff', fg: '#0969da' }
-	};
-	const DEFAULT_STATUS_COLOR = { bg: '#fff8e6', border: '#d4a72c', fg: '#9a6700' };
-	const badge = $derived(STATUS_COLORS[order.state] ?? DEFAULT_STATUS_COLOR);
+	// Status badge colour by health: green = on track / done, amber = waiting or
+	// stuck, red = cancelled. Mirrors the orders list.
+	const STATUS_GO = { bg: '#e6f4ea', border: '#4ea866', fg: '#1a7f37' };
+	const STATUS_WAIT = { bg: '#fff4d6', border: '#d4a72c', fg: '#8a5a00' };
+	const STATUS_STOP = { bg: '#ffebe9', border: '#e5534b', fg: '#cf222e' };
+	function statusBadge(state: string) {
+		switch (state) {
+			case 'In Progress':
+			case 'Work Scheduled':
+			case 'Parts Ordered':
+			case 'Work Complete':
+				return STATUS_GO;
+			case 'Work Cancelled':
+				return STATUS_STOP;
+			default:
+				return STATUS_WAIT;
+		}
+	}
+	const badge = $derived(statusBadge(order.state));
 
 	const field = 'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 	const pill =
@@ -34,24 +45,38 @@
 	const primaryBtn =
 		'padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
 	const card =
-		'border: 1px solid #d0d7de; border-radius: 16px; padding: 1rem 1.1rem; display: grid; gap: 0.75rem;';
+		'background: #fff; border: 1px solid #e2e6ea; border-radius: 16px; padding: 1.1rem 1.2rem; display: grid; gap: 0.75rem; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 4px 12px rgba(27, 31, 36, 0.06);';
 	const sectionTitle = 'margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: #8c959f;';
+
+	// Show the project type only when the name doesn't already say it, so
+	// "Poolside Pergola" + type "Pergola" reads as one line, not "… · Pergola".
+	function typeSuffix(name: string | null, type: string | null): string | null {
+		if (!type) return null;
+		if (name && name.toLowerCase().includes(type.toLowerCase())) return null;
+		return type;
+	}
 </script>
 
 <svelte:head>
 	<title>{order.projectName ?? 'Order'}</title>
 </svelte:head>
 
-<div style="max-width: 760px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem;">
+<div style="background: #f6f8fa; min-height: 100%;">
+<div style="max-width: 760px; margin: 0 auto; padding: 1.25rem 1rem 2rem; display: grid; gap: 1rem;">
 	<a href="/contractor/orders" style="color: #0969da; font-size: 0.9rem; text-decoration: none;"
 		>← Orders</a
 	>
 
-	<!-- Header -->
+	<!-- Header: customer name leads, project is the subtitle -->
 	<header style="display: flex; justify-content: space-between; gap: 1rem; align-items: start;">
-		<div style="display: grid; gap: 0.25rem;">
-			<h1 style="margin: 0; font-size: 1.4rem;">{order.projectName ?? 'Untitled project'}</h1>
-			{#if order.projectType}<span style="color: #57606a;">{order.projectType}</span>{/if}
+		<div style="display: grid; gap: 0.4rem;">
+			<h1 style="margin: 0; font-size: 1.4rem;">{order.customerName}</h1>
+			<span style="color: #57606a; font-weight: 600;"
+				>{order.projectName ?? 'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)} · {typeSuffix(
+						order.projectName,
+						order.projectType
+					)}{/if}</span
+			>
 		</div>
 		<span
 			style="font-size: 0.82rem; font-weight: 600; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.2rem 0.7rem;"
@@ -67,9 +92,24 @@
 	<section style={card}>
 		<h2 style={sectionTitle}>Customer</h2>
 		{#if customer}
+			<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+				<a
+					href={`mailto:${customer.email}`}
+					style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; text-decoration: none; font-weight: 500;"
+					>✉ Email</a
+				>
+				{#if customer.phone}
+					<a
+						href={telHref(customer.phone)}
+						style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none;"
+						>📞 Call</a
+					>
+				{/if}
+			</div>
 			<div style="display: grid; gap: 0.3rem; font-size: 0.95rem;">
-				<strong>{customer.name}</strong>
-				<div><span style="color: #57606a;">Email:</span> {customer.email}</div>
+				<div style="word-break: break-word;">
+					<span style="color: #57606a;">Email:</span> {customer.email}
+				</div>
 				{#if customer.phone}<div><span style="color: #57606a;">Phone:</span> {customer.phone}</div>{/if}
 				{#if customer.address}<div>
 						<span style="color: #57606a;">Address:</span> {customer.address}
@@ -306,4 +346,5 @@
 			>
 		{/if}
 	</section>
+</div>
 </div>

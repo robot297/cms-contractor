@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
 	import { customerContactSchema, formatPhone } from '$lib/crm';
@@ -18,6 +19,12 @@
 	let cameraCustomerId: string | null = $state(null);
 	let cameraError = $state('');
 	let cameraStream: MediaStream | undefined;
+	// 'choose' shows the options first; 'camera' is the live capture view. The
+	// camera is only started when the user explicitly picks "Take photo".
+	let cameraMode: 'choose' | 'camera' = $state('choose');
+	const cameraCustomer = $derived(
+		cameraCustomerId ? (data.customers.find((c) => c.id === cameraCustomerId) ?? null) : null
+	);
 
 	/** Downscale a source (image or video frame) to a small JPEG data URL. */
 	function toAvatarDataUrl(source: HTMLImageElement | HTMLVideoElement): string | null {
@@ -81,10 +88,18 @@
 		if (dataUrl) await saveAvatar(customerId, dataUrl);
 	}
 
-	async function openCamera(customerId: string) {
+	/** Open the photo modal on its chooser — does NOT turn the camera on yet. */
+	function openCamera(customerId: string) {
 		cameraCustomerId = customerId;
 		cameraError = '';
+		cameraMode = 'choose';
 		cameraDialog?.showModal();
+	}
+
+	/** Explicitly start the live camera once the user chooses "Take photo". */
+	async function startCamera() {
+		cameraError = '';
+		cameraMode = 'camera';
 		if (!navigator.mediaDevices?.getUserMedia) {
 			cameraError = 'This device has no camera access. Upload a photo instead.';
 			return;
@@ -94,6 +109,7 @@
 				video: { facingMode: 'environment' },
 				audio: false
 			});
+			await tick(); // let the <video> render before attaching the stream
 			if (cameraVideo) cameraVideo.srcObject = cameraStream;
 		} catch {
 			cameraError = 'Camera permission was denied or unavailable. Upload a photo instead.';
@@ -108,7 +124,30 @@
 
 	function closeCamera() {
 		stopCamera();
+		cameraMode = 'choose';
 		cameraDialog?.close();
+	}
+
+	/** Clear a customer's photo back to the initials placeholder. */
+	async function removeAvatar(customerId: string) {
+		savingAvatarId = customerId;
+		try {
+			const body = new FormData();
+			body.set('id', customerId);
+			body.set('avatar', '');
+			const res = await fetch('?/setAvatar', {
+				method: 'POST',
+				headers: { 'x-sveltekit-action': 'true' },
+				body
+			});
+			if (!res.ok) throw new Error('Remove failed');
+			closeCamera();
+			await invalidateAll();
+		} catch {
+			alert('Sorry — that photo could not be removed.');
+		} finally {
+			savingAvatarId = null;
+		}
 	}
 
 	async function capturePhoto() {
@@ -126,6 +165,12 @@
 	// --- Per-card interaction ---------------------------------------------
 	let editingId: string | null = $state(null);
 	let confirmingArchiveId: string | null = $state(null);
+	// Which contact row is expanded to show full details + quick actions.
+	let expandedId: string | null = $state(null);
+	function toggleExpanded(id: string) {
+		expandedId = expandedId === id ? null : id;
+		confirmingArchiveId = null;
+	}
 
 	// --- Live search (debounced) + suggestions ----------------------------
 	let query = $state('');
@@ -157,6 +202,50 @@
 		return out.filter((n) => n.toLowerCase() !== raw);
 	});
 
+	// --- Alphabetical grouping + A–Z jump rail ----------------------------
+	const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
+	function letterOf(name: string): string {
+		const ch = name.trim().charAt(0).toUpperCase();
+		return /[A-Z]/.test(ch) ? ch : '#';
+	}
+	const groups = $derived.by(() => {
+		const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+		const map = new Map<string, typeof data.customers>();
+		for (const c of sorted) {
+			const letter = letterOf(c.name);
+			const bucket = map.get(letter);
+			if (bucket) bucket.push(c);
+			else map.set(letter, [c]);
+		}
+		return [...map.entries()]
+			.sort((a, b) => a[0].localeCompare(b[0]))
+			.map(([letter, items]) => ({ letter, items }));
+	});
+	const presentLetters = $derived(new Set(groups.map((g) => g.letter)));
+	function jumpTo(letter: string) {
+		document.getElementById(`sec-${letter}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+	// Dock-style magnification: the hovered letter is largest, neighbours taper off.
+	let railHover: number | null = $state(null);
+	function railScale(i: number): number {
+		if (railHover === null) return 1;
+		const d = Math.abs(i - railHover);
+		if (d === 0) return 2;
+		if (d === 1) return 1.6;
+		if (d === 2) return 1.3;
+		if (d === 3) return 1.12;
+		return 1;
+	}
+	// Push neighbours away from the hovered letter so the enlarged glyphs don't
+	// collide — the dock "spread" that makes the magnified letter easy to hit.
+	function railShift(i: number): number {
+		if (railHover === null) return 0;
+		const d = Math.abs(i - railHover);
+		if (d === 0) return 0;
+		const push = d === 1 ? 9 : d === 2 ? 15 : d === 3 ? 18 : 19;
+		return Math.sign(i - railHover) * push;
+	}
+
 	function liveFormatPhone(e: Event & { currentTarget: HTMLInputElement }) {
 		e.currentTarget.value = formatPhone(e.currentTarget.value);
 	}
@@ -176,39 +265,61 @@
 
 	const fieldStyle =
 		'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
+	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 </script>
 
 <svelte:head>
 	<title>Customer directory</title>
 </svelte:head>
 
-<div style="max-width: 860px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem;">
-	<h1 style="margin: 0;">Customers</h1>
-
-	<div
-		style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: space-between; align-items: center;"
+<div style="background: #f6f8fa; min-height: 100%;">
+<div style="max-width: 860px; margin: 0 auto; padding: 1.25rem 1rem 2rem; display: grid; gap: 1rem;">
+	<header
+		style="display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap;"
 	>
-		<!-- Live search -->
+		<h1 style="margin: 0;">Customers</h1>
+		<span style="font-size: 0.85rem; color: #57606a;"
+			>{data.customers.length} {data.customers.length === 1 ? 'contact' : 'contacts'}</span
+		>
+	</header>
+
+	<!-- Search + add, pinned to the top of the directory while scrolling -->
+	<div
+		style="position: sticky; top: 0; z-index: 20; background: #f6f8fa; padding: 0.4rem 0 0.6rem; display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;"
+	>
 		<div style="position: relative; flex: 1; min-width: 220px;">
+			<span
+				style="position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); color: #8c959f; font-size: 0.95rem; pointer-events: none;"
+				>🔍</span
+			>
 			<input
 				value={query}
 				oninput={(e) => (query = e.currentTarget.value)}
 				onfocus={() => (searchFocused = true)}
 				onblur={() => setTimeout(() => (searchFocused = false), 150)}
 				placeholder="Search by name or email"
-				style="width: 100%; box-sizing: border-box; padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de;"
+				style="width: 100%; box-sizing: border-box; padding: 0.6rem 2.2rem 0.6rem 2.4rem; border-radius: 999px; border: 1px solid #d0d7de; background: #fff; font-size: 1rem; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05);"
 			/>
+			{#if query}
+				<button
+					type="button"
+					aria-label="Clear search"
+					onmousedown={() => (query = '')}
+					style="position: absolute; right: 0.6rem; top: 50%; transform: translateY(-50%); border: none; background: none; color: #8c959f; cursor: pointer; font-size: 0.95rem; line-height: 1; padding: 0.2rem;"
+					>✕</button
+				>
+			{/if}
 			{#if searchFocused && suggestions.length > 0}
 				<ul
-					style="position: absolute; z-index: 10; left: 0; right: 0; margin: 0.25rem 0 0; padding: 0.25rem; list-style: none; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);"
+					style="position: absolute; z-index: 30; left: 0; right: 0; margin: 0.25rem 0 0; padding: 0.25rem; list-style: none; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);"
 				>
 					{#each suggestions as name (name)}
 						<li>
 							<button
 								type="button"
 								onmousedown={() => (query = name)}
-								style="width: 100%; text-align: left; padding: 0.45rem 0.6rem; border: none; background: none; border-radius: 6px; cursor: pointer;"
-								>{name}</button
+								style="width: 100%; text-align: left; padding: 0.45rem 0.6rem; border: none; background: none; border-radius: 8px; cursor: pointer;"
+								>🔍&nbsp;&nbsp;{name}</button
 							>
 						</li>
 					{/each}
@@ -221,245 +332,338 @@
 				addError = '';
 				addDialog?.showModal();
 			}}
-			style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600;"
+			style="padding: 0.6rem 1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600; white-space: nowrap;"
 			>＋ Add customer</button
 		>
 	</div>
 
-	<!-- Directory -->
-	<section style="display: grid; gap: 0.75rem;">
-		{#if filtered.length === 0}
-			<p style="color: #57606a;">
-				{#if term !== ''}
-					No customers match “{debounced}”.
-				{:else}
-					No customers yet. Add your first customer with the button above.
-				{/if}
-			</p>
-		{/if}
-
-		{#each filtered as c (c.id)}
-			<article
-				style="border: 1px solid #d0d7de; border-radius: 16px; padding: 1rem; display: grid; gap: 0.6rem;"
-			>
-				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: center;">
-					<div style="display: flex; gap: 0.65rem; align-items: center; min-width: 0;">
-						<button
-							type="button"
-							onclick={() => openCamera(c.id)}
-							title="Take or upload a photo"
-							aria-label="Set customer photo"
-							style="border: none; background: none; padding: 0; cursor: pointer; flex-shrink: 0; position: relative;"
-						>
-							{#if c.avatar}
-								<img
-									src={c.avatar}
-									alt={c.name}
-									style="width: 44px; height: 44px; border-radius: 999px; object-fit: cover; border: 1px solid #d0d7de; display: block; opacity: {savingAvatarId ===
-									c.id
-										? '0.5'
-										: '1'};"
-								/>
-							{:else}
-								<span
-									style="width: 44px; height: 44px; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: #57606a; display: flex; align-items: center; justify-content: center; font-weight: 600; opacity: {savingAvatarId ===
-									c.id
-										? '0.5'
-										: '1'};">{c.name.charAt(0).toUpperCase()}</span
-								>
-							{/if}
-							<span
-								style="position: absolute; right: -2px; bottom: -2px; width: 18px; height: 18px; border-radius: 999px; background: #0969da; color: #fff; font-size: 0.6rem; display: flex; align-items: center; justify-content: center; border: 1px solid #fff;"
-								>📷</span
-							>
-						</button>
-						<strong style="overflow: hidden; text-overflow: ellipsis;">{c.name}</strong>
-					</div>
-					<div style="display: flex; gap: 0.5rem; align-items: center;">
-						{#if isLinked(c)}
-							<span
-								style="font-size: 0.75rem; color: #1a7f37; border: 1px solid #1a7f37; border-radius: 999px; padding: 0.05rem 0.5rem;"
-								>Linked</span
-							>
-						{/if}
-						<button
-							type="button"
-							title="Archive customer"
-							aria-label="Archive customer"
-							onclick={() => {
-								confirmingArchiveId = c.id;
-								if (editingId === c.id) editingId = null;
-							}}
-							style="border: none; background: none; cursor: pointer; font-size: 1rem; line-height: 1; color: #cf222e; padding: 0.2rem 0.35rem; border-radius: 6px;"
-							>🗑</button
-						>
-					</div>
-				</div>
-
-				{#if confirmingArchiveId === c.id}
-					<div
-						style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; background: #fff8f8; border: 1px solid #ffd7d5; border-radius: 10px; padding: 0.5rem 0.7rem;"
-					>
-						<span style="font-size: 0.85rem; color: #57606a; flex: 1; min-width: 160px;"
-							>Archive {c.name}? They’ll be hidden, not deleted.</span
-						>
-						<form
-							method="POST"
-							action="?/archiveCustomer"
-							use:enhance={() =>
-								async ({ update }) => {
-									confirmingArchiveId = null;
-									await update();
-								}}
-						>
-							<input type="hidden" name="id" value={c.id} />
-							<button
-								type="submit"
-								style="padding: 0.35rem 0.75rem; border-radius: 999px; border: 1px solid #cf222e; background: #cf222e; color: #fff; cursor: pointer;"
-								>Yes, archive</button
-							>
-						</form>
-						<button
-							type="button"
-							onclick={() => (confirmingArchiveId = null)}
-							style="padding: 0.35rem 0.75rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-							>Cancel</button
-						>
-					</div>
-				{/if}
-
-				{#if c.tags.length > 0}
-					<div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-						{#each c.tags as tag (tag)}
-							<span
-								style="font-size: 0.75rem; background: #ddf4ff; color: #0969da; border-radius: 999px; padding: 0.1rem 0.55rem;"
-								>{tag}</span
-							>
-						{/each}
-					</div>
-				{/if}
-
-				{#if editingId === c.id}
-					<!-- Edit mode -->
-					<form
-						method="POST"
-						action="?/editCustomer"
-						use:enhance={({ formData, cancel }) => {
-							const err = firstError(formData);
-							if (err) {
-								addError = '';
-								alert(err);
-								cancel();
-								return;
-							}
-							return async ({ result, update }) => {
-								await update();
-								if (result.type === 'success') editingId = null;
-							};
-						}}
-						style="display: grid; gap: 0.5rem;"
-					>
-						<input type="hidden" name="id" value={c.id} />
-						<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-							<input
-								name="name"
-								value={c.name}
-								required
-								style="flex: 1; min-width: 120px; {fieldStyle}"
-							/>
-							<input
-								name="email"
-								type="email"
-								value={c.email}
-								readonly={isLinked(c)}
-								title={isLinked(c) ? 'Email is locked once the customer has joined' : ''}
-								style="flex: 1; min-width: 140px; {fieldStyle} background: {isLinked(c)
-									? '#f6f8fa'
-									: '#fff'};"
-							/>
-						</div>
-						<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-							<input
-								name="phone"
-								type="tel"
-								value={c.phone ?? ''}
-								oninput={liveFormatPhone}
-								placeholder="Phone"
-								style="flex: 1; min-width: 120px; {fieldStyle}"
-							/>
-							<input
-								name="address"
-								value={c.address ?? ''}
-								placeholder="Address"
-								style="flex: 2; min-width: 160px; {fieldStyle}"
-							/>
-						</div>
-						<input
-							name="tags"
-							value={c.tags.join(', ')}
-							placeholder="Tags (comma-separated)"
-							style={fieldStyle}
-						/>
-						<textarea
-							name="notes"
-							rows="2"
-							placeholder="Project details / notes"
-							style="{fieldStyle} resize: vertical;">{c.notes ?? ''}</textarea
-						>
-						{#if form?.action === 'edit' && 'id' in form && form.id === c.id && form.message}
-							<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">{form.message}</p>
-						{/if}
-						<div style="display: flex; gap: 0.5rem;">
-							<button
-								type="submit"
-								style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer;"
-								>Save</button
-							>
-							<button
-								type="button"
-								onclick={() => (editingId = null)}
-								style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-								>Cancel</button
-							>
-						</div>
-					</form>
-				{:else}
-					<!-- Read-only view -->
-					<div style="display: grid; gap: 0.2rem; font-size: 0.9rem; color: #57606a;">
-						<div>{c.email}</div>
-						{#if c.phone}<div>{c.phone}</div>{/if}
-						{#if c.address}<div>{c.address}</div>{/if}
-					</div>
-					{#if c.notes}
-						<p style="margin: 0; font-size: 0.9rem; white-space: pre-wrap;">{c.notes}</p>
+	<!-- Directory: grouped list on the left, A–Z jump rail on the right -->
+	<div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+		<section style="flex: 1; min-width: 0; display: grid; gap: 1.25rem;">
+			{#if filtered.length === 0}
+				<p style="color: #57606a;">
+					{#if term !== ''}
+						No customers match “{debounced}”.
+					{:else}
+						No customers yet. Add your first customer with the button above.
 					{/if}
+				</p>
+			{/if}
 
-					<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-						<button
-							type="button"
-							onclick={() => {
-								editingId = c.id;
-								confirmingArchiveId = null;
-							}}
-							style="padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #0969da; color: #0969da; background: none; cursor: pointer;"
-							>Edit</button
+			{#each groups as group (group.letter)}
+				<div id={`sec-${group.letter}`} style="display: grid; gap: 0.5rem; scroll-margin-top: 84px;">
+					<h2
+						style="position: sticky; top: 52px; z-index: 5; margin: 0; padding: 0.15rem 0.1rem; font-size: 0.85rem; font-weight: 800; color: #0969da; background: #f6f8fa; letter-spacing: 0.03em;"
+					>
+						{group.letter}
+					</h2>
+
+					{#each group.items as c (c.id)}
+						{@const expanded = expandedId === c.id}
+						<article
+							style="background: #fff; border: 1px solid #e2e6ea; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 4px 12px rgba(27, 31, 36, 0.05);"
 						>
-
-						{#if !isLinked(c)}
-							<form method="POST" action="?/sendInvite" use:enhance>
-								<input type="hidden" name="id" value={c.id} />
+							<!-- Contact row -->
+							<div style="display: flex; align-items: center; gap: 0.7rem; padding: 0.65rem 0.8rem;">
 								<button
-									type="submit"
-									style="padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-									>Send invite</button
+									type="button"
+									onclick={() => openCamera(c.id)}
+									title="Take or upload a photo"
+									aria-label="Set customer photo"
+									style="border: none; background: none; padding: 0; cursor: pointer; flex-shrink: 0; position: relative;"
 								>
-							</form>
-						{/if}
-					</div>
-				{/if}
-			</article>
-		{/each}
-	</section>
+									{#if c.avatar}
+										<img
+											src={c.avatar}
+											alt={c.name}
+											style="width: 46px; height: 46px; border-radius: 999px; object-fit: cover; border: 1px solid #d0d7de; display: block; opacity: {savingAvatarId ===
+											c.id
+												? '0.5'
+												: '1'};"
+										/>
+									{:else}
+										<span
+											style="width: 46px; height: 46px; border-radius: 999px; border: 1px solid #d0d7de; background: linear-gradient(135deg, #e7edf3, #f6f8fa); color: #445; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.1rem; opacity: {savingAvatarId ===
+											c.id
+												? '0.5'
+												: '1'};">{c.name.charAt(0).toUpperCase()}</span
+										>
+									{/if}
+									<span
+										style="position: absolute; right: -2px; bottom: -2px; width: 18px; height: 18px; border-radius: 999px; background: #0969da; color: #fff; font-size: 0.6rem; display: flex; align-items: center; justify-content: center; border: 1px solid #fff;"
+										>📷</span
+									>
+								</button>
+
+								<button
+									type="button"
+									onclick={() => toggleExpanded(c.id)}
+									aria-expanded={expanded}
+									style="flex: 1; min-width: 0; text-align: left; border: none; background: none; cursor: pointer; padding: 0; display: grid; gap: 0.1rem;"
+								>
+									<span
+										style="font-weight: 700; font-size: 1rem; color: #1f2328; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+										>{c.name}</span
+									>
+									<span
+										style="font-size: 0.82rem; color: #8c959f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+										>{c.phone ?? c.email}</span
+									>
+								</button>
+
+								{#if isLinked(c)}
+									<span
+										title="Customer has joined"
+										style="font-size: 0.72rem; color: #1a7f37; background: #e6f4ea; border: 1px solid #4ea866; border-radius: 999px; padding: 0.05rem 0.5rem; white-space: nowrap;"
+										>Linked</span
+									>
+								{/if}
+								<span
+									style="color: #8c959f; font-size: 0.8rem; flex-shrink: 0; transition: transform 0.15s; transform: rotate({expanded
+										? 90
+										: 0}deg);">▸</span
+								>
+							</div>
+
+							{#if expanded}
+								<div
+									style="border-top: 1px solid #eef1f4; padding: 0.8rem; display: grid; gap: 0.75rem;"
+								>
+									{#if editingId === c.id}
+										<!-- Edit mode -->
+										<form
+											method="POST"
+											action="?/editCustomer"
+											use:enhance={({ formData, cancel }) => {
+												const err = firstError(formData);
+												if (err) {
+													addError = '';
+													alert(err);
+													cancel();
+													return;
+												}
+												return async ({ result, update }) => {
+													await update();
+													if (result.type === 'success') editingId = null;
+												};
+											}}
+											style="display: grid; gap: 0.5rem;"
+										>
+											<input type="hidden" name="id" value={c.id} />
+											<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+												<input
+													name="name"
+													value={c.name}
+													required
+													style="flex: 1; min-width: 120px; {fieldStyle}"
+												/>
+												<input
+													name="email"
+													type="email"
+													value={c.email}
+													readonly={isLinked(c)}
+													title={isLinked(c) ? 'Email is locked once the customer has joined' : ''}
+													style="flex: 1; min-width: 140px; {fieldStyle} background: {isLinked(c)
+														? '#f6f8fa'
+														: '#fff'};"
+												/>
+											</div>
+											<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+												<input
+													name="phone"
+													type="tel"
+													value={c.phone ?? ''}
+													oninput={liveFormatPhone}
+													placeholder="Phone"
+													style="flex: 1; min-width: 120px; {fieldStyle}"
+												/>
+												<input
+													name="address"
+													value={c.address ?? ''}
+													placeholder="Address"
+													style="flex: 2; min-width: 160px; {fieldStyle}"
+												/>
+											</div>
+											<input
+												name="tags"
+												value={c.tags.join(', ')}
+												placeholder="Tags (comma-separated)"
+												style={fieldStyle}
+											/>
+											<textarea
+												name="notes"
+												rows="2"
+												placeholder="Project details / notes"
+												style="{fieldStyle} resize: vertical;">{c.notes ?? ''}</textarea
+											>
+											{#if form?.action === 'edit' && 'id' in form && form.id === c.id && form.message}
+												<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">{form.message}</p>
+											{/if}
+											<div style="display: flex; gap: 0.5rem;">
+												<button
+													type="submit"
+													style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer;"
+													>Save</button
+												>
+												<button
+													type="button"
+													onclick={() => (editingId = null)}
+													style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+													>Cancel</button
+												>
+											</div>
+										</form>
+									{:else}
+										<!-- Quick contact actions -->
+										<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+											<a
+												href={`mailto:${c.email}`}
+												style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; text-decoration: none; font-weight: 500; font-size: 0.9rem;"
+												>✉ Email</a
+											>
+											{#if c.phone}
+												<a
+													href={telHref(c.phone)}
+													style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none; font-size: 0.9rem;"
+													>📞 Call</a
+												>
+											{/if}
+										</div>
+
+										<!-- Contact details -->
+										<div style="display: grid; gap: 0.3rem; font-size: 0.9rem;">
+											<div style="word-break: break-word;">
+												<span style="color: #8c959f;">Email</span> · {c.email}
+											</div>
+											{#if c.phone}
+												<div><span style="color: #8c959f;">Phone</span> · {c.phone}</div>
+											{/if}
+											{#if c.address}
+												<div style="word-break: break-word;">
+													<span style="color: #8c959f;">Address</span> · {c.address}
+												</div>
+											{/if}
+										</div>
+
+										{#if c.tags.length > 0}
+											<div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+												{#each c.tags as tag (tag)}
+													<span
+														style="font-size: 0.75rem; background: #ddf4ff; color: #0969da; border-radius: 999px; padding: 0.1rem 0.55rem;"
+														>{tag}</span
+													>
+												{/each}
+											</div>
+										{/if}
+
+										{#if c.notes}
+											<p
+												style="margin: 0; font-size: 0.9rem; color: #57606a; white-space: pre-wrap;"
+											>
+												{c.notes}
+											</p>
+										{/if}
+
+										{#if confirmingArchiveId === c.id}
+											<div
+												style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; background: #fff8f8; border: 1px solid #ffd7d5; border-radius: 10px; padding: 0.5rem 0.7rem;"
+											>
+												<span style="font-size: 0.85rem; color: #57606a; flex: 1; min-width: 160px;"
+													>Archive {c.name}? They’ll be hidden, not deleted.</span
+												>
+												<form
+													method="POST"
+													action="?/archiveCustomer"
+													use:enhance={() =>
+														async ({ update }) => {
+															confirmingArchiveId = null;
+															await update();
+														}}
+												>
+													<input type="hidden" name="id" value={c.id} />
+													<button
+														type="submit"
+														style="padding: 0.35rem 0.75rem; border-radius: 999px; border: 1px solid #cf222e; background: #cf222e; color: #fff; cursor: pointer;"
+														>Yes, archive</button
+													>
+												</form>
+												<button
+													type="button"
+													onclick={() => (confirmingArchiveId = null)}
+													style="padding: 0.35rem 0.75rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+													>Cancel</button
+												>
+											</div>
+										{:else}
+											<!-- Manage actions -->
+											<div
+												style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; border-top: 1px solid #eef1f4; padding-top: 0.7rem;"
+											>
+												<button
+													type="button"
+													onclick={() => {
+														editingId = c.id;
+														confirmingArchiveId = null;
+													}}
+													style="padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #0969da; color: #0969da; background: none; cursor: pointer; font-size: 0.9rem;"
+													>Edit</button
+												>
+
+												{#if !isLinked(c)}
+													<form method="POST" action="?/sendInvite" use:enhance>
+														<input type="hidden" name="id" value={c.id} />
+														<button
+															type="submit"
+															style="padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.9rem;"
+															>Send invite</button
+														>
+													</form>
+												{/if}
+
+												<button
+													type="button"
+													title="Archive customer"
+													aria-label="Archive customer"
+													onclick={() => (confirmingArchiveId = c.id)}
+													style="margin-left: auto; padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #ffd7d5; color: #cf222e; background: none; cursor: pointer; font-size: 0.9rem;"
+													>🗑 Archive</button
+												>
+											</div>
+										{/if}
+									{/if}
+								</div>
+							{/if}
+						</article>
+					{/each}
+				</div>
+			{/each}
+		</section>
+
+		<!-- A–Z jump rail with dock-style magnification -->
+		{#if data.customers.length > 0}
+			<nav
+				aria-label="Jump to letter"
+				onmouseleave={() => (railHover = null)}
+				style="position: sticky; top: 84px; display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; padding: 0.25rem 0.35rem;"
+			>
+				{#each ALPHABET as letter, i (letter)}
+					{@const present = presentLetters.has(letter)}
+					<button
+						type="button"
+						disabled={!present}
+						onclick={() => jumpTo(letter)}
+						onmouseenter={() => (railHover = i)}
+						style="border: none; background: none; font-size: 0.72rem; font-weight: 700; line-height: 1.05; padding: 0.1rem 0.35rem; border-radius: 4px; cursor: {present
+							? 'pointer'
+							: 'default'}; color: {present
+							? '#0969da'
+							: '#c9d1d9'}; transform: translateY({railShift(i)}px) scale({railScale(i)}); transform-origin: center center; transition: transform 0.12s ease-out; will-change: transform;">{letter}</button
+					>
+				{/each}
+			</nav>
+		{/if}
+	</div>
+</div>
 </div>
 
 <!-- Add-customer modal -->
@@ -558,9 +762,11 @@
 	onclose={stopCamera}
 	style="border: none; border-radius: 16px; padding: 0; max-width: 460px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
 >
-	<div style="display: grid; gap: 0.75rem; padding: 1.25rem;">
+	<div style="display: grid; gap: 0.9rem; padding: 1.25rem;">
 		<div style="display: flex; justify-content: space-between; align-items: center;">
-			<h2 style="margin: 0; font-size: 1.1rem;">Customer photo</h2>
+			<h2 style="margin: 0; font-size: 1.1rem;">
+				{cameraCustomer ? `${cameraCustomer.name}’s photo` : 'Customer photo'}
+			</h2>
 			<button
 				type="button"
 				onclick={closeCamera}
@@ -569,38 +775,97 @@
 			>
 		</div>
 
-		{#if cameraError}
-			<p style="margin: 0; color: #cf222e; font-size: 0.9rem;">{cameraError}</p>
-		{:else}
-			<video
-				bind:this={cameraVideo}
-				autoplay
-				playsinline
-				muted
-				style="width: 100%; max-height: 60vh; border-radius: 12px; background: #000;"
-			></video>
-		{/if}
+		{#if cameraMode === 'choose'}
+			{@const choiceBtn =
+				'box-sizing: border-box; width: 100%; display: block; text-align: center; padding: 0.65rem 1rem; border-radius: 999px; font-size: 1rem; font-weight: 600; line-height: 1.2; cursor: pointer;'}
+			<!-- Chooser: preview + options, no camera activity yet -->
+			<div style="display: flex; flex-direction: column; align-items: center; gap: 0.9rem;">
+				{#if cameraCustomer?.avatar}
+					<img
+						src={cameraCustomer.avatar}
+						alt={cameraCustomer.name}
+						style="width: 96px; height: 96px; border-radius: 999px; object-fit: cover; border: 1px solid #d0d7de;"
+					/>
+				{:else}
+					<span
+						style="width: 96px; height: 96px; border-radius: 999px; border: 1px solid #d0d7de; background: linear-gradient(135deg, #e7edf3, #f6f8fa); color: #445; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 2rem;"
+						>{cameraCustomer?.name.charAt(0).toUpperCase() ?? '?'}</span
+					>
+				{/if}
 
-		<div style="display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap;">
-			<label
-				style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-			>
-				Upload instead
-				<input
-					type="file"
-					accept="image/*"
-					onchange={(e) => cameraCustomerId && onAvatarPick(cameraCustomerId, e)}
-					style="display: none;"
-				/>
-			</label>
-			{#if !cameraError}
+				<div style="display: grid; gap: 0.5rem; width: 100%;">
+					<button
+						type="button"
+						onclick={startCamera}
+						style="{choiceBtn} border: 1px solid #0969da; background: #0969da; color: #fff;"
+						>📸 Take photo</button
+					>
+					<label style="{choiceBtn} border: 1px solid #d0d7de; background: #f6f8fa;">
+						⬆ Upload photo
+						<input
+							type="file"
+							accept="image/*"
+							onchange={(e) => cameraCustomerId && onAvatarPick(cameraCustomerId, e)}
+							style="display: none;"
+						/>
+					</label>
+					{#if cameraCustomer?.avatar}
+						<button
+							type="button"
+							onclick={() => cameraCustomerId && removeAvatar(cameraCustomerId)}
+							style="{choiceBtn} border: 1px solid #ffd7d5; background: none; color: #cf222e;"
+							>Remove photo</button
+						>
+					{/if}
+				</div>
+			</div>
+		{:else}
+			<!-- Live camera view -->
+			{#if cameraError}
+				<p style="margin: 0; color: #cf222e; font-size: 0.9rem;">{cameraError}</p>
+			{:else}
+				<video
+					bind:this={cameraVideo}
+					autoplay
+					playsinline
+					muted
+					style="width: 100%; max-height: 60vh; border-radius: 12px; background: #000;"
+				></video>
+			{/if}
+
+			<div style="display: flex; gap: 0.5rem; justify-content: space-between; flex-wrap: wrap;">
 				<button
 					type="button"
-					onclick={capturePhoto}
-					style="padding: 0.55rem 1.1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600;"
-					>📸 Capture</button
+					onclick={() => {
+						stopCamera();
+						cameraError = '';
+						cameraMode = 'choose';
+					}}
+					style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+					>← Back</button
 				>
-			{/if}
-		</div>
+				<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+					<label
+						style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+					>
+						Upload instead
+						<input
+							type="file"
+							accept="image/*"
+							onchange={(e) => cameraCustomerId && onAvatarPick(cameraCustomerId, e)}
+							style="display: none;"
+						/>
+					</label>
+					{#if !cameraError}
+						<button
+							type="button"
+							onclick={capturePhoto}
+							style="padding: 0.55rem 1.1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600;"
+							>📸 Capture</button
+						>
+					{/if}
+				</div>
+			</div>
+		{/if}
 	</div>
 </dialog>
