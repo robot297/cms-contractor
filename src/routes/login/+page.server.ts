@@ -1,14 +1,33 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { APIError } from 'better-auth/api';
 import { auth } from '$lib/server/auth';
+import { isDemoEnabled, prepareDemoSession } from '$lib/server/demo.server';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) redirect(302, '/');
-	return {};
+	return { demoEnabled: isDemoEnabled() };
 };
 
 export const actions: Actions = {
+	demo: async (event) => {
+		if (!isDemoEnabled()) return fail(403, { mode: 'signIn', message: 'Demo mode is disabled.' });
+		try {
+			// Provision + re-seed the shared demo contractor, then sign in as them
+			// exactly like a normal login so every guard and query runs for real.
+			const creds = await prepareDemoSession();
+			await auth.api.signInEmail({ body: creds, headers: event.request.headers });
+		} catch (error) {
+			if (error instanceof APIError) return fail(400, { mode: 'signIn', message: error.message });
+			console.error('[login] demo entry failed:', error);
+			return fail(500, {
+				mode: 'signIn',
+				message: `Demo unavailable: ${(error as Error)?.message ?? error}`
+			});
+		}
+		redirect(302, '/');
+	},
+
 	signIn: async (event) => {
 		const form = await event.request.formData();
 		const email = form.get('email')?.toString() ?? '';
