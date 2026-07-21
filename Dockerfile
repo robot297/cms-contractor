@@ -31,4 +31,5 @@ COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/scripts ./scripts
 EXPOSE 3000
 # Migrate → (optional seed) → start. See scripts/docker-entrypoint.sh.
-ENTRYPOINT ["sh", "scripts/docker-entrypoint.sh"]
+# Absolute path so the entrypoint is found regardless of the launch CWD.
+ENTRYPOINT ["sh", "/app/scripts/docker-entrypoint.sh"]
