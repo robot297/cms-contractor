@@ -5,6 +5,7 @@ import {
 	index,
 	integer,
 	pgTable,
+	primaryKey,
 	text,
 	timestamp,
 	uniqueIndex
@@ -58,6 +59,56 @@ export const customer = pgTable(
 		uniqueIndex('customer_contractor_email_idx').on(table.contractorId, table.email),
 		index('customer_contractorId_idx').on(table.contractorId),
 		index('customer_userId_idx').on(table.userId)
+	]
+);
+
+// A first-class, contractor-scoped subcontractor (trade partner) record. Mirrors
+// the `customer` record↔User↔Invite spine (see ADR-0003): it exists independently
+// of any order and optionally links to a login (`userId`) once an invite is
+// accepted. The `tier` gates portal visibility + write access across all of this
+// sub's order assignments.
+export const subcontractor = pgTable(
+	'subcontractor',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		contractorId: text('contractor_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		email: text('email').notNull(),
+		phone: text('phone'),
+		address: text('address'),
+		// The company/crew the sub trades under, if any.
+		company: text('company'),
+		// The trade/specialty (e.g. Electrical, Framing); free-form for the MVP.
+		trade: text('trade'),
+		// Access tier: 'trusted' (full order + write) | 'guest' (redacted PII, read-only).
+		// New subs default to least privilege.
+		tier: text('tier').notNull().default('guest'),
+		// License / insurance are stored for reference only — no compliance alerts (v1).
+		licenseNumber: text('license_number'),
+		insuranceCarrier: text('insurance_carrier'),
+		insuranceExpiresAt: timestamp('insurance_expires_at'),
+		notes: text('notes'),
+		tags: text('tags').array().notNull().default([]),
+		avatar: text('avatar'),
+		// Set when an invited sub accepts and binds their login (by token).
+		userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+		// Soft-archive marker: archived subs drop out of the active roster.
+		archivedAt: timestamp('archived_at'),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+		updatedAt: timestamp('updated_at')
+			.defaultNow()
+			.$onUpdate(() => new Date())
+			.notNull()
+	},
+	(table) => [
+		// A contractor cannot hold two subcontractors with the same email.
+		uniqueIndex('subcontractor_contractor_email_idx').on(table.contractorId, table.email),
+		index('subcontractor_contractorId_idx').on(table.contractorId),
+		index('subcontractor_userId_idx').on(table.userId)
 	]
 );
 
@@ -158,6 +209,53 @@ export const customerInvite = pgTable(
 	]
 );
 
+// A parallel invite mechanism for subcontractors (ADR-0003), mirroring
+// `customer_invite` without touching it. Acceptance binds a login to the
+// subcontractor record by token (email fallback).
+export const subcontractorInvite = pgTable(
+	'subcontractor_invite',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		// The subcontractor this invite binds a login to on acceptance.
+		subcontractorId: text('subcontractor_id').references(() => subcontractor.id, {
+			onDelete: 'cascade'
+		}),
+		contractorId: text('contractor_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		subcontractorEmail: text('subcontractor_email').notNull(),
+		token: text('token').notNull().unique(),
+		status: text('status').notNull().default('pending'), // pending | revoked | used
+		expiresAt: timestamp('expires_at').notNull(),
+		createdAt: timestamp('created_at').defaultNow().notNull()
+	},
+	(table) => [
+		index('sub_invite_contractorId_idx').on(table.contractorId),
+		index('sub_invite_subcontractorId_idx').on(table.subcontractorId)
+	]
+);
+
+// Many-to-many assignment of subcontractors to orders. A sub's "work" is the set
+// of orders joined here; both sides cascade so history clears with either record.
+export const orderSubcontractor = pgTable(
+	'order_subcontractor',
+	{
+		orderId: text('order_id')
+			.notNull()
+			.references(() => order.id, { onDelete: 'cascade' }),
+		subcontractorId: text('subcontractor_id')
+			.notNull()
+			.references(() => subcontractor.id, { onDelete: 'cascade' }),
+		assignedAt: timestamp('assigned_at').defaultNow().notNull()
+	},
+	(table) => [
+		primaryKey({ columns: [table.orderId, table.subcontractorId] }),
+		index('order_subcontractor_subId_idx').on(table.subcontractorId)
+	]
+);
+
 // Files (photos, quotes, invoices) attached to an order. Bytes live in `data`;
 // size is stored separately so listings don't have to read the blob.
 export const attachment = pgTable(
@@ -194,7 +292,30 @@ export const orderRelations = relations(order, ({ one, many }) => ({
 	customer: one(customer, { fields: [order.customerId], references: [customer.id] }),
 	timeline: many(timelineEntry),
 	invites: many(customerInvite),
-	attachments: many(attachment)
+	attachments: many(attachment),
+	assignments: many(orderSubcontractor)
+}));
+
+export const subcontractorRelations = relations(subcontractor, ({ one, many }) => ({
+	contractor: one(user, { fields: [subcontractor.contractorId], references: [user.id] }),
+	account: one(user, { fields: [subcontractor.userId], references: [user.id] }),
+	invites: many(subcontractorInvite),
+	assignments: many(orderSubcontractor)
+}));
+
+export const subcontractorInviteRelations = relations(subcontractorInvite, ({ one }) => ({
+	subcontractor: one(subcontractor, {
+		fields: [subcontractorInvite.subcontractorId],
+		references: [subcontractor.id]
+	})
+}));
+
+export const orderSubcontractorRelations = relations(orderSubcontractor, ({ one }) => ({
+	order: one(order, { fields: [orderSubcontractor.orderId], references: [order.id] }),
+	subcontractor: one(subcontractor, {
+		fields: [orderSubcontractor.subcontractorId],
+		references: [subcontractor.id]
+	})
 }));
 
 export const attachmentRelations = relations(attachment, ({ one }) => ({

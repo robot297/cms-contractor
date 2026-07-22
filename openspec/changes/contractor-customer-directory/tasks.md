@@ -51,4 +51,4 @@
 
 - [x] 6.2 Type-check (`pnpm run check`, 0 errors) and unit suite (21 tests) pass
 - [x] 6.3 `openspec validate contractor-customer-directory` passes
-- [ ] 6.1 Drive each spec scenario end-to-end against a running app with a live Postgres (pending: no local DB run yet — apply migrations `0001`+`0002` first)
+- [x] 6.1 Drive each spec scenario end-to-end against a running app with a live Postgres (verified via demo-contractor session on `pnpm dev` + migrated `contractor-crm` DB: list/create/edit/soft-archive, duplicate + missing-email rejection, email-editable-while-unlinked, and notification delivery to a linked user on order update)

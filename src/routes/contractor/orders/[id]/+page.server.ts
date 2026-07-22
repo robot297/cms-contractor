@@ -17,11 +17,17 @@ import {
 	snoozeFollowUp,
 	updateOrderState
 } from '$lib/server/crm.server';
+import {
+	assignSubcontractor,
+	listOrderSubcontractors,
+	listSubcontractors,
+	unassignSubcontractor
+} from '$lib/server/subcontractor.server';
 import type { Actions, PageServerLoad } from './$types';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
-	if (locals.user.role !== 'contractor') redirect(302, '/customer');
+	if (locals.user.role !== 'contractor') redirect(302, '/');
 	return locals.user;
 }
 
@@ -29,7 +35,17 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	const user = requireContractor(locals);
 	const detail = await getOrderDetail(params.id, user.id);
 	if (!detail) error(404, 'Order not found');
-	return detail;
+	const [assignedSubs, roster] = await Promise.all([
+		listOrderSubcontractors(user.id, params.id),
+		listSubcontractors(user.id)
+	]);
+	const assignedIds = new Set(assignedSubs.map((s) => s.id));
+	return {
+		...detail,
+		assignedSubs,
+		// Subs not yet on this job, offered in the assign picker.
+		availableSubs: roster.filter((s) => !assignedIds.has(s.id))
+	};
 };
 
 export const actions: Actions = {
@@ -112,6 +128,24 @@ export const actions: Actions = {
 		const customerId = form.get('customerId')?.toString() ?? '';
 		if (!customerId) return fail(400, { message: 'A customer is required' });
 		await createInvite(user.id, customerId);
+		return { success: true };
+	},
+
+	assignSub: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const subcontractorId = form.get('subcontractorId')?.toString() ?? '';
+		if (!subcontractorId) return fail(400, { message: 'A subcontractor is required' });
+		await assignSubcontractor(user.id, params.id, subcontractorId);
+		return { success: true };
+	},
+
+	unassignSub: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const subcontractorId = form.get('subcontractorId')?.toString() ?? '';
+		if (!subcontractorId) return fail(400, { message: 'A subcontractor is required' });
+		await unassignSubcontractor(user.id, params.id, subcontractorId);
 		return { success: true };
 	},
 

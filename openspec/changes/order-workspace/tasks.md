@@ -40,6 +40,6 @@
 
 ## 7. Verification
 
-- [ ] 7.1 Drive each spec scenario end-to-end against a running app + live Postgres (pending: no local DB run)
+- [x] 7.1 Drive each spec scenario end-to-end against a running app + live Postgres (verified via demo-contractor session on `pnpm dev` + migrated `contractor-crm` DB: create order → valid state transition + note → set follow-up → delete-with-cascade (0 orphans), invalid state + invalid project-type rejected, customer-avatar set/clear/invalid-reject)
 - [x] 7.2 Type-check (0 errors), unit tests (21), eslint (0), and a production build all pass
 - [x] 7.3 `openspec validate order-workspace`

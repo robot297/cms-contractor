@@ -10,6 +10,8 @@
 	const onDashboard = $derived(path === '/contractor');
 	const onOrders = $derived(path.startsWith('/contractor/orders'));
 	const onCustomers = $derived(path.startsWith('/contractor/customers'));
+	const onSubcontractors = $derived(path.startsWith('/contractor/subcontractors'));
+	const onSupport = $derived(path.startsWith('/contractor/support'));
 
 	const year = new Date().getFullYear();
 
@@ -35,12 +37,30 @@
 				onclick={() => (menuOpen = !menuOpen)}
 			>
 				{#if menuOpen}
-					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+					<svg
+						width="22"
+						height="22"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.4"
+						stroke-linecap="round"
+						aria-hidden="true"
+					>
 						<line x1="6" y1="6" x2="18" y2="18" />
 						<line x1="18" y1="6" x2="6" y2="18" />
 					</svg>
 				{:else}
-					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+					<svg
+						width="22"
+						height="22"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.4"
+						stroke-linecap="round"
+						aria-hidden="true"
+					>
 						<line x1="4" y1="7" x2="20" y2="7" />
 						<line x1="4" y1="12" x2="20" y2="12" />
 						<line x1="4" y1="17" x2="20" y2="17" />
@@ -50,14 +70,22 @@
 
 			<div class="nav-collapse" class:open={menuOpen}>
 				<div class="nav-links">
-					<a href={resolve('/contractor')} class="navlink" class:is-active={onDashboard}>Dashboard</a>
+					<a href={resolve('/contractor')} class="navlink" class:is-active={onDashboard}
+						>Dashboard</a
+					>
 					<a href={resolve('/contractor/orders')} class="navlink" class:is-active={onOrders}
 						>Orders</a
 					>
+					<a href={resolve('/contractor/customers')} class="navlink" class:is-active={onCustomers}
+						>Customers</a
+					>
 					<a
-						href={resolve('/contractor/customers')}
+						href={resolve('/contractor/subcontractors')}
 						class="navlink"
-						class:is-active={onCustomers}>Customers</a
+						class:is-active={onSubcontractors}>Subcontractors</a
+					>
+					<a href={resolve('/contractor/support')} class="navlink" class:is-active={onSupport}
+						>Support</a
 					>
 				</div>
 				<div class="nav-right">
@@ -93,9 +121,12 @@
 <style>
 	.nav {
 		position: relative;
-		max-width: 860px;
-		margin: 0 auto;
-		padding: 0.7rem 1rem;
+		/* Full-width bar: brand hugs the left, user/sign-out the right, so the
+		   whole desktop width is used instead of a centered 860px column. The
+		   <nav> already fills its parent, so no explicit width — and border-box
+		   keeps the side padding inside the bar instead of overflowing it. */
+		box-sizing: border-box;
+		padding: 0.7rem 1.5rem;
 		display: flex;
 		align-items: center;
 		gap: 1rem;

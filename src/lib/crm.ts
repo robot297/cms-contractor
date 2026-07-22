@@ -24,7 +24,7 @@ export const QUICK_UPDATE_STATES: ContractorOrderState[] = CONTRACTOR_ORDER_STAT
 	(s) => s !== 'On Hold / Archived'
 );
 
-export type UserRole = 'contractor' | 'customer';
+export type UserRole = 'contractor' | 'customer' | 'subcontractor';
 
 export type TimelineKind = 'status' | 'invoice' | 'message' | 'milestone' | 'issue';
 
@@ -142,6 +142,174 @@ export function validateCustomerContact(input: {
 		field: field === 'email' || field === 'phone' ? field : 'name',
 		message: issue.message
 	};
+}
+
+// ------------------------------------------------------------ Subcontractors
+
+/**
+ * Access tier on a subcontractor record. `trusted` sees the full assigned order
+ * (customer contact + timeline) and may write; `guest` sees work details only,
+ * with customer PII redacted, read-only. New subs default to `guest` (least
+ * privilege).
+ */
+export const SUBCONTRACTOR_TIERS = ['trusted', 'guest'] as const;
+export type SubcontractorTier = (typeof SUBCONTRACTOR_TIERS)[number];
+
+export function isSubcontractorTier(value: string): value is SubcontractorTier {
+	return (SUBCONTRACTOR_TIERS as readonly string[]).includes(value);
+}
+
+/** Human label for a tier badge. */
+export function tierLabel(tier: SubcontractorTier): string {
+	return tier === 'trusted' ? 'Trusted Subcontractor' : 'Guest Contractor';
+}
+
+/**
+ * Suggested trades for the profile's trade/specialty field. The field is
+ * free-form (any string is accepted); this list only powers a datalist of
+ * common options in the UI.
+ */
+export const TRADES = [
+	'Electrical',
+	'Plumbing',
+	'Framing',
+	'Concrete',
+	'Roofing',
+	'HVAC',
+	'Drywall',
+	'Painting',
+	'Landscaping',
+	'Excavation'
+] as const;
+
+/** A subcontractor is "linked" once a login (userId) has bound to it via an invite. */
+export function isSubcontractorLinked(sub: { userId: string | null }): boolean {
+	return sub.userId != null;
+}
+
+export type SubcontractorContact = {
+	name: string;
+	email: string;
+	phone: string | null;
+	address: string | null;
+	company: string | null;
+	trade: string | null;
+	tier: SubcontractorTier;
+	licenseNumber: string | null;
+	insuranceCarrier: string | null;
+	insuranceExpiresAt: Date | null;
+	notes: string | null;
+	tags: string[];
+};
+
+/** Parse a YYYY-MM-DD date input into a Date, or null when blank/invalid. */
+function parseDateInput(value?: string): Date | null {
+	const t = (value ?? '').trim();
+	if (t === '') return null;
+	const d = new Date(t);
+	return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** The single source of truth for subcontractor-profile validation (client + server). */
+export const subcontractorContactSchema = z.object({
+	name: z.string().trim().min(1, 'Name is required'),
+	email: z
+		.string()
+		.trim()
+		.min(1, 'Email is required')
+		.pipe(z.email('Enter a valid email'))
+		.transform(normalizeEmail),
+	phone: z
+		.string()
+		.optional()
+		.transform((v) => {
+			const d = digitsOnly(v ?? '');
+			return d === '' ? null : formatPhone(d);
+		})
+		.refine((v) => v === null || digitsOnly(v).length === 10, 'Enter a 10-digit phone number'),
+	address: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v)),
+	company: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v)),
+	trade: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v)),
+	tier: z
+		.string()
+		.optional()
+		.transform((v): SubcontractorTier => (v === 'trusted' ? 'trusted' : 'guest')),
+	licenseNumber: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v)),
+	insuranceCarrier: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v)),
+	insuranceExpiresAt: z
+		.string()
+		.optional()
+		.transform((v) => parseDateInput(v)),
+	notes: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v)),
+	tags: z
+		.string()
+		.optional()
+		.transform((v) => parseTags(v ?? ''))
+});
+
+export type SubcontractorContactValidation =
+	| { ok: true; value: SubcontractorContact }
+	| { ok: false; field: 'name' | 'email' | 'phone'; message: string };
+
+/** Validate a new/edited subcontractor's profile via the shared Zod schema. */
+export function validateSubcontractorContact(input: {
+	name?: string;
+	email?: string;
+	phone?: string;
+	address?: string;
+	company?: string;
+	trade?: string;
+	tier?: string;
+	licenseNumber?: string;
+	insuranceCarrier?: string;
+	insuranceExpiresAt?: string;
+	notes?: string;
+	tags?: string;
+}): SubcontractorContactValidation {
+	const result = subcontractorContactSchema.safeParse(input);
+	if (result.success) return { ok: true, value: result.data };
+	const issue = result.error.issues[0];
+	const field = issue.path[0];
+	return {
+		ok: false,
+		field: field === 'email' || field === 'phone' ? field : 'name',
+		message: issue.message
+	};
+}
+
+/**
+ * The customer identity/contact fields a Guest Contractor must never receive.
+ * Redaction is done here so a guest order view can be assembled server-side with
+ * PII stripped — it never reaches the client. Trusted subs bypass this entirely.
+ */
+export type RedactedCustomer = {
+	name: null;
+	email: null;
+	phone: null;
+	address: null;
+};
+
+/** Project any customer-ish record down to a PII-free stub for Guest views. */
+export function redactCustomerForGuest(): RedactedCustomer {
+	return { name: null, email: null, phone: null, address: null };
 }
 
 // -------------------------------------------------------------------- Orders
@@ -304,4 +472,82 @@ export function getVisibleCustomerState(state: ContractorOrderState): CustomerVi
 		default:
 			return 'Pending';
 	}
+}
+
+// ------------------------------------------------------------ Support feedback
+
+/** The kind of feedback a contractor can file from the support page. */
+export const FEEDBACK_TYPES = ['bug', 'feature'] as const;
+export type FeedbackType = (typeof FEEDBACK_TYPES)[number];
+
+export function isFeedbackType(value: string): value is FeedbackType {
+	return (FEEDBACK_TYPES as readonly string[]).includes(value);
+}
+
+/** Human label for a feedback type. */
+export function feedbackTypeLabel(type: FeedbackType): string {
+	return type === 'bug' ? 'Bug report' : 'Feature request';
+}
+
+export type Feedback = {
+	type: FeedbackType;
+	title: string;
+	detail: string;
+};
+
+/** Shared validation for the support form (client pre-check + server). */
+export const feedbackSchema = z.object({
+	type: z
+		.string()
+		.optional()
+		.transform((v): FeedbackType => (v === 'bug' ? 'bug' : 'feature'))
+		.refine((v) => isFeedbackType(v), 'Choose a feedback type'),
+	title: z
+		.string()
+		.trim()
+		.min(1, 'A short summary is required')
+		.max(140, 'Keep the summary under 140 characters'),
+	detail: z.string().trim().min(1, 'Please describe your feedback')
+});
+
+export type FeedbackValidation =
+	| { ok: true; value: Feedback }
+	| { ok: false; field: 'type' | 'title' | 'detail'; message: string };
+
+export function validateFeedback(input: {
+	type?: string;
+	title?: string;
+	detail?: string;
+}): FeedbackValidation {
+	const result = feedbackSchema.safeParse(input);
+	if (result.success) return { ok: true, value: result.data };
+	const issue = result.error.issues[0];
+	const field = issue.path[0];
+	return {
+		ok: false,
+		field: field === 'title' || field === 'detail' ? field : 'type',
+		message: issue.message
+	};
+}
+
+/**
+ * Build the GitHub issue title + body for a piece of feedback. Pure (no network)
+ * so it can be unit-tested; the server layer adds the labels + files it. The
+ * submitter is recorded in the body so maintainers can follow up.
+ */
+export function buildFeedbackIssue(
+	feedback: Feedback,
+	submittedBy?: { name?: string | null; email?: string | null }
+): { title: string; body: string } {
+	const prefix = feedback.type === 'bug' ? '[Bug]' : '[Feature]';
+	const who = submittedBy?.name || submittedBy?.email || 'a contractor';
+	const contact = submittedBy?.email ? ` (${submittedBy.email})` : '';
+	const body = [
+		feedback.detail,
+		'',
+		'---',
+		`*Filed from the in-app support form by ${who}${contact}.*`,
+		`*Type: ${feedbackTypeLabel(feedback.type)}*`
+	].join('\n');
+	return { title: `${prefix} ${feedback.title}`, body };
 }

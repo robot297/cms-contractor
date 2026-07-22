@@ -4,7 +4,13 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = (event) => {
 	const user = event.locals.user;
 	if (user) {
-		redirect(302, user.role === 'contractor' ? '/contractor' : '/customer');
+		const home =
+			user.role === 'contractor'
+				? '/contractor'
+				: user.role === 'subcontractor'
+					? '/subcontractor'
+					: '/customer';
+		redirect(302, home);
 	}
 	return {};
 };

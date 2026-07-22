@@ -296,8 +296,13 @@
 					</details>
 				{/if}
 
-				<!-- Action bar: chunky icon buttons, bottom-right -->
-				<div style="display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center;">
+				<!-- Action bar: explicit details link on the left, icon buttons on the right -->
+				<div style="display: flex; gap: 0.5rem; align-items: center;">
+					<a
+						href={`/contractor/orders/${order.id}`}
+						style="margin-right: auto; font-size: 0.9rem; font-weight: 600; color: #0969da; text-decoration: none; white-space: nowrap;"
+						>View order details →</a
+					>
 					{#if order.customerId}
 						<button
 							type="button"

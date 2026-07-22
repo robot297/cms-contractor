@@ -14,7 +14,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
-	if (locals.user.role !== 'contractor') redirect(302, '/customer');
+	if (locals.user.role !== 'contractor') redirect(302, '/');
 	return locals.user;
 }
 

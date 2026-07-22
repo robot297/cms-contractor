@@ -18,7 +18,13 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 // Single source of truth for the sample data — shared with the in-app demo
 // seeder (src/lib/server/demo.server.ts).
-import { DEMO_CUSTOMERS, DEMO_ORDERS, DEMO_NOTIFICATIONS } from './demo-fixtures.js';
+import {
+	DEMO_CUSTOMERS,
+	DEMO_ORDERS,
+	DEMO_NOTIFICATIONS,
+	DEMO_SUBCONTRACTORS,
+	DEMO_ASSIGNMENTS
+} from './demo-fixtures.js';
 
 function resolveDatabaseUrl() {
 	if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
@@ -64,6 +70,8 @@ async function main() {
 	// Orders cascade their timeline/notifications/invites; then remove customers.
 	await sql`delete from "order" where contractor_id = ${contractor.id}`;
 	await sql`delete from customer where contractor_id = ${contractor.id}`;
+	// Subcontractors cascade their assignments + pending invites.
+	await sql`delete from subcontractor where contractor_id = ${contractor.id}`;
 	await sql`delete from notification where user_id = ${contractor.id}`;
 
 	// Create customers, linking any that match a signed-up login.
@@ -80,9 +88,11 @@ async function main() {
 	}
 
 	// Create orders + a customer-visible status entry (and internal notes).
+	const orderIdByProject = {};
 	for (const o of ORDERS) {
 		const target = customerIds[o.cust];
 		const orderId = randomUUID();
+		orderIdByProject[o.project] = orderId;
 		await sql`
 			insert into "order" (id, contractor_id, customer_id, project_name, project_type, icon, state, next_follow_up_at)
 			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.icon ?? null}, ${o.state}, ${followUpAt(o.followUpDays)})
@@ -108,6 +118,39 @@ async function main() {
 		`;
 	}
 
+	// Subcontractors (Trusted + Guest), linking any that match a signed-up login,
+	// plus a pending invite for those flagged `invited`.
+	const subIds = {};
+	for (const s of DEMO_SUBCONTRACTORS) {
+		const [account] = await sql`select id from "user" where email = ${s.email}`;
+		if (account) await sql`update "user" set role = 'subcontractor' where id = ${account.id}`;
+		const id = randomUUID();
+		subIds[s.key] = id;
+		await sql`
+			insert into subcontractor (id, contractor_id, name, email, phone, company, trade, tier, license_number, insurance_carrier, insurance_expires_at, notes, tags, avatar, user_id)
+			values (${id}, ${contractor.id}, ${s.name}, ${s.email}, ${s.phone}, ${s.company}, ${s.trade}, ${s.tier}, ${s.licenseNumber}, ${s.insuranceCarrier}, ${followUpAt(s.insuranceDays)}, ${s.notes}, ${s.tags}, ${s.avatar}, ${account?.id ?? null})
+		`;
+		if (s.invited && !account) {
+			await sql`
+				insert into subcontractor_invite (id, subcontractor_id, contractor_id, subcontractor_email, token, status, expires_at)
+				values (${randomUUID()}, ${id}, ${contractor.id}, ${s.email}, ${randomUUID()}, 'pending', now() + interval '24 hours')
+			`;
+		}
+	}
+
+	// Assign subcontractors to orders (many-to-many).
+	for (const a of DEMO_ASSIGNMENTS) {
+		const orderId = orderIdByProject[a.order];
+		const subcontractorId = subIds[a.sub];
+		if (orderId && subcontractorId) {
+			await sql`
+				insert into order_subcontractor (order_id, subcontractor_id)
+				values (${orderId}, ${subcontractorId})
+				on conflict do nothing
+			`;
+		}
+	}
+
 	// A couple of contractor notifications for the bell.
 	for (const n of DEMO_NOTIFICATIONS) {
 		await sql`
@@ -121,6 +164,9 @@ async function main() {
 		`\n✓ Seeded ${CUSTOMERS.length} customers and ${ORDERS.length} orders for ${contractorEmail}`
 	);
 	console.log(`  ${linked} customer(s) linked to a signed-up login.`);
+	console.log(
+		`  ${DEMO_SUBCONTRACTORS.length} subcontractors (${DEMO_SUBCONTRACTORS.filter((s) => s.tier === 'trusted').length} trusted) and ${DEMO_ASSIGNMENTS.length} assignments.`
+	);
 	console.log(
 		`  Follow-ups: 3 due (In Progress, Deposit Pending, Inquiry), the rest upcoming/none.`
 	);

@@ -27,10 +27,16 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	const session = await auth.api.getSession({ headers: event.request.headers });
 
 	if (session) {
+		const rawRole = session.user.role;
 		event.locals.session = session.session;
 		event.locals.user = {
 			...session.user,
-			role: session.user.role === 'contractor' ? 'contractor' : 'customer'
+			role:
+				rawRole === 'contractor'
+					? 'contractor'
+					: rawRole === 'subcontractor'
+						? 'subcontractor'
+						: 'customer'
 		};
 	}
 

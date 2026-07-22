@@ -2,10 +2,25 @@ import { eq } from 'drizzle-orm';
 import { APIError } from 'better-auth/api';
 import { env } from '$env/dynamic/private';
 import { db } from './db';
-import { user, customer, order, timelineEntry, notification } from './db/schema';
+import {
+	user,
+	customer,
+	order,
+	orderSubcontractor,
+	subcontractor,
+	subcontractorInvite,
+	timelineEntry,
+	notification
+} from './db/schema';
 import { auth } from './auth';
 // Single source of truth for the sample data — shared with scripts/seed.mjs.
-import { DEMO_CUSTOMERS, DEMO_ORDERS, DEMO_NOTIFICATIONS } from '../../../scripts/demo-fixtures.js';
+import {
+	DEMO_CUSTOMERS,
+	DEMO_ORDERS,
+	DEMO_NOTIFICATIONS,
+	DEMO_SUBCONTRACTORS,
+	DEMO_ASSIGNMENTS
+} from '../../../scripts/demo-fixtures.js';
 
 /**
  * A shared, self-provisioning demo contractor. The "Explore the live demo"
@@ -87,6 +102,8 @@ async function seedDemoData(contractorId: string): Promise<void> {
 	// by owner since some aren't tied to an order.
 	await db.delete(order).where(eq(order.contractorId, contractorId));
 	await db.delete(customer).where(eq(customer.contractorId, contractorId));
+	// Deleting subcontractors cascades their assignments + pending invites.
+	await db.delete(subcontractor).where(eq(subcontractor.contractorId, contractorId));
 	await db.delete(notification).where(eq(notification.userId, contractorId));
 
 	const idByKey = new Map<string, string>();
@@ -107,8 +124,10 @@ async function seedDemoData(contractorId: string): Promise<void> {
 		});
 	}
 
+	const orderIdByProject = new Map<string, string>();
 	for (const o of DEMO_ORDERS) {
 		const orderId = crypto.randomUUID();
+		orderIdByProject.set(o.project, orderId);
 		await db.insert(order).values({
 			id: orderId,
 			contractorId,
@@ -138,6 +157,48 @@ async function seedDemoData(contractorId: string): Promise<void> {
 				authorRole: 'contractor',
 				internal: true
 			});
+		}
+	}
+
+	// Subcontractors (one Trusted, one Guest) + a pending invite for the Guest.
+	const subIdByKey = new Map<string, string>();
+	for (const s of DEMO_SUBCONTRACTORS) {
+		const id = crypto.randomUUID();
+		subIdByKey.set(s.key, id);
+		await db.insert(subcontractor).values({
+			id,
+			contractorId,
+			name: s.name,
+			email: s.email,
+			phone: s.phone,
+			company: s.company,
+			trade: s.trade,
+			tier: s.tier,
+			licenseNumber: s.licenseNumber,
+			insuranceCarrier: s.insuranceCarrier,
+			insuranceExpiresAt: s.insuranceDays === null ? null : inDays(s.insuranceDays),
+			notes: s.notes,
+			tags: s.tags,
+			avatar: s.avatar
+		});
+		if (s.invited) {
+			await db.insert(subcontractorInvite).values({
+				subcontractorId: id,
+				contractorId,
+				subcontractorEmail: s.email,
+				token: crypto.randomUUID(),
+				status: 'pending',
+				expiresAt: inDays(1)
+			});
+		}
+	}
+
+	// Assign subcontractors to orders (many-to-many).
+	for (const a of DEMO_ASSIGNMENTS) {
+		const orderId = orderIdByProject.get(a.order);
+		const subcontractorId = subIdByKey.get(a.sub);
+		if (orderId && subcontractorId) {
+			await db.insert(orderSubcontractor).values({ orderId, subcontractorId });
 		}
 	}
 

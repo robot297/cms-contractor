@@ -7,11 +7,20 @@ import {
 	isCustomerLinked,
 	isFollowUpDue,
 	isValidAvatarDataUrl,
+	buildFeedbackIssue,
+	feedbackTypeLabel,
+	isFeedbackType,
 	normalizeEmail,
 	parseTags,
+	redactCustomerForGuest,
+	validateFeedback,
+	isSubcontractorLinked,
+	isSubcontractorTier,
 	snoozeDate,
+	tierLabel,
 	validateCustomerContact,
-	validateOrderSetup
+	validateOrderSetup,
+	validateSubcontractorContact
 } from './crm';
 
 describe('customer-visible state mapping', () => {
@@ -67,7 +76,8 @@ describe('customer contact validation', () => {
 				phone: '(555) 123-4567',
 				address: '12 Main St',
 				notes: null,
-				tags: ['kitchen', 'repeat']
+				tags: ['kitchen', 'repeat'],
+				preferredContact: 'email'
 			}
 		});
 	});
@@ -76,7 +86,15 @@ describe('customer contact validation', () => {
 		const result = validateCustomerContact({ name: 'Dan', email: 'a@b.com' });
 		expect(result).toEqual({
 			ok: true,
-			value: { name: 'Dan', email: 'a@b.com', phone: null, address: null, notes: null, tags: [] }
+			value: {
+				name: 'Dan',
+				email: 'a@b.com',
+				phone: null,
+				address: null,
+				notes: null,
+				tags: [],
+				preferredContact: 'email'
+			}
 		});
 	});
 });
@@ -178,5 +196,149 @@ describe('avatar data url', () => {
 		expect(isValidAvatarDataUrl('data:text/plain;base64,AAAA')).toBe(false);
 		expect(isValidAvatarDataUrl('https://example.com/x.png')).toBe(false);
 		expect(isValidAvatarDataUrl('data:image/png;base64,' + 'A'.repeat(400_000))).toBe(false);
+	});
+});
+
+describe('subcontractor tier', () => {
+	it('recognizes valid tiers only', () => {
+		expect(isSubcontractorTier('trusted')).toBe(true);
+		expect(isSubcontractorTier('guest')).toBe(true);
+		expect(isSubcontractorTier('admin')).toBe(false);
+		expect(isSubcontractorTier('')).toBe(false);
+	});
+
+	it('labels tiers for display', () => {
+		expect(tierLabel('trusted')).toBe('Trusted Subcontractor');
+		expect(tierLabel('guest')).toBe('Guest Contractor');
+	});
+
+	it('treats a subcontractor with a bound login as linked', () => {
+		expect(isSubcontractorLinked({ userId: 'user-1' })).toBe(true);
+		expect(isSubcontractorLinked({ userId: null })).toBe(false);
+	});
+});
+
+describe('subcontractor profile validation', () => {
+	it('requires name and email and formats phone', () => {
+		const result = validateSubcontractorContact({
+			name: 'Rae Ohm',
+			email: '  Rae@Sparks.CO ',
+			phone: '5551234567',
+			trade: 'Electrical',
+			company: 'Sparks Co',
+			tags: 'licensed, insured'
+		});
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value.email).toBe('rae@sparks.co');
+			expect(result.value.phone).toBe('(555) 123-4567');
+			expect(result.value.trade).toBe('Electrical');
+			expect(result.value.tags).toEqual(['licensed', 'insured']);
+		}
+	});
+
+	it('defaults tier to guest (least privilege)', () => {
+		const result = validateSubcontractorContact({ name: 'A', email: 'a@b.com' });
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.value.tier).toBe('guest');
+	});
+
+	it('honors an explicit trusted tier', () => {
+		const result = validateSubcontractorContact({ name: 'A', email: 'a@b.com', tier: 'trusted' });
+		expect(result.ok && result.value.tier).toBe('trusted');
+	});
+
+	it('parses insurance expiry into a Date and leaves blanks null', () => {
+		const withDate = validateSubcontractorContact({
+			name: 'A',
+			email: 'a@b.com',
+			insuranceExpiresAt: '2024-01-15'
+		});
+		expect(withDate.ok && withDate.value.insuranceExpiresAt instanceof Date).toBe(true);
+		const noDate = validateSubcontractorContact({ name: 'A', email: 'a@b.com' });
+		expect(noDate.ok && noDate.value.insuranceExpiresAt).toBe(null);
+	});
+
+	it('rejects a missing email', () => {
+		const result = validateSubcontractorContact({ name: 'A', email: '' });
+		expect(result).toEqual({ ok: false, field: 'email', message: 'Email is required' });
+	});
+
+	it('rejects a bad phone', () => {
+		const result = validateSubcontractorContact({ name: 'A', email: 'a@b.com', phone: '12' });
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.field).toBe('phone');
+	});
+});
+
+describe('guest PII redaction', () => {
+	it('strips all customer identity and contact fields', () => {
+		expect(redactCustomerForGuest()).toEqual({
+			name: null,
+			email: null,
+			phone: null,
+			address: null
+		});
+	});
+});
+
+describe('support feedback', () => {
+	it('recognizes valid feedback types', () => {
+		expect(isFeedbackType('bug')).toBe(true);
+		expect(isFeedbackType('feature')).toBe(true);
+		expect(isFeedbackType('rant')).toBe(false);
+	});
+
+	it('labels feedback types', () => {
+		expect(feedbackTypeLabel('bug')).toBe('Bug report');
+		expect(feedbackTypeLabel('feature')).toBe('Feature request');
+	});
+
+	it('validates a good submission and trims fields', () => {
+		const result = validateFeedback({ type: 'bug', title: '  Save fails  ', detail: '  broken  ' });
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toEqual({ type: 'bug', title: 'Save fails', detail: 'broken' });
+		}
+	});
+
+	it('requires a summary and details', () => {
+		expect(validateFeedback({ type: 'bug', title: '', detail: 'x' })).toMatchObject({
+			ok: false,
+			field: 'title'
+		});
+		expect(validateFeedback({ type: 'feature', title: 'x', detail: '' })).toMatchObject({
+			ok: false,
+			field: 'detail'
+		});
+	});
+
+	it('rejects an over-long summary', () => {
+		const result = validateFeedback({ type: 'bug', title: 'x'.repeat(141), detail: 'ok' });
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.field).toBe('title');
+	});
+
+	it('builds a bug issue: [Bug] prefix, bug label context, submitter in body', () => {
+		const { title, body } = buildFeedbackIssue(
+			{ type: 'bug', title: 'Status won’t save', detail: 'Tapping save does nothing.' },
+			{ name: 'Rae', email: 'rae@example.com' }
+		);
+		expect(title).toBe('[Bug] Status won’t save');
+		expect(body).toContain('Tapping save does nothing.');
+		expect(body).toContain('Rae (rae@example.com)');
+		expect(body).toContain('Type: Bug report');
+	});
+
+	it('builds a feature issue with the [Feature] prefix', () => {
+		const { title, body } = buildFeedbackIssue({
+			type: 'feature',
+			title: 'CSV export',
+			detail: 'Export orders.'
+		});
+		expect(title).toBe('[Feature] CSV export');
+		expect(body).toContain('Type: Feature request');
+		// Falls back gracefully when no submitter is provided.
+		expect(body).toContain('a contractor');
 	});
 });

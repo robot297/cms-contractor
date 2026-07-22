@@ -124,6 +124,61 @@ export const DEMO_ORDERS = [
 	{ cust: 'sam', project: 'Tool Shed', type: 'Shed', state: 'Inquiry', followUpDays: 0, icon: '🏠' } // due today
 ];
 
+/**
+ * @typedef {{
+ *   key: string, name: string, email: string, phone: string | null,
+ *   company: string | null, trade: string | null, tier: 'trusted' | 'guest',
+ *   licenseNumber: string | null, insuranceCarrier: string | null,
+ *   insuranceDays: number | null, notes: string | null, tags: string[],
+ *   avatar: string | null, invited?: boolean
+ * }} DemoSubcontractor
+ */
+
+/** @type {DemoSubcontractor[]} */
+export const DEMO_SUBCONTRACTORS = [
+	{
+		key: 'rae',
+		name: 'Rae Sparks',
+		email: 'rae.sparks@example.com',
+		phone: '(555) 480-1122',
+		company: 'Sparks Electric',
+		trade: 'Electrical',
+		tier: 'trusted',
+		licenseNumber: 'EC-99213',
+		insuranceCarrier: 'Statewide Mutual',
+		insuranceDays: 120, // valid, expires in ~4 months
+		notes: 'Go-to electrician. Fast, fully licensed and insured.',
+		tags: ['licensed', 'insured'],
+		avatar: '/img/ben.png'
+	},
+	{
+		key: 'cody',
+		name: 'Cody Nash',
+		email: 'cody.nash@example.com',
+		phone: '(555) 771-3346',
+		company: 'Nash Concrete',
+		trade: 'Concrete',
+		tier: 'guest',
+		licenseNumber: null,
+		insuranceCarrier: 'Ironclad Insurance',
+		insuranceDays: -20, // expired — stored for reference, never enforced
+		notes: 'Concrete crew for footings. Insurance lapsed; kept for records only.',
+		tags: ['concrete'],
+		avatar: '/img/liam.png',
+		invited: true // shows the "Invited" status in the roster
+	}
+];
+
+/**
+ * Assignments join a subcontractor (by key) to an order (by project name).
+ * @type {{ sub: string, order: string }[]}
+ */
+export const DEMO_ASSIGNMENTS = [
+	{ sub: 'rae', order: 'Backyard Deck Rebuild' }, // Trusted on an in-progress job
+	{ sub: 'rae', order: 'HOA Community Pavilion' },
+	{ sub: 'cody', order: 'Backyard Deck Rebuild' } // Guest on the same job → both tiers
+];
+
 /** @type {DemoNotification[]} */
 export const DEMO_NOTIFICATIONS = [
 	{
