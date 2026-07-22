@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { isSnoozePreset, validateOrderSetup } from '$lib/crm';
+import { validateOrderSetup } from '$lib/crm';
 import {
 	addOrderNote,
 	createInvite,
@@ -8,8 +8,6 @@ import {
 	listContractorOrders,
 	listCustomers,
 	listOrderNotes,
-	setFollowUp,
-	snoozeFollowUp,
 	type OrderNote
 } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
@@ -65,34 +63,6 @@ export const actions: Actions = {
 		if (!orderId) return fail(400, { message: 'Order is required' });
 		if (!note) return fail(400, { message: 'Note cannot be empty' });
 		await addOrderNote(orderId, user.id, note);
-		return { success: true };
-	},
-
-	setFollowUp: async ({ request, locals }) => {
-		const user = requireContractor(locals);
-		const form = await request.formData();
-		const orderId = form.get('orderId')?.toString() ?? '';
-		const raw = form.get('date')?.toString() ?? '';
-		const date = raw ? new Date(raw) : null;
-		if (date && Number.isNaN(date.getTime())) return fail(400, { message: 'Invalid date' });
-		await setFollowUp(orderId, user.id, date);
-		return { success: true };
-	},
-
-	snoozeFollowUp: async ({ request, locals }) => {
-		const user = requireContractor(locals);
-		const form = await request.formData();
-		const orderId = form.get('orderId')?.toString() ?? '';
-		const preset = form.get('preset')?.toString() ?? '';
-		if (!isSnoozePreset(preset)) return fail(400, { message: 'Invalid snooze' });
-		await snoozeFollowUp(orderId, user.id, preset);
-		return { success: true };
-	},
-
-	clearFollowUp: async ({ request, locals }) => {
-		const user = requireContractor(locals);
-		const form = await request.formData();
-		await setFollowUp(form.get('orderId')?.toString() ?? '', user.id, null);
 		return { success: true };
 	},
 

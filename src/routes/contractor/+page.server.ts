@@ -1,13 +1,12 @@
-import { redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
+import { isOrderIcon } from '$lib/crm';
 import {
 	deleteInvite,
 	listContractorOrders,
 	listInvites,
-	listNotifications,
-	markAllNotificationsRead,
-	markNotificationRead,
 	resendInvite,
-	revokeInvite
+	revokeInvite,
+	setOrderIcon
 } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -19,14 +18,30 @@ function requireContractor(locals: App.Locals) {
 
 export const load: PageServerLoad = async ({ locals }) => {
 	const user = requireContractor(locals);
-	const [orders, notifications, invites] = await Promise.all([
+	const [orders, invites] = await Promise.all([
 		listContractorOrders(user.id),
-		listNotifications(user.id),
 		listInvites(user.id)
 	]);
-	// Only the due-follow-up count is shown here; the list lives on /contractor/orders.
-	const dueCount = orders.filter((o) => o.followUpDue).length;
-	return { dueCount, notifications, invites, userName: user.name };
+	// Orders whose next follow-up is due, soonest first — the dashboard's default tab.
+	const dueOrders = orders
+		.filter((o) => o.followUpDue)
+		.sort((a, b) => {
+			const av = a.nextFollowUpAt ? new Date(a.nextFollowUpAt).getTime() : Infinity;
+			const bv = b.nextFollowUpAt ? new Date(b.nextFollowUpAt).getTime() : Infinity;
+			return av - bv;
+		})
+		.map((o) => ({
+			id: o.id,
+			customerName: o.customerName,
+			customerEmail: o.customerEmail,
+			customerPhone: o.customerPhone,
+			customerPreferredContact: o.customerPreferredContact,
+			projectName: o.projectName,
+			projectType: o.projectType,
+			icon: o.icon,
+			nextFollowUpAt: o.nextFollowUpAt
+		}));
+	return { dueOrders, invites, userName: user.name };
 };
 
 export const actions: Actions = {
@@ -51,16 +66,15 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
-	markRead: async ({ request, locals }) => {
+	setOrderIcon: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
-		await markNotificationRead(form.get('id')?.toString() ?? '', user.id);
-		return { success: true };
-	},
-
-	markAllRead: async ({ locals }) => {
-		const user = requireContractor(locals);
-		await markAllNotificationsRead(user.id);
+		const orderId = form.get('orderId')?.toString() ?? '';
+		const raw = form.get('icon')?.toString() ?? '';
+		if (!orderId) return fail(400, { message: 'Order is required' });
+		// Empty clears the icon; any other value must be one of the fixed set.
+		if (raw !== '' && !isOrderIcon(raw)) return fail(400, { message: 'Unknown icon' });
+		await setOrderIcon(orderId, user.id, raw === '' ? null : raw);
 		return { success: true };
 	}
 };

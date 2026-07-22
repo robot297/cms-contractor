@@ -75,6 +75,9 @@ export const order = pgTable(
 		// What the job is and the kind of structure being built.
 		projectName: text('project_name'),
 		projectType: text('project_type'),
+		// An optional glyph from a fixed construction icon set (see ORDER_ICONS),
+		// chosen by the contractor to convey status / build type at a glance.
+		icon: text('icon'),
 		state: text('state').notNull().default('Inquiry'),
 		// Contractor-set date for the next follow-up (defaults to +3 days on create).
 		nextFollowUpAt: timestamp('next_follow_up_at'),

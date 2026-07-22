@@ -84,8 +84,8 @@ async function main() {
 		const target = customerIds[o.cust];
 		const orderId = randomUUID();
 		await sql`
-			insert into "order" (id, contractor_id, customer_id, project_name, project_type, state, next_follow_up_at)
-			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.state}, ${followUpAt(o.followUpDays)})
+			insert into "order" (id, contractor_id, customer_id, project_name, project_type, icon, state, next_follow_up_at)
+			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.icon ?? null}, ${o.state}, ${followUpAt(o.followUpDays)})
 		`;
 		await sql`
 			insert into timeline_entry (id, order_id, kind, title, detail, author_role, internal)

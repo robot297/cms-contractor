@@ -159,6 +159,18 @@ export const PROJECT_TYPES = [
 
 export type ProjectType = (typeof PROJECT_TYPES)[number];
 
+/**
+ * A fixed palette of construction glyphs a contractor can pin to an order to
+ * signal its build type or status at a glance. Capped at 10 options.
+ */
+export const ORDER_ICONS = ['🏗️', '🏠', '🛠️', '🔨', '🪚', '🧱', '🪵', '🚧', '📐', '✅'] as const;
+
+export type OrderIcon = (typeof ORDER_ICONS)[number];
+
+export function isOrderIcon(value: string): value is OrderIcon {
+	return (ORDER_ICONS as readonly string[]).includes(value);
+}
+
 export function isProjectType(value: string): value is ProjectType {
 	return (PROJECT_TYPES as readonly string[]).includes(value);
 }

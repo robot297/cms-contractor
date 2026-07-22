@@ -115,6 +115,7 @@ async function seedDemoData(contractorId: string): Promise<void> {
 			customerId: idByKey.get(o.cust),
 			projectName: o.project,
 			projectType: o.type,
+			icon: o.icon ?? null,
 			state: o.state,
 			nextFollowUpAt: o.followUpDays === null ? null : inDays(o.followUpDays)
 		});

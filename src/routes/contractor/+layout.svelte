@@ -79,12 +79,8 @@
 		<div class="hazard"></div>
 		<div style="background: #111;">
 			<div
-				style="max-width: 860px; margin: 0 auto; padding: 1.25rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;"
+				style="max-width: 860px; margin: 0 auto; padding: 1.25rem 1rem; display: flex; align-items: center; justify-content: center; gap: 1rem; flex-wrap: wrap;"
 			>
-				<span
-					style="font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; color: #ffcc00; text-shadow: 2px 2px 0 #000;"
-					>🛠 Contractor&nbsp;CRM</span
-				>
 				<span
 					style="font-size: 0.75rem; color: #fff; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;"
 					>© {year} · Built for those who do</span

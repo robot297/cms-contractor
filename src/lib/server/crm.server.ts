@@ -34,6 +34,8 @@ export type InviteRow = typeof customerInvite.$inferSelect;
 export type ContractorOrderView = OrderRow & {
 	customerName: string;
 	customerEmail: string;
+	customerPhone: string | null;
+	customerPreferredContact: 'email' | 'phone';
 	customerVisibleState: string;
 	followUpDue: boolean;
 };
@@ -63,6 +65,8 @@ function toContractorView(row: OrderRow, cust: CustomerRow | null): ContractorOr
 		...row,
 		customerName: cust?.name ?? 'Unknown customer',
 		customerEmail: cust?.email ?? '',
+		customerPhone: cust?.phone ?? null,
+		customerPreferredContact: cust?.preferredContact === 'phone' ? 'phone' : 'email',
 		customerVisibleState: getVisibleCustomerState(row.state as ContractorOrderState),
 		followUpDue: isFollowUpDue(row.nextFollowUpAt)
 	};
@@ -334,6 +338,17 @@ export async function setFollowUp(
 	const existing = await contractorOrder(orderId, contractorId);
 	if (!existing) throw new Error('Order not found');
 	await db.update(order).set({ nextFollowUpAt: date }).where(eq(order.id, orderId));
+}
+
+/** Set or clear (null) an order's construction icon. */
+export async function setOrderIcon(
+	orderId: string,
+	contractorId: string,
+	icon: string | null
+): Promise<void> {
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+	await db.update(order).set({ icon }).where(eq(order.id, orderId));
 }
 
 /** Snooze an order's follow-up forward by a preset, from now. */

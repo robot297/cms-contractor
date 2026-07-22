@@ -1,23 +1,43 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { resolve } from '$app/paths';
+	import { ORDER_ICONS } from '$lib/crm';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
-	let showNotifications = $state(false);
+	// Dashboard tabs: due follow-ups (default) and open customer invites.
+	let tab = $state<'due' | 'invites'>('due');
 	let confirmingDeleteInviteId: string | null = $state(null);
-
-	const unread = $derived(data.notifications.filter((n) => n.unread).length);
-	const highPending = $derived(
-		data.notifications.filter((n) => n.unread && n.priority === 'high').length
-	);
+	// Which due card's "send communication" contact menu is open.
+	let contactOpenId: string | null = $state(null);
+	// Which due card's construction-icon picker is open.
+	let iconPickerId: string | null = $state(null);
+	// Close the icon picker once a choice is submitted.
+	const pickIconThenClose = () =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			iconPickerId = null;
+			await update();
+		};
 
 	function inviteLabel(status: string, expiresAt: Date): string {
 		if (status === 'revoked') return 'Revoked';
 		if (status === 'used') return 'Accepted';
 		return new Date(expiresAt).getTime() > Date.now() ? 'Active' : 'Expired';
 	}
+	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
+
+	const pill =
+		'padding: 0.45rem 0.95rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.9rem; font-weight: 600;';
+	const pillActive = 'background: #0969da; color: #fff; border-color: #0969da;';
+	const iconBtn =
+		'width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 999px; cursor: pointer; font-size: 1rem; line-height: 1;';
+	// The settable order-icon bubble + each choice in the picker.
+	const iconBubble =
+		'width: 2.6rem; height: 2.6rem; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 999px; cursor: pointer; font-size: 1.3rem; line-height: 1; padding: 0;';
+	const iconChoice =
+		'width: 2.4rem; height: 2.4rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: none; border-radius: 10px; cursor: pointer; font-size: 1.3rem; line-height: 1; padding: 0;';
+	const contactItem =
+		'display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit; text-decoration: none;';
 </script>
 
 <svelte:head>
@@ -25,117 +45,172 @@
 </svelte:head>
 
 <div style="max-width: 860px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem;">
-	<header style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+	<header>
 		<h1 style="margin: 0;">Dashboard</h1>
-		<!-- Notifications bell -->
-		<div style="position: relative;">
-			<button
-				type="button"
-				onclick={() => (showNotifications = !showNotifications)}
-				aria-label="Notifications"
-				title="Notifications"
-				style="position: relative; width: 2.25rem; height: 2.25rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 1.05rem; line-height: 1;"
-			>
-				🔔
-				{#if unread > 0}
-					<span
-						style="position: absolute; top: -4px; right: -4px; min-width: 1.1rem; height: 1.1rem; padding: 0 0.28rem; box-sizing: border-box; border-radius: 999px; background: #cf222e; color: #fff; font-size: 0.68rem; line-height: 1.1rem; text-align: center;"
-						>{unread}</span
-					>
-				{/if}
-			</button>
-			{#if showNotifications}
-				<div
-					style="position: absolute; right: 0; top: calc(100% + 0.4rem); z-index: 20; width: min(340px, 90vw); background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15); padding: 0.75rem; display: grid; gap: 0.6rem; max-height: 60vh; overflow: auto;"
-				>
-					<div style="display: flex; justify-content: space-between; align-items: center;">
-						<h2 style="margin: 0; font-size: 0.95rem;">Notifications</h2>
-						{#if unread > 0}
-							<form method="POST" action="?/markAllRead" use:enhance>
-								<button
-									type="submit"
-									style="font-size: 0.85rem; color: #0969da; background: none; border: none; cursor: pointer;"
-									>Mark all read</button
-								>
-							</form>
-						{/if}
-					</div>
-					{#if highPending > 0}
-						<div style="font-size: 0.8rem; color: #9a6700;">
-							{highPending} high-priority milestone{highPending === 1 ? '' : 's'} will also be emailed.
-						</div>
-					{/if}
-					{#if data.notifications.length === 0}
-						<p style="margin: 0; color: #57606a; font-size: 0.9rem;">No notifications yet.</p>
-					{/if}
-					<div style="display: grid; gap: 0.5rem;">
-						{#each data.notifications as n (n.id)}
-							<div
-								style="padding: 0.6rem; border-radius: 10px; background: {n.unread
-									? '#f6f8fa'
-									: '#fff'}; border: 1px solid #d0d7de; display: flex; justify-content: space-between; gap: 0.75rem; align-items: start;"
-							>
-								<div>
-									<strong style="font-size: 0.9rem;">{n.title}</strong>
-									{#if n.priority === 'high'}
-										<span
-											style="font-size: 0.7rem; color: #9a6700; border: 1px solid #d4a72c; border-radius: 999px; padding: 0.05rem 0.4rem; margin-left: 0.35rem;"
-											>High</span
-										>
-									{/if}
-									{#if n.detail}<div style="font-size: 0.85rem; color: #57606a;">
-											{n.detail}
-										</div>{/if}
-								</div>
-								{#if n.unread}
-									<form method="POST" action="?/markRead" use:enhance>
-										<input type="hidden" name="id" value={n.id} />
-										<button
-											type="submit"
-											style="font-size: 0.78rem; color: #0969da; background: none; border: none; cursor: pointer; white-space: nowrap;"
-											>Mark read</button
-										>
-									</form>
-								{/if}
-							</div>
-						{/each}
-					</div>
-				</div>
-			{/if}
-		</div>
 	</header>
 
-	<!-- Follow-ups due -->
-	<a href={resolve('/contractor/orders')} style="text-decoration: none; color: inherit;">
-		<div
-			style="border: 1px solid {data.dueCount > 0
-				? '#d4a72c'
-				: '#d0d7de'}; background: {data.dueCount > 0
-				? '#fffbe6'
-				: '#f6f8fa'}; border-radius: 16px; padding: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem;"
+	<!-- Tabs -->
+	<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+		<button
+			type="button"
+			onclick={() => (tab = 'due')}
+			style="{pill} {tab === 'due' ? pillActive : ''}"
+			>Follow-ups due ({data.dueOrders.length})</button
 		>
-			<div>
-				<strong>{data.dueCount} follow-up{data.dueCount === 1 ? '' : 's'} due</strong>
-				<div style="font-size: 0.9rem; color: #57606a;">
-					{data.dueCount > 0 ? 'Orders waiting on your next touch.' : 'You’re all caught up.'}
-				</div>
-			</div>
-			<span style="color: #0969da;">View orders →</span>
-		</div>
-	</a>
+		<button
+			type="button"
+			onclick={() => (tab = 'invites')}
+			style="{pill} {tab === 'invites' ? pillActive : ''}"
+			>Customer invites ({data.invites.length})</button
+		>
+	</div>
 
-	<!-- Invites -->
-	<section
-		style="border: 1px solid #d0d7de; border-radius: 16px; padding: 1rem; display: grid; gap: 0.75rem;"
-	>
-		<h2 style="margin: 0; font-size: 1rem;">Customer invites</h2>
-		{#if data.invites.length === 0}
-			<p style="margin: 0; color: #57606a; font-size: 0.9rem;">No invites sent yet.</p>
-		{/if}
-		<div style="display: grid; gap: 0.5rem;">
+	{#if tab === 'due'}
+		<!-- Follow-ups due -->
+		<section style="display: grid; gap: 0.5rem;">
+			{#if data.dueOrders.length === 0}
+				<div
+					style="border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 16px; padding: 1.25rem; text-align: center; color: #57606a;"
+				>
+					You’re all caught up — no follow-ups due.
+				</div>
+			{:else}
+				{#each data.dueOrders as o (o.id)}
+					<div
+						style="padding: 0.85rem; border-radius: 12px; background: #fff; border: 1px solid #e2e6ea; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05); display: flex; justify-content: space-between; gap: 0.75rem; align-items: center;"
+					>
+						<!-- Settable construction icon -->
+						<div style="position: relative; flex-shrink: 0;">
+							<button
+								type="button"
+								title="Set order icon"
+								aria-label="Set order icon"
+								aria-expanded={iconPickerId === o.id}
+								onclick={() => (iconPickerId = iconPickerId === o.id ? null : o.id)}
+								style="{iconBubble} {o.icon ? '' : 'opacity: 0.55;'}">{o.icon ?? '🏗️'}</button
+							>
+							{#if iconPickerId === o.id}
+								<!-- click-away backdrop -->
+								<button
+									type="button"
+									aria-label="Close icon picker"
+									onclick={() => (iconPickerId = null)}
+									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+								></button>
+								<form
+									method="POST"
+									action="?/setOrderIcon"
+									use:enhance={pickIconThenClose}
+									style="position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 13.5rem; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.2rem;"
+								>
+									<input type="hidden" name="orderId" value={o.id} />
+									{#each ORDER_ICONS as ic (ic)}
+										<button
+											type="submit"
+											name="icon"
+											value={ic}
+											title={ic}
+											style="{iconChoice} {o.icon === ic
+												? 'background: #ddf4ff; border-color: #0969da;'
+												: ''}">{ic}</button
+										>
+									{/each}
+									{#if o.icon}
+										<button
+											type="submit"
+											name="icon"
+											value=""
+											style="width: 100%; margin-top: 0.25rem; padding: 0.4rem; border-radius: 8px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.82rem; color: #57606a;"
+											>Clear icon</button
+										>
+									{/if}
+								</form>
+							{/if}
+						</div>
+
+						<a
+							href={`/contractor/orders/${o.id}`}
+							style="flex: 1; min-width: 0; text-decoration: none; color: inherit;"
+						>
+							<strong style="font-size: 1rem;">{o.customerName}</strong>
+							<div style="font-size: 0.85rem; color: #57606a;">
+								{o.projectName ?? 'Untitled project'}
+							</div>
+						</a>
+
+						<div style="flex-shrink: 0;">
+							<span
+								style="font-size: 0.72rem; font-weight: 700; color: #cf222e; background: #ffebe9; border: 1px solid #e5534b; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap;"
+								>Needs update</span
+							>
+						</div>
+
+						<!-- Send communication -->
+						<div style="position: relative; flex-shrink: 0;">
+							<button
+								type="button"
+								title="Send communication"
+								aria-label="Send communication"
+								aria-expanded={contactOpenId === o.id}
+								onclick={() => (contactOpenId = contactOpenId === o.id ? null : o.id)}
+								style={iconBtn}>💬</button
+							>
+							{#if contactOpenId === o.id}
+								<!-- click-away backdrop -->
+								<button
+									type="button"
+									aria-label="Close contact menu"
+									onclick={() => (contactOpenId = null)}
+									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+								></button>
+								<div
+									style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 180px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
+								>
+									<a
+										href={`mailto:${o.customerEmail}`}
+										onclick={() => (contactOpenId = null)}
+										style="{contactItem} {o.customerPreferredContact === 'email'
+											? 'color: #0969da; font-weight: 700;'
+											: ''}"
+										>✉ Email{#if o.customerPreferredContact === 'email'}
+											<span style="font-size: 0.7rem; color: #8c959f; font-weight: 400;"
+												>· preferred</span
+											>{/if}</a
+									>
+									{#if o.customerPhone}
+										<a
+											href={telHref(o.customerPhone)}
+											onclick={() => (contactOpenId = null)}
+											style="{contactItem} border-top: 1px solid #eaeef2; {o.customerPreferredContact ===
+											'phone'
+												? 'color: #0969da; font-weight: 700;'
+												: ''}"
+											>📞 Call{#if o.customerPreferredContact === 'phone'}
+												<span style="font-size: 0.7rem; color: #8c959f; font-weight: 400;"
+													>· preferred</span
+												>{/if}</a
+										>
+									{/if}
+								</div>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			{/if}
+		</section>
+	{:else}
+		<!-- Customer invites -->
+		<section style="display: grid; gap: 0.5rem;">
+			{#if data.invites.length === 0}
+				<div
+					style="border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 16px; padding: 1.25rem; text-align: center; color: #57606a;"
+				>
+					No invites sent yet.
+				</div>
+			{/if}
 			{#each data.invites as invite (invite.id)}
 				<div
-					style="padding: 0.75rem; border-radius: 12px; background: #f6f8fa; border: 1px solid #d0d7de; display: flex; justify-content: space-between; gap: 1rem; align-items: center; flex-wrap: wrap;"
+					style="padding: 0.75rem; border-radius: 12px; background: #fff; border: 1px solid #e2e6ea; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05); display: flex; justify-content: space-between; gap: 1rem; align-items: center; flex-wrap: wrap;"
 				>
 					<div>
 						<strong>{invite.customerEmail}</strong>
@@ -201,6 +276,6 @@
 					</div>
 				</div>
 			{/each}
-		</div>
-	</section>
+		</section>
+	{/if}
 </div>

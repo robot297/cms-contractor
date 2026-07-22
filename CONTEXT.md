@@ -19,8 +19,24 @@ A Customer is _Linked_ once someone accepts its Invite and a User binds to it; _
 A Customer whose state has been set to archived — removed from the Directory and "select existing" but never deleted; the record and its Orders are preserved. Archiving always updates state (reversible), never deletes, and is confirmed before it takes effect.
 
 **User**:
-A login identity (a `user` row / better-auth account) with a `role` of `contractor` or `customer`. Distinct from a Customer record.
-_Avoid_: Account (ambiguous — could mean User or Customer).
+A login identity (a `user` row / better-auth account) with a `role` of `contractor`, `customer`, or `subcontractor`. Distinct from a Customer or Subcontractor record. A User holds exactly one role globally: the same real person cannot be both a Customer and a Subcontractor (or a Contractor and a Subcontractor) under one login — an Invite that would create such a collision is refused. See [ADR-0002](docs/adr/0002-one-role-per-user.md).
+_Avoid_: Account (ambiguous — could mean User or Customer or Subcontractor).
+
+**Subcontractor**:
+A contractor-scoped record for a trade partner the Contractor delegates work to. Belongs to exactly one Contractor and may Link to at most one User via a Subcontractor Invite — mirroring the Customer record↔User pattern (the same trade person under two Contractors = two Subcontractor records → one User). Carries a profile the Contractor administers (trade/specialty, contact, company, license #, insurance) and an access Tier. A Subcontractor is assigned to Orders to receive work.
+_Avoid_: Vendor, crew, worker, contractor (a Subcontractor is a distinct record, not a Contractor User).
+
+**Tier (Trusted Subcontractor / Guest Contractor)**:
+An access level the primary Contractor assigns to each Subcontractor, gating both visibility and write access on assigned Orders. A **Trusted Subcontractor** sees the full Order (including the Customer's contact details + timeline) and may write back (timeline notes, job photos). A **Guest Contractor** sees work details only — project, type, status, work timeline — with the Customer's contact PII redacted, and is read-only. The Tier lives on the Subcontractor record and applies to all their assignments.
+_Avoid_: Permission, role (role is a User concept; Tier is a Subcontractor-record concept).
+
+**Subcontractor Invite**:
+A magic/invite link a Contractor sends so a Subcontractor can access their portal, bound to the Subcontractor record by token (email is a fallback) — the same load-bearing binding as the customer Invite ([ADR-0001](docs/adr/0001-bind-customer-to-user-by-invite-token.md)), implemented as a parallel mechanism rather than by generalizing the customer Invite. See [ADR-0003](docs/adr/0003-parallel-subcontractor-invite.md).
+_Avoid_: Signup, registration.
+
+**Assignment**:
+The link that puts a Subcontractor on an Order (many-to-many: an Order may have several assigned Subcontractors; a Subcontractor's portal lists the Orders assigned to them). Assignment is what makes an Order appear as a Subcontractor's "work".
+_Avoid_: Dispatch, allocation.
 
 **Invite**:
 A magic/invite link a Contractor sends so a Customer can access their portal. The Contractor initiates it; Customers do not self-register.
@@ -41,6 +57,10 @@ _Avoid_: Project (used in older business proposal), job, ticket.
 - A **Contractor** sends an **Invite** to a **Customer**; the Customer does not self-register.
 - Accepting an **Invite** binds the accepting **User** to the **Customer** via the Invite's token (email match is a fallback). A **User** may link to at most one **Customer** per **Contractor**.
 - An **Order** belongs to one **Contractor** and references one **Customer**.
+- A **Contractor** owns many **Subcontractors** (contractor-scoped, exactly as with Customers).
+- A **Subcontractor** links to at most one **User** account (set when it accepts a **Subcontractor Invite**), and a **User** holds one global role — so a login is never both a Customer and a Subcontractor.
+- A **Subcontractor** is assigned to many **Orders**, and an **Order** may have many assigned **Subcontractors** (**Assignment**).
+- A Subcontractor's **Tier** (Trusted Subcontractor vs Guest Contractor) determines what they see and whether they can write on their assigned **Orders**.
 
 ## Example dialogue
 

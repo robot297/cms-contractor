@@ -21,7 +21,7 @@
 /**
  * @typedef {{
  *   cust: string, project: string, type: string, state: string,
- *   followUpDays: number | null, notes?: string[]
+ *   followUpDays: number | null, notes?: string[], icon?: string | null
  * }} DemoOrder
  */
 
@@ -85,26 +85,43 @@ export const DEMO_ORDERS = [
 		type: 'Deck',
 		state: 'In Progress',
 		followUpDays: -1, // overdue → shows as "due"
-		notes: ['Cedar posts confirmed. Deposit paid by check.']
+		notes: ['Cedar posts confirmed. Deposit paid by check.'],
+		icon: '🪵'
 	},
-	{ cust: 'mina', project: 'Poolside Pergola', type: 'Pergola', state: 'Quote Sent', followUpDays: 3 },
+	{
+		cust: 'mina',
+		project: 'Poolside Pergola',
+		type: 'Pergola',
+		state: 'Quote Sent',
+		followUpDays: 3,
+		icon: '📐'
+	},
 	{
 		cust: 'luis',
 		project: 'Driveway Carport',
 		type: 'Carport',
 		state: 'Deposit Pending',
 		followUpDays: -4, // overdue
-		notes: ['Left a voicemail about the deposit.']
+		notes: ['Left a voicemail about the deposit.'],
+		icon: '🏗️'
 	},
 	{
 		cust: 'nina',
 		project: 'HOA Community Pavilion',
 		type: 'Pavilion',
 		state: 'Work Scheduled',
-		followUpDays: 6
+		followUpDays: 6,
+		icon: '🚧'
 	},
-	{ cust: 'nina', project: 'Garden Gazebo', type: 'Gazebo', state: 'Work Complete', followUpDays: null },
-	{ cust: 'sam', project: 'Tool Shed', type: 'Shed', state: 'Inquiry', followUpDays: 0 } // due today
+	{
+		cust: 'nina',
+		project: 'Garden Gazebo',
+		type: 'Gazebo',
+		state: 'Work Complete',
+		followUpDays: null,
+		icon: '✅'
+	},
+	{ cust: 'sam', project: 'Tool Shed', type: 'Shed', state: 'Inquiry', followUpDays: 0, icon: '🏠' } // due today
 ];
 
 /** @type {DemoNotification[]} */

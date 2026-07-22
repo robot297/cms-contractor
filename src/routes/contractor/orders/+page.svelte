@@ -39,17 +39,11 @@
 	const visibleOrders = $derived(buckets[view]);
 
 	let confirmingDeleteOrderId: string | null = $state(null);
-	// Which order's follow-up "Snooze" menu is expanded (one at a time).
-	let snoozeOpenId: string | null = $state(null);
 	// Which order's overflow (⋯) menu is open, and which has its note field open.
 	let menuOpenId: string | null = $state(null);
 	let noteOpenId: string | null = $state(null);
-	// Close the snooze menu once a follow-up change is submitted.
-	const snoozeThenClose = () =>
-		async ({ update }: { update: () => Promise<void> }) => {
-			snoozeOpenId = null;
-			await update();
-		};
+	// The lifecycle filter is a single button that opens a small menu.
+	let viewMenuOpen = $state(false);
 	// Close & reset the note field after it's submitted.
 	const noteThenClose = () =>
 		async ({ update }: { update: () => Promise<void> }) => {
@@ -83,10 +77,6 @@
 		newOrderDialog?.showModal();
 	}
 
-	function toDateInput(d: Date | string | null): string {
-		if (!d) return '';
-		return new Date(d).toISOString().slice(0, 10);
-	}
 	function fmtDate(d: Date | string | null): string {
 		return d ? new Date(d).toLocaleDateString() : '—';
 	}
@@ -145,16 +135,38 @@
 		>
 	</header>
 
-	<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-		{#each VIEWS as key (key)}
+	<div style="position: relative; align-self: start;">
+		<button
+			type="button"
+			aria-expanded={viewMenuOpen}
+			onclick={() => (viewMenuOpen = !viewMenuOpen)}
+			style="{pill} display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600;"
+			>{VIEW_LABELS[view]} ({buckets[view].length}) <span style="color: #8c959f;">▾</span></button
+		>
+		{#if viewMenuOpen}
+			<!-- click-away backdrop -->
 			<button
 				type="button"
-				onclick={() => (view = key)}
-				style="{pill} {view === key
-					? 'background: #0969da; color: #fff; border-color: #0969da;'
-					: ''}">{VIEW_LABELS[key]} ({buckets[key].length})</button
+				aria-label="Close filter menu"
+				onclick={() => (viewMenuOpen = false)}
+				style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+			></button>
+			<div
+				style="position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; min-width: 200px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
 			>
-		{/each}
+				{#each VIEWS as key (key)}
+					<button
+						type="button"
+						onclick={() => {
+							view = key;
+							viewMenuOpen = false;
+						}}
+						style="{menuItem} {view === key ? 'background: #ddf4ff; color: #0969da; font-weight: 700;' : ''}"
+						>{VIEW_LABELS[key]} ({buckets[key].length})</button
+					>
+				{/each}
+			</div>
+		{/if}
 	</div>
 
 	<section style="display: grid; gap: 0.75rem;">
@@ -191,12 +203,6 @@
 					</div>
 
 					<div style="display: flex; gap: 0.4rem; align-items: center; flex-shrink: 0;">
-						{#if order.followUpDue}
-							<span
-								style="font-size: 0.72rem; font-weight: 700; color: #cf222e; background: #ffebe9; border: 1px solid #e5534b; border-radius: 999px; padding: 0.1rem 0.55rem; white-space: nowrap;"
-								>Due</span
-							>
-						{/if}
 						<span
 							style="font-size: 0.78rem; font-weight: 700; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1.5px solid {badge.border}; border-radius: 999px; padding: 0.15rem 0.65rem;"
 							>{order.state}</span
@@ -236,64 +242,20 @@
 					</div>
 				{/if}
 
-				<!-- Follow-up -->
+				<!-- Follow-up (read-only) — overdue is flagged right on the date -->
 				<div style="display: grid; gap: 0.5rem;">
-					<div
-						style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; font-size: 0.9rem;"
-					>
-						<span style="color: #57606a;"
-							>Next follow-up: <strong style="color: #1f2328;"
-								>{fmtDate(order.nextFollowUpAt)}</strong
-							></span
+					<div style="font-size: 0.9rem;">
+						<span style="color: #57606a;">Next follow-up:</span>
+						<strong style="color: {order.followUpDue ? '#cf222e' : '#1f2328'};"
+							>{fmtDate(order.nextFollowUpAt)}</strong
 						>
-						<button
-							type="button"
-							aria-expanded={snoozeOpenId === order.id}
-							onclick={() => (snoozeOpenId = snoozeOpenId === order.id ? null : order.id)}
-							style={pill}>Snooze ▾</button
-						>
-					</div>
-
-					{#if snoozeOpenId === order.id}
-						<div
-							style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; background: #f6f8fa; border: 1px solid #eaeef2; border-radius: 10px; padding: 0.55rem 0.65rem;"
-						>
-							<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
-								<input type="hidden" name="orderId" value={order.id} />
-								<button type="submit" name="preset" value="1d" style={pill}>+1 day</button>
-							</form>
-							<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
-								<input type="hidden" name="orderId" value={order.id} />
-								<button type="submit" name="preset" value="3d" style={pill}>+3 days</button>
-							</form>
-							<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
-								<input type="hidden" name="orderId" value={order.id} />
-								<button type="submit" name="preset" value="1w" style={pill}>+1 week</button>
-							</form>
-							<span style="width: 1px; height: 20px; background: #d0d7de;"></span>
-							<form
-								method="POST"
-								action="?/setFollowUp"
-								use:enhance={snoozeThenClose}
-								style="display: flex; gap: 0.35rem; align-items: center;"
+						{#if order.followUpDue}
+							<span
+								style="font-size: 0.72rem; font-weight: 700; color: #cf222e; background: #ffebe9; border: 1px solid #e5534b; border-radius: 999px; padding: 0.1rem 0.5rem; margin-left: 0.3rem; white-space: nowrap;"
+								>Needs update</span
 							>
-								<input type="hidden" name="orderId" value={order.id} />
-								<input
-									type="date"
-									name="date"
-									value={toDateInput(order.nextFollowUpAt)}
-									style={field}
-								/>
-								<button type="submit" style={pill}>Set date</button>
-							</form>
-							{#if order.nextFollowUpAt}
-								<form method="POST" action="?/clearFollowUp" use:enhance={snoozeThenClose}>
-									<input type="hidden" name="orderId" value={order.id} />
-									<button type="submit" style="{pill} color: #cf222e;">Clear</button>
-								</form>
-							{/if}
-						</div>
-					{/if}
+						{/if}
+					</div>
 
 					{#if noteOpenId === order.id}
 						<form
