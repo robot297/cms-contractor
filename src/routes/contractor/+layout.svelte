@@ -27,7 +27,7 @@
 <div style="min-height: 100dvh; display: flex; flex-direction: column;">
 	<div style="background: #111;">
 		<nav class="nav">
-			<span class="brand">🛠 Contractor&nbsp;CRM</span>
+			<a href={resolve('/')} class="brand">🛠 Contractor&nbsp;CRM</a>
 
 			<button
 				type="button"
@@ -138,7 +138,11 @@
 		letter-spacing: 0.02em;
 		color: #ffcc00;
 		text-shadow: 2px 2px 0 #000;
+		text-decoration: none;
 		flex-shrink: 0;
+	}
+	.brand:hover {
+		color: #fff;
 	}
 	/* Desktop: links sit next to the brand, user/sign-out pushed to the right. */
 	.nav-collapse {

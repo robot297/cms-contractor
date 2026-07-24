@@ -35,6 +35,7 @@ export type ContractorOrderView = OrderRow & {
 	customerName: string;
 	customerEmail: string;
 	customerPhone: string | null;
+	customerAddress: string | null;
 	customerPreferredContact: 'email' | 'phone';
 	customerVisibleState: string;
 	followUpDue: boolean;
@@ -66,6 +67,7 @@ function toContractorView(row: OrderRow, cust: CustomerRow | null): ContractorOr
 		customerName: cust?.name ?? 'Unknown customer',
 		customerEmail: cust?.email ?? '',
 		customerPhone: cust?.phone ?? null,
+		customerAddress: cust?.address ?? null,
 		customerPreferredContact: cust?.preferredContact === 'phone' ? 'phone' : 'email',
 		customerVisibleState: getVisibleCustomerState(row.state as ContractorOrderState),
 		followUpDue: isFollowUpDue(row.nextFollowUpAt)

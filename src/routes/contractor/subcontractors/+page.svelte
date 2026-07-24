@@ -51,18 +51,23 @@
 <div class="wrap">
 	<header class="head">
 		<div>
-			<h1>Subcontractors</h1>
+			<h1 class="page-title">Subcontractors</h1>
 			<p class="sub">Your trade partners — roster, tier, and job assignments.</p>
 		</div>
-		<button class="btn primary" onclick={() => (showAdd = true)}>+ Add subcontractor</button>
 	</header>
 
-	<input
-		class="search"
-		type="search"
-		placeholder="Search by name, email, trade, or company…"
-		bind:value={q}
-	/>
+	<div class="search-row">
+		<div class="search-field">
+			<span class="search-icon" aria-hidden="true">🔍</span>
+			<input class="search" type="search" placeholder="Search" aria-label="Search subcontractors" bind:value={q} />
+		</div>
+		<button
+			class="icon-btn add-btn"
+			title="Add subcontractor"
+			aria-label="Add subcontractor"
+			onclick={() => (showAdd = true)}>＋</button
+		>
+	</div>
 
 	{#if filtered.length === 0}
 		<div class="empty">
@@ -250,7 +255,15 @@
 		onclick={(e) => e.target === e.currentTarget && (showAdd = false)}
 	>
 		<div class="modal" role="dialog" aria-modal="true" aria-label="Add subcontractor" tabindex="-1">
+			<button
+				class="modal-close"
+				type="button"
+				title="Cancel"
+				aria-label="Cancel"
+				onclick={() => (showAdd = false)}>✕</button
+			>
 			<h2>Add subcontractor</h2>
+			<p class="modal-sub">Add a trade partner to your roster — you can assign them to jobs afterward.</p>
 			<form
 				method="POST"
 				action="?/addSubcontractor"
@@ -260,26 +273,62 @@
 				}}
 			>
 				<div class="fields">
-					<label>Name<input name="name" required /></label>
-					<label>Email<input name="email" type="email" required /></label>
-					<label>Phone<input name="phone" oninput={onPhoneInput} /></label>
-					<label>Trade<input name="trade" list="trades" placeholder="e.g. Electrical" /></label>
-					<label>Company<input name="company" /></label>
+					<div class="group-label">Contact</div>
 					<label>
-						Tier
+						<span class="lbl">Name <span class="req" aria-hidden="true">*</span></span>
+						<input name="name" required placeholder="Jordan Rivera" />
+					</label>
+					<label>
+						<span class="lbl">Email <span class="req" aria-hidden="true">*</span></span>
+						<input name="email" type="email" required placeholder="jordan@example.com" />
+					</label>
+					<label>
+						<span class="lbl">Phone</span>
+						<input name="phone" oninput={onPhoneInput} placeholder="(555) 123-4567" />
+					</label>
+					<label>
+						<span class="lbl">Company</span>
+						<input name="company" placeholder="Rivera Electric" />
+					</label>
+
+					<div class="group-label">Trade &amp; access</div>
+					<label>
+						<span class="lbl">Trade</span>
+						<input name="trade" list="trades" placeholder="e.g. Electrical" />
+					</label>
+					<label>
+						<span class="lbl">Tier</span>
 						<select name="tier">
-							<option value="guest">Guest Contractor (read-only, PII redacted)</option>
-							<option value="trusted">Trusted Subcontractor (full access)</option>
+							<option value="guest">Guest Contractor</option>
+							<option value="trusted">Trusted Subcontractor</option>
 						</select>
 					</label>
-					<label>License #<input name="licenseNumber" /></label>
-					<label>Insurance carrier<input name="insuranceCarrier" /></label>
-					<label>Insurance expires<input name="insuranceExpiresAt" type="date" /></label>
-					<label class="wide">Tags<input name="tags" placeholder="licensed, insured" /></label>
+					<p class="form-note">
+						Guests are read-only and never see customer contact details. Trusted subs get full
+						order access.
+					</p>
+
+					<div class="group-label">Compliance <span class="opt">optional</span></div>
+					<label>
+						<span class="lbl">License #</span>
+						<input name="licenseNumber" placeholder="EC-100420" />
+					</label>
+					<label>
+						<span class="lbl">Insurance carrier</span>
+						<input name="insuranceCarrier" placeholder="Acme Mutual" />
+					</label>
+					<label>
+						<span class="lbl">Insurance expires</span>
+						<input name="insuranceExpiresAt" type="date" />
+					</label>
+					<label>
+						<span class="lbl">Tags</span>
+						<input name="tags" placeholder="licensed, insured" />
+					</label>
 				</div>
-				<div class="row-actions">
-					<button class="btn primary" type="submit">Add subcontractor</button>
+				<div class="row-actions end">
 					<button class="btn ghost" type="button" onclick={() => (showAdd = false)}>Cancel</button>
+					<button class="btn primary" type="submit">Add subcontractor</button>
 				</div>
 			</form>
 		</div>
@@ -308,13 +357,39 @@
 		color: #555;
 		font-weight: 600;
 	}
+	.search-row {
+		display: flex;
+		gap: 0.6rem;
+		align-items: center;
+		margin: 1rem 0;
+	}
+	.search-field {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+	}
+	.search-icon {
+		position: absolute;
+		left: 0.85rem;
+		top: 50%;
+		transform: translateY(-50%);
+		pointer-events: none;
+		font-size: 0.95rem;
+		color: #8c959f;
+	}
 	.search {
 		width: 100%;
-		margin: 1rem 0;
-		padding: 0.7rem 0.9rem;
+		box-sizing: border-box;
+		padding: 0.7rem 0.9rem 0.7rem 2.5rem;
 		border: 2px solid #111;
 		border-radius: 10px;
 		font-size: 1rem;
+	}
+	.add-btn {
+		flex-shrink: 0;
+		width: 2.9rem;
+		height: 2.9rem;
+		font-size: 1.5rem;
 	}
 	.grid {
 		display: grid;
@@ -457,29 +532,90 @@
 	.fields {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.6rem;
+		gap: 0.75rem 1rem;
 	}
 	.fields .wide {
 		grid-column: 1 / -1;
 	}
 	.fields label {
 		display: grid;
-		gap: 0.25rem;
-		font-size: 0.78rem;
-		font-weight: 800;
-		text-transform: uppercase;
-		letter-spacing: 0.02em;
-		color: #444;
+		gap: 0.3rem;
+		font-size: 0.8rem;
+		font-weight: 600;
+		text-transform: none;
+		letter-spacing: normal;
+		color: #57606a;
 	}
 	.fields input,
 	.fields select,
 	.fields textarea {
-		padding: 0.5rem;
-		border: 2px solid #111;
-		border-radius: 8px;
+		padding: 0.6rem 0.7rem;
+		border: 1.5px solid #d9dde3;
+		border-radius: 9px;
 		font-size: 0.95rem;
 		font-weight: 500;
 		text-transform: none;
+		background: #fff;
+		color: #1f2328;
+		transition:
+			border-color 0.12s ease,
+			box-shadow 0.12s ease;
+	}
+	.fields input::placeholder,
+	.fields textarea::placeholder {
+		color: #b3b9c2;
+	}
+	.fields input:focus,
+	.fields select:focus,
+	.fields textarea:focus {
+		outline: none;
+		border-color: #a98be2;
+		box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.16);
+	}
+	.fields input:disabled {
+		background: #f4f5f7;
+		color: #8c959f;
+	}
+	/* Section divider inside the field grid — turns a 10-field wall into
+	   scannable groups. */
+	.group-label {
+		grid-column: 1 / -1;
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		margin-top: 0.35rem;
+		padding-bottom: 0.3rem;
+		border-bottom: 1px solid #eef0f3;
+		font-size: 0.72rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #8c959f;
+	}
+	.group-label:first-child {
+		margin-top: 0;
+	}
+	.opt {
+		font-size: 0.62rem;
+		font-weight: 700;
+		color: #8c959f;
+		background: #f2f3f5;
+		border-radius: 999px;
+		padding: 0.05rem 0.45rem;
+		text-transform: none;
+		letter-spacing: 0;
+	}
+	.req {
+		color: #cf222e;
+		font-weight: 900;
+	}
+	.form-note {
+		grid-column: 1 / -1;
+		margin: -0.25rem 0 0.1rem;
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: #8c959f;
+		line-height: 1.35;
 	}
 	.hint {
 		font-weight: 600;
@@ -547,6 +683,7 @@
 		z-index: 100;
 	}
 	.modal {
+		position: relative;
 		background: #fff;
 		border: 3px solid #111;
 		border-radius: 16px;
@@ -557,13 +694,60 @@
 		max-height: 90dvh;
 		overflow-y: auto;
 	}
+	.modal-close {
+		position: absolute;
+		top: 0.85rem;
+		right: 0.85rem;
+		width: 2rem;
+		height: 2rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: none;
+		border-radius: 8px;
+		background: #f2f3f5;
+		color: #57606a;
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+	}
+	.modal-close:hover {
+		background: #e6e8eb;
+		color: #1f2328;
+	}
 	.modal h2 {
-		margin: 0 0 0.9rem;
+		margin: 0 0 0.15rem;
+		padding-right: 2.5rem;
+		font-family: 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif;
+		font-size: 1.25rem;
+		font-weight: 700;
+		text-transform: none;
+		letter-spacing: -0.01em;
+	}
+	.modal-sub {
+		margin: 0 0 1.1rem;
+		color: #57606a;
+		font-size: 0.85rem;
+		font-weight: 500;
+		line-height: 1.4;
+	}
+	.row-actions.end {
+		justify-content: flex-end;
+		margin-top: 1rem;
+		padding-top: 0.9rem;
+		border-top: 1px solid #eef0f3;
 	}
 	@media (max-width: 560px) {
 		.fields,
 		.profile {
 			grid-template-columns: 1fr;
+		}
+		/* Full-width, thumb-friendly actions; primary sits on top. */
+		.modal .row-actions.end {
+			flex-direction: column-reverse;
+		}
+		.modal .row-actions.end .btn {
+			width: 100%;
 		}
 	}
 </style>

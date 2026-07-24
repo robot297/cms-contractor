@@ -1,4 +1,5 @@
 import { redirect } from '@sveltejs/kit';
+import { isDemoEnabled } from '$lib/server/demo.server';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = (event) => {
@@ -12,5 +13,5 @@ export const load: PageServerLoad = (event) => {
 					: '/customer';
 		redirect(302, home);
 	}
-	return {};
+	return { demoEnabled: isDemoEnabled() };
 };

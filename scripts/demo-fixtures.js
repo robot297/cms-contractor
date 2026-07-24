@@ -74,6 +74,129 @@ export const DEMO_CUSTOMERS = [
 		tags: [],
 		avatar: '/img/noah.png',
 		preferredContact: 'email'
+	},
+	// Extra roster (no avatars → exercises the initials placeholder) spread
+	// across the alphabet so the A–Z jump rail has something to scrub through.
+	{
+		key: 'aisha',
+		name: 'Aisha Khan',
+		email: 'aisha.khan@example.com',
+		phone: '(555) 118-2043',
+		address: '27 Birch Rd, Riverton, TX 75002',
+		notes: 'Wants a shaded patio before summer.',
+		tags: ['pergola'],
+		avatar: null,
+		preferredContact: 'phone'
+	},
+	{
+		key: 'bianca',
+		name: 'Bianca Rossi',
+		email: 'bianca.rossi@example.com',
+		phone: '(555) 204-8891',
+		address: '3 Willow Ct, Springfield',
+		notes: null,
+		tags: ['repeat'],
+		avatar: null,
+		preferredContact: 'email'
+	},
+	{
+		key: 'caleb',
+		name: 'Caleb Nguyen',
+		email: 'caleb.nguyen@example.com',
+		phone: '(555) 660-1177',
+		address: '410 Sunset Blvd, Fair Oaks, CA 95628',
+		notes: 'Referred by Bianca.',
+		tags: ['referral', 'deck'],
+		avatar: null,
+		preferredContact: 'phone'
+	},
+	{
+		key: 'divya',
+		name: 'Divya Rao',
+		email: 'divya.rao@example.com',
+		phone: null,
+		address: '88 Maple Way, Riverton',
+		notes: 'HOA approval needed before scheduling.',
+		tags: ['commercial'],
+		avatar: null,
+		preferredContact: 'email'
+	},
+	{
+		key: 'elena',
+		name: 'Elena Popov',
+		email: 'elena.popov@example.com',
+		phone: '(555) 771-3320',
+		address: '15 Harbor St, Springfield, IL 62704',
+		notes: null,
+		tags: [],
+		avatar: null,
+		preferredContact: 'phone'
+	},
+	{
+		key: 'grace',
+		name: 'Grace Owusu',
+		email: 'grace.owusu@example.com',
+		phone: '(555) 902-4415',
+		address: '502 Ridgeline Dr, Fair Oaks',
+		notes: 'Prefers weekend site visits.',
+		tags: ['carport'],
+		avatar: null,
+		preferredContact: 'email'
+	},
+	{
+		key: 'hank',
+		name: 'Hank Miller',
+		email: 'hank.miller@example.com',
+		phone: '(555) 335-7788',
+		address: '9 Foundry Ln, Riverton, TX 75002',
+		notes: null,
+		tags: [],
+		avatar: null,
+		preferredContact: 'phone'
+	},
+	{
+		key: 'priya',
+		name: 'Priya Shah',
+		email: 'priya.shah@example.com',
+		phone: '(555) 447-9012',
+		address: '221 Orchard Ave, Springfield',
+		notes: 'Repeat client — pole barn next.',
+		tags: ['repeat', 'pole barn'],
+		avatar: null,
+		preferredContact: 'email'
+	},
+	{
+		key: 'quentin',
+		name: 'Quentin Blake',
+		email: 'quentin.blake@example.com',
+		phone: null,
+		address: '64 Cannery Row, Fair Oaks, CA 95628',
+		notes: null,
+		tags: [],
+		avatar: null,
+		preferredContact: 'email'
+	},
+	{
+		key: 'tomas',
+		name: 'Tomás Vega',
+		email: 'tomas.vega@example.com',
+		phone: '(555) 613-5540',
+		address: '7 Kiln St, Riverton',
+		notes: 'Bilingual — Spanish preferred.',
+		tags: ['referral'],
+		avatar: null,
+		preferredContact: 'phone'
+	},
+	{
+		key: 'wendy',
+		name: 'Wendy Zhao',
+		email: 'wendy.zhao@example.com',
+		phone: '(555) 288-6603',
+		address: '133 Lakeview Ter, Springfield, IL 62704',
+		notes: 'Detailed itemized quotes, please.',
+		tags: ['commercial'],
+		avatar: null,
+		preferredContact: 'email'
 	}
 ];
 

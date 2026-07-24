@@ -8,6 +8,7 @@
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	type OrderView = (typeof data.orders)[number];
+	type NoteView = (typeof data.notesByOrder)[string][number];
 
 	// Which lifecycle bucket is shown. Active is the working list; completed and
 	// cancelled orders move out of the way into their own views.
@@ -115,7 +116,7 @@
 	const primaryBtn =
 		'padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
 	const iconBtn =
-		'width: 2.4rem; height: 2.4rem; display: inline-flex; align-items: center; justify-content: center; border: 2px solid #111; background: #fff; border-radius: 12px; cursor: pointer; font-size: 1.2rem; line-height: 1; box-shadow: 2px 2px 0 #111;';
+		'width: 2.4rem; height: 2.4rem; font-size: 1.4rem;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
@@ -124,9 +125,26 @@
 	<title>Orders</title>
 </svelte:head>
 
+<!-- Shared renderer for an order's internal-note history (used by the desktop
+     disclosure and the mobile add-note panel). -->
+{#snippet notesList(notes: NoteView[])}
+	<div style="display: grid; gap: 0.4rem;">
+		{#each notes as note (note.id)}
+			<div
+				style="padding: 0.5rem 0.6rem; border-radius: 8px; background: #f6f8fa; border: 1px solid #eaeef2;"
+			>
+				<div style="white-space: pre-wrap;">{note.detail}</div>
+				<div style="font-size: 0.75rem; color: #8c959f; margin-top: 0.2rem;">
+					{new Date(note.createdAt).toLocaleString()} · internal
+				</div>
+			</div>
+		{/each}
+	</div>
+{/snippet}
+
 <div style="max-width: 860px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem;">
 	<header style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
-		<h1 style="margin: 0;">Orders</h1>
+		<h1 class="page-title" style="margin: 0;">Orders</h1>
 		<button
 			type="button"
 			onclick={openNewOrder}
@@ -249,57 +267,52 @@
 						<strong style="color: {order.followUpDue ? '#cf222e' : '#1f2328'};"
 							>{fmtDate(order.nextFollowUpAt)}</strong
 						>
-						{#if order.followUpDue}
-							<span
-								style="font-size: 0.72rem; font-weight: 700; color: #cf222e; background: #ffebe9; border: 1px solid #e5534b; border-radius: 999px; padding: 0.1rem 0.5rem; margin-left: 0.3rem; white-space: nowrap;"
-								>Needs update</span
-							>
-						{/if}
 					</div>
 
 					{#if noteOpenId === order.id}
-						<form
-							method="POST"
-							action="?/addNote"
-							use:enhance={noteThenClose}
-							style="display: flex; gap: 0.5rem; align-items: center;"
-						>
-							<input type="hidden" name="orderId" value={order.id} />
-							<input
-								name="note"
-								placeholder="Add an internal note…"
-								required
-								style="flex: 1; min-width: 140px; {field}"
-							/>
-							<button type="submit" style={primaryBtn}>Add</button>
-						</form>
+						<div style="display: grid; gap: 0.5rem;">
+							<!-- Mobile: the disclosure below is hidden, so the note history lives
+							     here alongside the add field once "Add note" is pressed. -->
+							{#if (data.notesByOrder[order.id] ?? []).length > 0}
+								<div class="notes-history-mobile">
+									{@render notesList(data.notesByOrder[order.id])}
+								</div>
+							{/if}
+							<form
+								method="POST"
+								action="?/addNote"
+								use:enhance={noteThenClose}
+								style="display: flex; gap: 0.5rem; align-items: center;"
+							>
+								<input type="hidden" name="orderId" value={order.id} />
+								<input
+									name="note"
+									placeholder="Add an internal note…"
+									required
+									style="flex: 1; min-width: 140px; {field}"
+								/>
+								<button type="submit" style={primaryBtn}>Add</button>
+							</form>
+						</div>
 					{/if}
 				</div>
 
 				{#if (data.notesByOrder[order.id] ?? []).length > 0}
-					<details style="font-size: 0.85rem;">
+					<details class="notes-disclosure" style="font-size: 0.85rem;">
 						<summary style="cursor: pointer; color: #57606a;"
 							>Internal notes ({data.notesByOrder[order.id].length})</summary
 						>
-						<div style="display: grid; gap: 0.4rem; margin-top: 0.4rem;">
-							{#each data.notesByOrder[order.id] as note (note.id)}
-								<div
-									style="padding: 0.5rem 0.6rem; border-radius: 8px; background: #f6f8fa; border: 1px solid #eaeef2;"
-								>
-									<div style="white-space: pre-wrap;">{note.detail}</div>
-									<div style="font-size: 0.75rem; color: #8c959f; margin-top: 0.2rem;">
-										{new Date(note.createdAt).toLocaleString()} · internal
-									</div>
-								</div>
-							{/each}
+						<div style="margin-top: 0.4rem;">
+							{@render notesList(data.notesByOrder[order.id])}
 						</div>
 					</details>
 				{/if}
 
 				<!-- Action bar: explicit details link on the left, icon buttons on the right -->
-				<div style="display: flex; gap: 0.5rem; align-items: center;">
+				<div class="action-bar" style="display: flex; gap: 0.7rem; align-items: center;">
 					<a
 						href={`/contractor/orders/${order.id}`}
+						class="view-details-link"
 						style="margin-right: auto; font-size: 0.9rem; font-weight: 600; color: #0969da; text-decoration: none; white-space: nowrap;"
 						>View order details →</a
 					>
@@ -309,6 +322,7 @@
 							title="Contact customer"
 							aria-label="Contact customer"
 							onclick={() => openContact(order.customerId)}
+							class="icon-btn"
 							style={iconBtn}>✉️</button
 						>
 					{/if}
@@ -318,6 +332,7 @@
 						aria-label="Add note"
 						aria-expanded={noteOpenId === order.id}
 						onclick={() => (noteOpenId = noteOpenId === order.id ? null : order.id)}
+						class="icon-btn"
 						style={iconBtn}>📝</button
 					>
 					<div style="position: relative;">
@@ -327,6 +342,7 @@
 							aria-label="More actions"
 							aria-expanded={menuOpenId === order.id}
 							onclick={() => (menuOpenId = menuOpenId === order.id ? null : order.id)}
+							class="icon-btn"
 							style={iconBtn}>⋯</button
 						>
 						{#if menuOpenId === order.id}
@@ -531,3 +547,30 @@
 		{/if}
 	</div>
 </dialog>
+
+<style>
+	/* The mobile-only note history inside the add-note panel is hidden on wider
+	   screens, where the disclosure below the card handles browsing instead. */
+	.notes-history-mobile {
+		display: none;
+	}
+
+	@media (max-width: 560px) {
+		/* Declutter the card on phones: the standalone "View order details" link
+		   is redundant (the customer name and the ⋯ menu both open the order),
+		   and the notes disclosure gives way to the add-note panel. */
+		.view-details-link {
+			display: none;
+		}
+		/* With the details link gone, keep the icon buttons pinned to the right. */
+		.action-bar {
+			justify-content: flex-end;
+		}
+		.notes-disclosure {
+			display: none;
+		}
+		.notes-history-mobile {
+			display: block;
+		}
+	}
+</style>

@@ -9,6 +9,40 @@
 	const customer = $derived(data.customer);
 
 	let confirmingDelete = $state(false);
+	// Status editing hides behind a "Change" toggle under the badge.
+	let statusOpen = $state(false);
+	const statusThenClose = () =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			statusOpen = false;
+			await update();
+		};
+	// Follow-up controls collapse behind a single snooze (⏰) button.
+	let snoozeOpen = $state(false);
+	// Customer contact (email/call) popover, mirroring the dashboard cards.
+	let contactOpen = $state(false);
+	// The subcontractor picker hides behind a + button.
+	let assignOpen = $state(false);
+	// Attachment rules (types + size) live in an info modal, off the main flow.
+	let infoDialog: HTMLDialogElement | undefined = $state();
+	const assignThenClose = () =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			assignOpen = false;
+			await update();
+		};
+	// The timeline's note input is hidden until the + button reveals it.
+	let noteOpen = $state(false);
+	// Close the snooze popover once a follow-up change is submitted.
+	const snoozeThenClose = () =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			snoozeOpen = false;
+			await update();
+		};
+	// Close & reset the note field after a note is added.
+	const noteThenClose = () =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			noteOpen = false;
+			await update();
+		};
 
 	function toDateInput(d: Date | string | null): string {
 		if (!d) return '';
@@ -71,7 +105,7 @@
 		<!-- Header: customer name leads, project is the subtitle -->
 		<header class="order-head">
 			<div style="display: grid; gap: 0.3rem; min-width: 0;">
-				<h1 style="margin: 0; font-size: 1.5rem; line-height: 1.15;">{order.customerName}</h1>
+				<h1 class="order-title">{order.customerName}</h1>
 				<span style="color: #57606a; font-weight: 600;"
 					>{order.projectName ?? 'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)} · {typeSuffix(
 							order.projectName,
@@ -79,10 +113,43 @@
 						)}{/if}</span
 				>
 			</div>
-			<span
-				style="font-size: 0.82rem; font-weight: 700; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.25rem 0.8rem;"
-				>{order.state}</span
-			>
+			<div style="display: grid; gap: 0.4rem; justify-items: end; flex-shrink: 0;">
+				<span
+					style="font-size: 0.82rem; font-weight: 700; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.25rem 0.8rem;"
+					>{order.state}</span
+				>
+				<div style="position: relative;">
+					<button
+						type="button"
+						aria-expanded={statusOpen}
+						onclick={() => (statusOpen = !statusOpen)}
+						style="padding: 0.2rem 0.7rem; border-radius: 999px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; font-size: 0.78rem; font-weight: 600; color: #57606a;"
+						>Change status</button
+					>
+					{#if statusOpen}
+						<!-- click-away backdrop -->
+						<button
+							type="button"
+							aria-label="Close status editor"
+							onclick={() => (statusOpen = false)}
+							style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+						></button>
+						<form
+							method="POST"
+							action="?/updateStatus"
+							use:enhance={statusThenClose}
+							style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 240px; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.6rem; display: grid; gap: 0.5rem;"
+						>
+							<select name="state" aria-label="Order status" style="{field} width: 100%;">
+								{#each QUICK_UPDATE_STATES as s (s)}
+									<option value={s} selected={s === order.state}>{s}</option>
+								{/each}
+							</select>
+							<button type="submit" style="{primaryBtn} width: 100%;">Save status</button>
+						</form>
+					{/if}
+				</div>
+			</div>
 		</header>
 
 		{#if form?.message}
@@ -94,85 +161,109 @@
 		{/if}
 
 		<div class="detail-grid">
-			<!-- Main column: the working surface — status, follow-up, activity -->
+			<!-- Main column: the working surface — follow-up, activity -->
 			<div class="col">
-				<!-- Status -->
+				<!-- Follow-up: one snooze (⏰) button opens presets + a date picker -->
 				<section style={card}>
-					<h2 style={sectionTitle}>Update status</h2>
-					<form method="POST" action="?/updateStatus" use:enhance style="display: grid; gap: 0.6rem;">
-						<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-							<select name="state" aria-label="Order status" style="flex: 1; min-width: 180px; {field}">
-								{#each QUICK_UPDATE_STATES as s (s)}
-									<option value={s} selected={s === order.state}>{s}</option>
-								{/each}
-							</select>
-							<button type="submit" style={primaryBtn}>Save status</button>
-						</div>
-						<input name="note" placeholder="Optional note to record with this change" style={field} />
-					</form>
-				</section>
-
-				<!-- Follow-up -->
-				<section style={card}>
-					<h2 style={sectionTitle}>Follow-up</h2>
-					<div style="font-size: 0.95rem;">
-						Next: <strong style="color: {order.followUpDue ? '#cf222e' : '#1f2328'};"
-							>{fmtDate(order.nextFollowUpAt)}</strong
-						>
-						{#if order.followUpDue}
-							<span
-								style="font-size: 0.72rem; font-weight: 700; color: #cf222e; background: #ffebe9; border: 1px solid #e5534b; border-radius: 999px; padding: 0.1rem 0.5rem; margin-left: 0.3rem;"
-								>Needs update</span
+					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;">
+						<div style="font-size: 0.95rem;">
+							<span style="color: #8c959f;">Follow-up:</span>
+							<strong style="color: {order.followUpDue ? '#cf222e' : '#1f2328'};"
+								>{fmtDate(order.nextFollowUpAt)}</strong
 							>
-						{/if}
+						</div>
+						<div style="position: relative; flex-shrink: 0;">
+							<button
+								type="button"
+								class="icon-btn"
+								style="width: 2.4rem; height: 2.4rem; font-size: 1.35rem;"
+								title="Snooze or set follow-up"
+								aria-label="Snooze or set follow-up"
+								aria-expanded={snoozeOpen}
+								onclick={() => (snoozeOpen = !snoozeOpen)}>⏰</button
+							>
+							{#if snoozeOpen}
+								<!-- click-away backdrop -->
+								<button
+									type="button"
+									aria-label="Close follow-up options"
+									onclick={() => (snoozeOpen = false)}
+									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+								></button>
+								<div
+									style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 230px; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.6rem; display: grid; gap: 0.5rem;"
+								>
+									<div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+										<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+											<input type="hidden" name="preset" value="1d" />
+											<button type="submit" style={pill}>+1 day</button>
+										</form>
+										<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+											<input type="hidden" name="preset" value="3d" />
+											<button type="submit" style={pill}>+3 days</button>
+										</form>
+										<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+											<input type="hidden" name="preset" value="1w" />
+											<button type="submit" style={pill}>+1 week</button>
+										</form>
+									</div>
+									<form
+										method="POST"
+										action="?/setFollowUp"
+										use:enhance={snoozeThenClose}
+										style="display: flex; gap: 0.4rem; align-items: center;"
+									>
+										<input
+											type="date"
+											name="date"
+											value={toDateInput(order.nextFollowUpAt)}
+											style="flex: 1; min-width: 0; {field}"
+										/>
+										<button type="submit" style={pill}>Set</button>
+									</form>
+									{#if order.nextFollowUpAt}
+										<form method="POST" action="?/clearFollowUp" use:enhance={snoozeThenClose}>
+											<button type="submit" style="{pill} width: 100%; color: #cf222e;"
+												>Clear follow-up</button
+											>
+										</form>
+									{/if}
+								</div>
+							{/if}
+						</div>
 					</div>
-					<div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
-						<form method="POST" action="?/snoozeFollowUp" use:enhance>
-							<input type="hidden" name="preset" value="1d" />
-							<button type="submit" style={pill}>+1 day</button>
-						</form>
-						<form method="POST" action="?/snoozeFollowUp" use:enhance>
-							<input type="hidden" name="preset" value="3d" />
-							<button type="submit" style={pill}>+3 days</button>
-						</form>
-						<form method="POST" action="?/snoozeFollowUp" use:enhance>
-							<input type="hidden" name="preset" value="1w" />
-							<button type="submit" style={pill}>+1 week</button>
-						</form>
-						{#if order.nextFollowUpAt}
-							<form method="POST" action="?/clearFollowUp" use:enhance>
-								<button type="submit" style="{pill} color: #cf222e;">Clear</button>
-							</form>
-						{/if}
-					</div>
-					<form
-						method="POST"
-						action="?/setFollowUp"
-						use:enhance
-						style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;"
-					>
-						<input
-							type="date"
-							name="date"
-							value={toDateInput(order.nextFollowUpAt)}
-							style="flex: 1; min-width: 150px; {field}"
-						/>
-						<button type="submit" style={pill}>Set date</button>
-					</form>
 				</section>
 
-				<!-- Timeline + add note -->
+				<!-- Timeline: the + button reveals the note input -->
 				<section style={card}>
-					<h2 style={sectionTitle}>Timeline</h2>
-					<form
-						method="POST"
-						action="?/addNote"
-						use:enhance
-						style="display: flex; gap: 0.5rem; align-items: center;"
-					>
-						<input name="note" placeholder="Add an internal note…" required style="flex: 1; {field}" />
-						<button type="submit" style={primaryBtn}>Add note</button>
-					</form>
+					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+						<h2 style={sectionTitle}>Timeline</h2>
+						<button
+							type="button"
+							class="icon-btn"
+							style="width: 2.2rem; height: 2.2rem; font-size: 1.35rem;"
+							title="Add note"
+							aria-label="Add note"
+							aria-expanded={noteOpen}
+							onclick={() => (noteOpen = !noteOpen)}>＋</button
+						>
+					</div>
+					{#if noteOpen}
+						<form
+							method="POST"
+							action="?/addNote"
+							use:enhance={noteThenClose}
+							style="display: flex; gap: 0.5rem; align-items: center;"
+						>
+							<input
+								name="note"
+								placeholder="Add an internal note…"
+								required
+								style="flex: 1; {field}"
+							/>
+							<button type="submit" style={primaryBtn}>Add</button>
+						</form>
+					{/if}
 
 					{#if data.timeline.length === 0}
 						<p style="margin: 0; color: #57606a; font-size: 0.9rem;">No activity yet.</p>
@@ -213,22 +304,70 @@
 			<div class="col">
 				<!-- Customer -->
 				<section style={card}>
-					<h2 style={sectionTitle}>Customer</h2>
+					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+						<h2 style={sectionTitle}>Customer</h2>
+						{#if customer}
+							<div style="display: flex; gap: 0.5rem; align-items: center;">
+								<!-- Contact (email / call) behind one button, like the dashboard -->
+								<div style="position: relative;">
+									<button
+										type="button"
+										class="icon-btn"
+										style="width: 2.2rem; height: 2.2rem; font-size: 1.15rem;"
+										title="Contact customer"
+										aria-label="Contact customer"
+										aria-expanded={contactOpen}
+										onclick={() => (contactOpen = !contactOpen)}>💬</button
+									>
+									{#if contactOpen}
+										<!-- click-away backdrop -->
+										<button
+											type="button"
+											aria-label="Close contact menu"
+											onclick={() => (contactOpen = false)}
+											style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+										></button>
+										<div
+											style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 200px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
+										>
+											<a
+												href={`mailto:${customer.email}`}
+												onclick={() => (contactOpen = false)}
+												style="padding: 0.55rem 0.8rem; text-decoration: none; color: inherit; font-size: 0.9rem;"
+												>✉ Email</a
+											>
+											{#if customer.phone}
+												<a
+													href={telHref(customer.phone)}
+													onclick={() => (contactOpen = false)}
+													style="padding: 0.55rem 0.8rem; text-decoration: none; color: inherit; font-size: 0.9rem; border-top: 1px solid #eaeef2;"
+													>📞 Call</a
+												>
+											{/if}
+											{#if order.customerId}
+												<form
+													method="POST"
+													action="?/sendInvite"
+													use:enhance={() => {
+														contactOpen = false;
+														return async ({ update }) => await update();
+													}}
+												>
+													<input type="hidden" name="customerId" value={order.customerId} />
+													<button
+														type="submit"
+														style="width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; border-top: 1px solid #eaeef2; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;"
+														>🔗 Invite customer</button
+													>
+												</form>
+											{/if}
+										</div>
+									{/if}
+								</div>
+							</div>
+						{/if}
+					</div>
 					{#if customer}
-						<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-							<a
-								href={`mailto:${customer.email}`}
-								style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; text-decoration: none; font-weight: 500;"
-								>✉ Email</a
-							>
-							{#if customer.phone}
-								<a
-									href={telHref(customer.phone)}
-									style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none;"
-									>📞 Call</a
-								>
-							{/if}
-						</div>
 						<div style="display: grid; gap: 0.3rem; font-size: 0.9rem;">
 							<div style="word-break: break-word;">
 								<span style="color: #57606a;">Email:</span> {customer.email}
@@ -250,12 +389,6 @@
 								</div>
 							{/if}
 						</div>
-						{#if order.customerId}
-							<form method="POST" action="?/sendInvite" use:enhance>
-								<input type="hidden" name="customerId" value={order.customerId} />
-								<button type="submit" style="{pill} width: 100%;">Invite customer</button>
-							</form>
-						{/if}
 					{:else}
 						<p style="margin: 0; color: #57606a;">No customer linked to this order.</p>
 					{/if}
@@ -263,7 +396,46 @@
 
 				<!-- Assigned subcontractors -->
 				<section style={card}>
-					<h2 style={sectionTitle}>Assigned subcontractors</h2>
+					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+						<h2 style={sectionTitle}>Assigned subcontractors</h2>
+						{#if data.availableSubs.length > 0}
+							<button
+								type="button"
+								class="icon-btn"
+								style="width: 2rem; height: 2rem; font-size: 1.3rem;"
+								title="Assign a subcontractor"
+								aria-label="Assign a subcontractor"
+								aria-expanded={assignOpen}
+								onclick={() => (assignOpen = !assignOpen)}>＋</button
+							>
+						{/if}
+					</div>
+
+					{#if assignOpen && data.availableSubs.length > 0}
+						<div style="display: grid; gap: 0.4rem;">
+							<span style="font-size: 0.78rem; color: #8c959f;">Tap a subcontractor to assign them</span>
+							{#each data.availableSubs as sub (sub.id)}
+								<form method="POST" action="?/assignSub" use:enhance={assignThenClose}>
+									<input type="hidden" name="subcontractorId" value={sub.id} />
+									<button type="submit" class="sub-pick">
+										<span class="sub-pick-avatar" aria-hidden="true"
+											>{sub.name.slice(0, 1).toUpperCase()}</span
+										>
+										<span style="min-width: 0; flex: 1;">
+											<strong style="display: block; font-size: 0.92rem;">{sub.name}</strong>
+											<span style="color: #57606a; font-size: 0.8rem;"
+												>{sub.trade ?? 'Trade not set'} · {sub.tier === 'trusted'
+													? 'Trusted'
+													: 'Guest'}</span
+											>
+										</span>
+										<span class="sub-pick-add" aria-hidden="true">＋</span>
+									</button>
+								</form>
+							{/each}
+						</div>
+					{/if}
+
 					{#if data.assignedSubs.length === 0}
 						<p style="margin: 0; color: #57606a; font-size: 0.9rem;">
 							No subcontractors assigned yet.
@@ -293,34 +465,11 @@
 						</div>
 					{/if}
 
-					{#if data.availableSubs.length > 0}
-						<form
-							method="POST"
-							action="?/assignSub"
-							use:enhance
-							style="display: flex; gap: 0.5rem; flex-wrap: wrap;"
-						>
-							<select
-								name="subcontractorId"
-								required
-								style="flex: 1; min-width: 160px; padding: 0.5rem; border: 1px solid #d0d7de; border-radius: 8px;"
-							>
-								<option value="" disabled selected>Assign a subcontractor…</option>
-								{#each data.availableSubs as sub (sub.id)}
-									<option value={sub.id}>
-										{sub.name}{sub.trade ? ` — ${sub.trade}` : ''} ({sub.tier === 'trusted'
-											? 'Trusted'
-											: 'Guest'})
-									</option>
-								{/each}
-							</select>
-							<button type="submit" style={pill}>Assign</button>
-						</form>
-					{:else if data.assignedSubs.length > 0}
+					{#if data.availableSubs.length === 0 && data.assignedSubs.length > 0}
 						<p style="margin: 0; color: #57606a; font-size: 0.82rem;">
 							All your subcontractors are assigned to this job.
 						</p>
-					{:else}
+					{:else if data.availableSubs.length === 0}
 						<p style="margin: 0; color: #57606a; font-size: 0.82rem;">
 							Add subcontractors in the <a href="/contractor/subcontractors">Subcontractors</a> page to
 							assign them here.
@@ -330,29 +479,55 @@
 
 				<!-- Attachments -->
 				<section style={card}>
-					<h2 style={sectionTitle}>Attachments</h2>
-
-					<form
-						method="POST"
-						action="?/uploadAttachment"
-						enctype="multipart/form-data"
-						use:enhance
-						style="display: grid; gap: 0.4rem;"
-					>
-						<input
-							type="file"
-							name="file"
-							accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
-							required
-							style="font-size: 0.85rem;"
-						/>
-						<div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-							<button type="submit" style={primaryBtn}>Upload</button>
-							<span style="font-size: 0.75rem; color: #8c959f;"
-								>Images or PDF · max {formatBytes(MAX_ATTACHMENT_BYTES)}</span
+					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+						<h2 style={sectionTitle}>Attachments</h2>
+						<form
+							method="POST"
+							action="?/uploadAttachment"
+							enctype="multipart/form-data"
+							use:enhance
+							style="display: flex; gap: 0.4rem; align-items: center;"
+						>
+							<!-- Styled trigger for a hidden file input; picking a file uploads it. -->
+							<label
+								style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.8rem; border-radius: 999px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; font-weight: 600; font-size: 0.85rem; white-space: nowrap;"
 							>
+								📎 Add file
+								<input
+									type="file"
+									name="file"
+									accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+									required
+									onchange={(e) => e.currentTarget.form?.requestSubmit()}
+									style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;"
+								/>
+							</label>
+							<button
+								type="button"
+								class="icon-btn"
+								style="width: 1.9rem; height: 1.9rem; font-size: 1rem;"
+								title="Attachment rules"
+								aria-label="Attachment rules"
+								onclick={() => infoDialog?.showModal()}>ℹ️</button
+							>
+						</form>
+					</div>
+
+					<dialog
+						bind:this={infoDialog}
+						style="border: none; border-radius: 16px; padding: 0; max-width: 380px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
+					>
+						<div style="padding: 1.1rem 1.2rem; display: grid; gap: 0.6rem;">
+							<h3 style="margin: 0; font-size: 1rem;">Attachment rules</h3>
+							<ul style="margin: 0; padding-left: 1.1rem; font-size: 0.9rem; color: #57606a; display: grid; gap: 0.3rem;">
+								<li>Accepted files: PNG, JPEG, WebP, GIF, or PDF.</li>
+								<li>Up to {formatBytes(MAX_ATTACHMENT_BYTES)} per file.</li>
+							</ul>
+							<form method="dialog" style="justify-self: end;">
+								<button type="submit" style={pill}>Got it</button>
+							</form>
 						</div>
-					</form>
+					</dialog>
 
 					{#if data.attachments.length === 0}
 						<p style="margin: 0; color: #57606a; font-size: 0.9rem;">No attachments yet.</p>
@@ -460,6 +635,76 @@
 		gap: 1rem;
 		align-items: start;
 	}
+	/* The order title should read as a title but stay subtle — no chunky yellow
+	   hero box, and a normal-weight font instead of the heavy display face. */
+	.order-title {
+		margin: 0;
+		font-family: 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif;
+		font-size: 1.5rem;
+		font-weight: 700;
+		line-height: 1.2;
+		letter-spacing: -0.01em;
+		text-transform: none;
+		color: #1f2328;
+		background: none;
+		border: none;
+		border-radius: 0;
+		box-shadow: none;
+		padding: 0;
+		display: block;
+	}
+	/* Tap-to-assign subcontractor rows: full-width, big touch targets, with a
+	   purple accent that ties into the icon buttons. */
+	.sub-pick {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 0.65rem;
+		text-align: left;
+		padding: 0.55rem 0.65rem;
+		border: 1px solid #e2e6ea;
+		border-radius: 12px;
+		background: #fff;
+		cursor: pointer;
+		transition:
+			border-color 0.1s ease,
+			background 0.1s ease;
+	}
+	.sub-pick:hover,
+	.sub-pick:focus-visible {
+		border-color: #c9b8f0;
+		background: #faf7ff;
+		outline: none;
+	}
+	.sub-pick:active {
+		background: #efe6ff;
+	}
+	.sub-pick-avatar {
+		flex-shrink: 0;
+		width: 2rem;
+		height: 2rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 999px;
+		background: #efe6ff;
+		color: #5b3fa8;
+		font-weight: 800;
+		font-size: 0.85rem;
+	}
+	.sub-pick-add {
+		flex-shrink: 0;
+		width: 1.7rem;
+		height: 1.7rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 8px;
+		background: #efe6ff;
+		color: #5b3fa8;
+		font-size: 1.1rem;
+	}
+
 	/* Two-column working layout on desktop; single column when it gets tight. */
 	.detail-grid {
 		display: grid;

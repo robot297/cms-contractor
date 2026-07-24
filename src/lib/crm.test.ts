@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	defaultFollowUp,
 	digitsOnly,
+	formatLocation,
 	formatPhone,
 	getVisibleCustomerState,
 	isCustomerLinked,
@@ -114,6 +115,25 @@ describe('phone formatting and tags', () => {
 	it('parses, trims, and de-duplicates tags', () => {
 		expect(parseTags(' a, b ,a, ,c ')).toEqual(['a', 'b', 'c']);
 		expect(parseTags('')).toEqual([]);
+	});
+});
+
+describe('location line from free-form address', () => {
+	it('returns the city when there is no state', () => {
+		expect(formatLocation('88 Cedar Ln, Springfield')).toBe('Springfield');
+		expect(formatLocation('14 Elm St, Springfield')).toBe('Springfield');
+	});
+
+	it('returns "City, ST" when a 2-letter state (and optional ZIP) is present', () => {
+		expect(formatLocation('123 Main St, Austin, TX')).toBe('Austin, TX');
+		expect(formatLocation('123 Main St, Austin, tx 78701')).toBe('Austin, TX');
+		expect(formatLocation('123 Main St, Austin, TX 78701-1234')).toBe('Austin, TX');
+	});
+
+	it('returns null when no city can be isolated', () => {
+		expect(formatLocation(null)).toBeNull();
+		expect(formatLocation('')).toBeNull();
+		expect(formatLocation('88 Cedar Ln')).toBeNull();
 	});
 });
 

@@ -119,6 +119,30 @@ export const customerContactSchema = z.object({
 		.transform((v): PreferredContact => (v === 'phone' ? 'phone' : 'email'))
 });
 
+/**
+ * Extract a short "City" or "City, ST" location line from a free-form address.
+ * Handles the common US shapes: "Street, City", "Street, City, ST" and
+ * "Street, City, ST 12345". Returns null when no city can be isolated (e.g. a
+ * lone street with no comma, or an empty address).
+ */
+export function formatLocation(address: string | null): string | null {
+	if (!address) return null;
+	const parts = address
+		.split(',')
+		.map((p) => p.trim())
+		.filter(Boolean);
+	if (parts.length === 0) return null;
+	// A trailing 2-letter state, optionally followed by a ZIP.
+	const last = parts[parts.length - 1];
+	const stateMatch = last.match(/^([A-Za-z]{2})(?:\s+\d{5}(?:-\d{4})?)?$/);
+	if (stateMatch && parts.length >= 2) {
+		return `${parts[parts.length - 2]}, ${stateMatch[1].toUpperCase()}`;
+	}
+	// No state present — the last non-street segment is the city.
+	if (parts.length >= 2) return parts[parts.length - 1];
+	return null;
+}
+
 export type CustomerContactValidation =
 	| { ok: true; value: CustomerContact }
 	| { ok: false; field: 'name' | 'email' | 'phone'; message: string };

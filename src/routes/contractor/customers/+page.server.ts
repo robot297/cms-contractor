@@ -5,10 +5,14 @@ import {
 	createCustomer,
 	createInvite,
 	CustomerEmailLockedError,
+	deleteInvite,
 	DuplicateCustomerEmailError,
 	editCustomer,
 	InvalidAvatarError,
 	listCustomers,
+	listInvites,
+	resendInvite,
+	revokeInvite,
 	setCustomerAvatar
 } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
@@ -22,8 +26,11 @@ function requireContractor(locals: App.Locals) {
 export const load: PageServerLoad = async ({ locals }) => {
 	const user = requireContractor(locals);
 	// Load the full directory; search is filtered live on the client.
-	const customers = await listCustomers(user.id);
-	return { customers, userName: user.name };
+	const [customers, invites] = await Promise.all([
+		listCustomers(user.id),
+		listInvites(user.id)
+	]);
+	return { customers, invites, userName: user.name };
 };
 
 export const actions: Actions = {
@@ -94,6 +101,27 @@ export const actions: Actions = {
 		const id = form.get('id')?.toString() ?? '';
 		if (!id) return fail(400, { action: 'invite', message: 'Customer is required' });
 		await createInvite(user.id, id);
+		return { success: true };
+	},
+
+	resendInvite: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		await resendInvite(form.get('inviteId')?.toString() ?? '', user.id);
+		return { success: true };
+	},
+
+	revokeInvite: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		await revokeInvite(form.get('inviteId')?.toString() ?? '', user.id);
+		return { success: true };
+	},
+
+	deleteInvite: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		await deleteInvite(form.get('inviteId')?.toString() ?? '', user.id);
 		return { success: true };
 	},
 

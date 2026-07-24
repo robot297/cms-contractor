@@ -1,13 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { isOrderIcon } from '$lib/crm';
-import {
-	deleteInvite,
-	listContractorOrders,
-	listInvites,
-	resendInvite,
-	revokeInvite,
-	setOrderIcon
-} from '$lib/server/crm.server';
+import { formatLocation, isOrderIcon } from '$lib/crm';
+import { listContractorOrders, setOrderIcon } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
 
 function requireContractor(locals: App.Locals) {
@@ -18,10 +11,7 @@ function requireContractor(locals: App.Locals) {
 
 export const load: PageServerLoad = async ({ locals }) => {
 	const user = requireContractor(locals);
-	const [orders, invites] = await Promise.all([
-		listContractorOrders(user.id),
-		listInvites(user.id)
-	]);
+	const orders = await listContractorOrders(user.id);
 	// Orders whose next follow-up is due, soonest first — the dashboard's default tab.
 	const dueOrders = orders
 		.filter((o) => o.followUpDue)
@@ -35,37 +25,17 @@ export const load: PageServerLoad = async ({ locals }) => {
 			customerName: o.customerName,
 			customerEmail: o.customerEmail,
 			customerPhone: o.customerPhone,
+			customerLocation: formatLocation(o.customerAddress),
 			customerPreferredContact: o.customerPreferredContact,
 			projectName: o.projectName,
 			projectType: o.projectType,
 			icon: o.icon,
 			nextFollowUpAt: o.nextFollowUpAt
 		}));
-	return { dueOrders, invites, userName: user.name };
+	return { dueOrders, userName: user.name };
 };
 
 export const actions: Actions = {
-	resendInvite: async ({ request, locals }) => {
-		const user = requireContractor(locals);
-		const form = await request.formData();
-		await resendInvite(form.get('inviteId')?.toString() ?? '', user.id);
-		return { success: true };
-	},
-
-	deleteInvite: async ({ request, locals }) => {
-		const user = requireContractor(locals);
-		const form = await request.formData();
-		await deleteInvite(form.get('inviteId')?.toString() ?? '', user.id);
-		return { success: true };
-	},
-
-	revokeInvite: async ({ request, locals }) => {
-		const user = requireContractor(locals);
-		const form = await request.formData();
-		await revokeInvite(form.get('inviteId')?.toString() ?? '', user.id);
-		return { success: true };
-	},
-
 	setOrderIcon: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();

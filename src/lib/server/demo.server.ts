@@ -5,6 +5,7 @@ import { db } from './db';
 import {
 	user,
 	customer,
+	customerInvite,
 	order,
 	orderSubcontractor,
 	subcontractor,
@@ -121,6 +122,23 @@ async function seedDemoData(contractorId: string): Promise<void> {
 			tags: c.tags,
 			avatar: c.avatar,
 			preferredContact: c.preferredContact
+		});
+	}
+
+	// A couple of pending customer app-invites so the Customers pane's invites
+	// panel has something to show: one still active, one already expired.
+	const demoInvites = [
+		{ key: 'luis', email: 'luis.ortega@example.com', expiresInDays: 1 },
+		{ key: 'nina', email: 'nina.brooks@example.com', expiresInDays: -1 }
+	];
+	for (const inv of demoInvites) {
+		await db.insert(customerInvite).values({
+			contractorId,
+			customerId: idByKey.get(inv.key),
+			customerEmail: inv.email,
+			token: crypto.randomUUID(),
+			status: 'pending',
+			expiresAt: inDays(inv.expiresInDays)
 		});
 	}
 

@@ -17,7 +17,7 @@
 
 <div class="wrap">
 	<header>
-		<h1>Support &amp; feedback</h1>
+		<h1 class="page-title">Support &amp; feedback</h1>
 		<p class="sub">
 			Found a bug or have an idea? Send it straight to our team — it becomes a tracked issue we can
 			follow up on.

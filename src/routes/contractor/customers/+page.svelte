@@ -13,6 +13,15 @@
 
 	let savingAvatarId: string | null = $state(null);
 
+	// Customer invites live here (moved off the dashboard): a collapsible panel.
+	let showInvites = $state(false);
+	let confirmingDeleteInviteId: string | null = $state(null);
+	function inviteLabel(status: string, expiresAt: Date): string {
+		if (status === 'revoked') return 'Revoked';
+		if (status === 'used') return 'Accepted';
+		return new Date(expiresAt).getTime() > Date.now() ? 'Active' : 'Expired';
+	}
+
 	// --- Camera capture ----------------------------------------------------
 	let cameraDialog: HTMLDialogElement | undefined = $state();
 	let cameraVideo: HTMLVideoElement | undefined = $state();
@@ -225,11 +234,24 @@
 			.map(([letter, items]) => ({ letter, items }));
 	});
 	const presentLetters = $derived(new Set(groups.map((g) => g.letter)));
-	function jumpTo(letter: string) {
-		document.getElementById(`sec-${letter}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	function jumpTo(letter: string, behavior: ScrollBehavior = 'smooth') {
+		document.getElementById(`sec-${letter}`)?.scrollIntoView({ behavior, block: 'start' });
 	}
 	// Dock-style magnification: the hovered letter is largest, neighbours taper off.
 	let railHover: number | null = $state(null);
+	// The rail element, so touch/mouse position can be mapped to a letter index.
+	let railNav: HTMLElement | undefined = $state();
+	// Map a pointer's Y onto a letter and magnify it. Child transforms don't
+	// reflow, so the nav's own box stays stable — no feedback loop as letters
+	// grow. `jump` is true while actively scrubbing (touch drag / mouse-down).
+	function railAt(clientY: number, jump: boolean) {
+		if (!railNav) return;
+		const r = railNav.getBoundingClientRect();
+		const frac = (clientY - r.top) / r.height;
+		const i = Math.max(0, Math.min(ALPHABET.length - 1, Math.round(frac * (ALPHABET.length - 1))));
+		railHover = i;
+		if (jump && presentLetters.has(ALPHABET[i])) jumpTo(ALPHABET[i], 'auto');
+	}
 	function railScale(i: number): number {
 		if (railHover === null) return 1;
 		const d = Math.abs(i - railHover);
@@ -277,8 +299,8 @@
 	const contactSecondary =
 		'padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none; font-weight: 500; font-size: 0.9rem;';
 	// Gear (⚙) menu that holds Edit / Send app invite / Archive.
-	const gearBtn =
-		'width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 999px; cursor: pointer; font-size: 1rem; line-height: 1;';
+	// Sizing only — the gold look comes from the shared `.icon-btn` class.
+	const gearBtn = 'width: 2.2rem; height: 2.2rem; font-size: 1.25rem;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
@@ -292,7 +314,7 @@
 	<header
 		style="display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap;"
 	>
-		<h1 style="margin: 0;">Customers</h1>
+		<h1 class="page-title" style="margin: 0;">Customers</h1>
 		<span style="font-size: 0.85rem; color: #57606a;"
 			>{data.customers.length} {data.customers.length === 1 ? 'contact' : 'contacts'}</span
 		>
@@ -300,7 +322,7 @@
 
 	<!-- Search + add, pinned to the top of the directory while scrolling -->
 	<div
-		style="position: sticky; top: 0; z-index: 20; background: #f6f8fa; padding: 0.4rem 0 0.6rem; display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;"
+		style="position: sticky; top: 0; z-index: 20; background: #f6f8fa; padding: 0.4rem 0 0.6rem; display: flex; gap: 0.6rem; align-items: center; flex-wrap: nowrap;"
 	>
 		<div style="position: relative; flex: 1; min-width: 220px;">
 			<span
@@ -343,14 +365,102 @@
 		</div>
 		<button
 			type="button"
+			title="Add customer"
+			aria-label="Add customer"
 			onclick={() => {
 				addError = '';
 				addDialog?.showModal();
 			}}
-			style="padding: 0.6rem 1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600; white-space: nowrap;"
-			>＋ Add customer</button
+			class="icon-btn"
+			style="flex-shrink: 0; width: 2.9rem; height: 2.9rem; font-size: 1.5rem;"
+			>＋</button
 		>
 	</div>
+
+	<!-- Customer invites (moved here from the dashboard): collapsed by default -->
+	{#if data.invites.length > 0}
+		<section style="display: grid; gap: 0.5rem;">
+			<button
+				type="button"
+				aria-expanded={showInvites}
+				onclick={() => (showInvites = !showInvites)}
+				style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; width: 100%; padding: 0.6rem 0.9rem; border-radius: 12px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; font-weight: 700; font-size: 0.9rem; color: inherit;"
+			>
+				<span>✉️ Customer invites ({data.invites.length})</span>
+				<span aria-hidden="true" style="color: #8c959f;">{showInvites ? '▲' : '▼'}</span>
+			</button>
+			{#if showInvites}
+				{#each data.invites as invite (invite.id)}
+					<div
+						style="padding: 0.7rem 0.85rem; border-radius: 12px; background: #fff; border: 1px solid #e2e6ea; display: flex; justify-content: space-between; gap: 1rem; align-items: center; flex-wrap: wrap;"
+					>
+						<div style="min-width: 0;">
+							<strong style="word-break: break-word;">{invite.customerEmail}</strong>
+							<div style="font-size: 0.82rem; color: #57606a;">
+								{inviteLabel(invite.status, invite.expiresAt)} · expires {new Date(
+									invite.expiresAt
+								).toLocaleDateString()}
+							</div>
+						</div>
+						<div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+							{#if confirmingDeleteInviteId === invite.id}
+								<span style="font-size: 0.85rem; color: #57606a;">Delete this invite?</span>
+								<form
+									method="POST"
+									action="?/deleteInvite"
+									use:enhance={() =>
+										async ({ update }) => {
+											confirmingDeleteInviteId = null;
+											await update();
+										}}
+								>
+									<input type="hidden" name="inviteId" value={invite.id} />
+									<button
+										type="submit"
+										style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #cf222e; background: #cf222e; color: #fff; cursor: pointer;"
+										>Yes, delete</button
+									>
+								</form>
+								<button
+									type="button"
+									onclick={() => (confirmingDeleteInviteId = null)}
+									style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+									>Cancel</button
+								>
+							{:else}
+								<form method="POST" action="?/resendInvite" use:enhance>
+									<input type="hidden" name="inviteId" value={invite.id} />
+									<button
+										type="submit"
+										style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #0969da; background: none; cursor: pointer;"
+										>Resend</button
+									>
+								</form>
+								{#if invite.status === 'pending'}
+									<form method="POST" action="?/revokeInvite" use:enhance>
+										<input type="hidden" name="inviteId" value={invite.id} />
+										<button
+											type="submit"
+											style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #cf222e; color: #cf222e; background: none; cursor: pointer;"
+											>Revoke</button
+										>
+									</form>
+								{/if}
+								<button
+									type="button"
+									title="Delete invite"
+									aria-label="Delete invite"
+									onclick={() => (confirmingDeleteInviteId = invite.id)}
+									style="border: none; background: none; cursor: pointer; font-size: 1rem; line-height: 1; color: #cf222e; padding: 0.2rem 0.35rem;"
+									>🗑</button
+								>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			{/if}
+		</section>
+	{/if}
 
 	<!-- Directory: grouped list on the left, A–Z jump rail on the right -->
 	<div style="display: flex; gap: 0.5rem; align-items: flex-start;">
@@ -632,6 +742,7 @@
 														aria-label="Manage customer"
 														aria-expanded={gearOpenId === c.id}
 														onclick={() => (gearOpenId = gearOpenId === c.id ? null : c.id)}
+														class="icon-btn"
 														style={gearBtn}>⚙</button
 													>
 													{#if gearOpenId === c.id}
@@ -694,17 +805,24 @@
 		{#if data.customers.length > 0}
 			<nav
 				aria-label="Jump to letter"
-				onmouseleave={() => (railHover = null)}
-				style="position: sticky; top: 84px; display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; padding: 0.25rem 0.35rem;"
+				bind:this={railNav}
+				onpointerdown={(e) => {
+					railNav?.setPointerCapture?.(e.pointerId);
+					railAt(e.clientY, true);
+				}}
+				onpointermove={(e) => railAt(e.clientY, e.pointerType !== 'mouse' || e.buttons > 0)}
+				onpointerup={() => (railHover = null)}
+				onpointercancel={() => (railHover = null)}
+				onpointerleave={() => (railHover = null)}
+				style="position: sticky; top: 84px; display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; padding: 0.25rem 0.35rem; touch-action: none;"
 			>
 				{#each ALPHABET as letter, i (letter)}
 					{@const present = presentLetters.has(letter)}
 					<button
 						type="button"
-						disabled={!present}
-						onclick={() => jumpTo(letter)}
-						onmouseenter={() => (railHover = i)}
-						style="border: none; background: none; font-size: 0.72rem; font-weight: 700; line-height: 1.05; padding: 0.1rem 0.35rem; border-radius: 4px; cursor: {present
+						tabindex="-1"
+						aria-hidden="true"
+						style="border: none; background: none; font-size: 0.72rem; font-weight: 700; line-height: 1.05; padding: 0.1rem 0.35rem; border-radius: 4px; pointer-events: none; cursor: {present
 							? 'pointer'
 							: 'default'}; color: {present
 							? '#0969da'
