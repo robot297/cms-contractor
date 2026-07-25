@@ -17,13 +17,15 @@
 	afterNavigate((nav) => {
 		const from = nav.from?.url.pathname;
 		if (from === '/contractor') backTo = { href: '/contractor', label: 'Dashboard' };
-		else if (from?.startsWith('/contractor/orders')) backTo = { href: '/contractor/orders', label: 'Orders' };
+		else if (from?.startsWith('/contractor/orders'))
+			backTo = { href: '/contractor/orders', label: 'Orders' };
 	});
 
 	let confirmingDelete = $state(false);
 	// Status editing hides behind a "Change" toggle under the badge.
 	let statusOpen = $state(false);
-	const statusThenClose = () =>
+	const statusThenClose =
+		() =>
 		async ({ update }: { update: () => Promise<void> }) => {
 			statusOpen = false;
 			await update();
@@ -36,7 +38,8 @@
 	let assignOpen = $state(false);
 	// Attachment rules (types + size) live in an info modal, off the main flow.
 	let infoDialog: HTMLDialogElement | undefined = $state();
-	const assignThenClose = () =>
+	const assignThenClose =
+		() =>
 		async ({ update }: { update: () => Promise<void> }) => {
 			assignOpen = false;
 			await update();
@@ -44,13 +47,15 @@
 	// The timeline's note input is hidden until the + button reveals it.
 	let noteOpen = $state(false);
 	// Close the snooze popover once a follow-up change is submitted.
-	const snoozeThenClose = () =>
+	const snoozeThenClose =
+		() =>
 		async ({ update }: { update: () => Promise<void> }) => {
 			snoozeOpen = false;
 			await update();
 		};
 	// Close & reset the note field after a note is added.
-	const noteThenClose = () =>
+	const noteThenClose =
+		() =>
 		async ({ update }: { update: () => Promise<void> }) => {
 			noteOpen = false;
 			await update();
@@ -118,10 +123,9 @@
 			<div style="display: grid; gap: 0.3rem; min-width: 0;">
 				<h1 class="order-title">{order.customerName}</h1>
 				<span style="color: #57606a; font-weight: 600;"
-					>{order.projectName ?? 'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)} · {typeSuffix(
-							order.projectName,
-							order.projectType
-						)}{/if}</span
+					>{order.projectName ??
+						'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)}
+						· {typeSuffix(order.projectName, order.projectType)}{/if}</span
 				>
 			</div>
 			<div style="display: grid; gap: 0.4rem; justify-items: end; flex-shrink: 0;">
@@ -178,7 +182,9 @@
 			<div class="col">
 				<!-- Follow-up: one snooze (⏰) button opens presets + a date picker -->
 				<section style={card}>
-					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;">
+					<div
+						style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;"
+					>
 						<div style="font-size: 0.95rem;">
 							<span style="color: #8c959f;">Follow-up:</span>
 							<strong style="color: {order.followUpDue ? '#cf222e' : '#1f2328'};"
@@ -249,7 +255,9 @@
 
 				<!-- Timeline: the + button reveals the note input -->
 				<section style={card}>
-					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+					<div
+						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
+					>
 						<h2 style={sectionTitle}>Timeline</h2>
 						<button
 							type="button"
@@ -317,7 +325,9 @@
 			<div class="col">
 				<!-- Customer -->
 				<section style={card}>
-					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+					<div
+						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
+					>
 						<h2 style={sectionTitle}>Customer</h2>
 						{#if customer}
 							<div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -333,12 +343,12 @@
 										onclick={() => (contactOpen = !contactOpen)}>💬</button
 									>
 									{#if contactOpen}
-										<!-- click-away backdrop -->
+										<!-- Dimmed click-away scrim so the composer is the focus. -->
 										<button
 											type="button"
 											aria-label="Close contact menu"
 											onclick={() => (contactOpen = false)}
-											style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+											class="contact-scrim"
 										></button>
 										<div class="contact-pop">
 											<ContactComposer
@@ -348,8 +358,10 @@
 													phone: customer.phone,
 													preferredContact: customer.preferredContact
 												}}
+												project={order.projectName}
 												rows={2}
 												onsent={() => (contactOpen = false)}
+												onclose={() => (contactOpen = false)}
 											/>
 											{#if order.customerId}
 												<form
@@ -361,7 +373,9 @@
 													}}
 												>
 													<input type="hidden" name="customerId" value={order.customerId} />
-													<button type="submit" class="invite-link">🔗 Invite customer to portal</button>
+													<button type="submit" class="invite-link"
+														>🔗 Invite customer to portal</button
+													>
 												</form>
 											{/if}
 										</div>
@@ -373,13 +387,16 @@
 					{#if customer}
 						<div style="display: grid; gap: 0.3rem; font-size: 0.9rem;">
 							<div style="word-break: break-word;">
-								<span style="color: #57606a;">Email:</span> {customer.email}
+								<span style="color: #57606a;">Email:</span>
+								{customer.email}
 							</div>
 							{#if customer.phone}<div>
-									<span style="color: #57606a;">Phone:</span> {customer.phone}
+									<span style="color: #57606a;">Phone:</span>
+									{customer.phone}
 								</div>{/if}
 							{#if customer.address}<div>
-									<span style="color: #57606a;">Address:</span> {customer.address}
+									<span style="color: #57606a;">Address:</span>
+									{customer.address}
 								</div>{/if}
 							{#if customer.tags.length > 0}
 								<div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.2rem;">
@@ -399,13 +416,17 @@
 
 				<!-- Assigned subcontractors -->
 				<section style={card}>
-					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+					<div
+						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
+					>
 						<h2 style={sectionTitle}>Assigned subcontractors</h2>
 						{#if data.availableSubs.length > 0}
 							<button
 								type="button"
 								class="icon-btn {assignOpen ? 'on' : ''}"
-								style="width: 2.2rem; height: 2.2rem; font-size: {assignOpen ? '1.15rem' : '1.55rem'};"
+								style="width: 2.2rem; height: 2.2rem; font-size: {assignOpen
+									? '1.15rem'
+									: '1.55rem'};"
 								title={assignOpen ? 'Hide' : 'Assign a subcontractor'}
 								aria-label={assignOpen ? 'Hide subcontractor picker' : 'Assign a subcontractor'}
 								aria-expanded={assignOpen}
@@ -416,7 +437,9 @@
 
 					{#if assignOpen && data.availableSubs.length > 0}
 						<div style="display: grid; gap: 0.4rem;">
-							<span style="font-size: 0.78rem; color: #8c959f;">Tap a subcontractor to assign them</span>
+							<span style="font-size: 0.78rem; color: #8c959f;"
+								>Tap a subcontractor to assign them</span
+							>
 							{#each data.availableSubs as sub (sub.id)}
 								<form method="POST" action="?/assignSub" use:enhance={assignThenClose}>
 									<input type="hidden" name="subcontractorId" value={sub.id} />
@@ -452,7 +475,9 @@
 									<div style="min-width: 0;">
 										<strong>{sub.name}</strong>
 										<div style="color: #57606a; font-size: 0.82rem;">
-											{sub.trade ?? 'Trade not set'} · {sub.tier === 'trusted' ? 'Trusted' : 'Guest'}
+											{sub.trade ?? 'Trade not set'} · {sub.tier === 'trusted'
+												? 'Trusted'
+												: 'Guest'}
 										</div>
 									</div>
 									<form method="POST" action="?/unassignSub" use:enhance>
@@ -482,7 +507,9 @@
 
 				<!-- Attachments -->
 				<section style={card}>
-					<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+					<div
+						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;"
+					>
 						<h2 style={sectionTitle}>Attachments</h2>
 						<form
 							method="POST"
@@ -522,7 +549,9 @@
 					>
 						<div style="padding: 1.1rem 1.2rem; display: grid; gap: 0.6rem;">
 							<h3 style="margin: 0; font-size: 1rem;">Attachment rules</h3>
-							<ul style="margin: 0; padding-left: 1.1rem; font-size: 0.9rem; color: #57606a; display: grid; gap: 0.3rem;">
+							<ul
+								style="margin: 0; padding-left: 1.1rem; font-size: 0.9rem; color: #57606a; display: grid; gap: 0.3rem;"
+							>
 								<li>Accepted files: PNG, JPEG, WebP, GIF, or PDF.</li>
 								<li>Up to {formatBytes(MAX_ATTACHMENT_BYTES)} per file.</li>
 							</ul>
@@ -649,20 +678,42 @@
 	}
 	/* Contact composer popover anchored to the 💬 button, with an invite action
 	   tucked under the composer. */
+	/* Dimmed full-screen scrim behind the composer so the rest of the page recedes.
+	   z-index sits above the mobile nav (50) so nothing pokes through the dim. */
+	.contact-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 90;
+		border: none;
+		cursor: default;
+		background: rgba(15, 23, 42, 0.45);
+	}
 	.contact-pop {
 		position: absolute;
 		right: 0;
 		top: calc(100% + 6px);
-		z-index: 20;
+		z-index: 100;
 		width: 280px;
 		max-width: 82vw;
-		background: #fff;
-		border: 1px solid #d0d7de;
+		background: #f6f4fc;
+		border: 1px solid #cdbff0;
 		border-radius: 12px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 		padding: 0.75rem;
 		display: grid;
 		gap: 0.6rem;
+	}
+	/* Mobile: a fixed bottom sheet so the popover never overflows off-screen. */
+	@media (max-width: 480px) {
+		.contact-pop {
+			position: fixed;
+			inset: auto 0.6rem 0.6rem;
+			top: auto;
+			width: auto;
+			max-width: none;
+			max-height: 80vh;
+			overflow-y: auto;
+		}
 	}
 	.invite-link {
 		width: 100%;

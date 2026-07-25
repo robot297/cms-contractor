@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import { formatPhone, tierLabel, TRADES, type SubcontractorTier } from '$lib/crm';
 	import type { PageData } from './$types';
 
@@ -25,7 +26,24 @@
 	let showAdd = $state(false);
 	let editingId = $state<string | null>(null);
 	let expandedId = $state<string | null>(null);
+	// Which card's "Manage" menu is open (one at a time).
+	let menuOpenId = $state<string | null>(null);
+	// Destructive actions require an explicit confirm before firing.
 	let confirmArchiveId = $state<string | null>(null);
+	let confirmRevokeId = $state<string | null>(null);
+	// Optional detail sections stay collapsed until toggled, to keep the card calm.
+	let notesOpenId = $state<string | null>(null);
+	let ordersOpenId = $state<string | null>(null);
+
+	/** Collapse a card and clear any open menu / pending confirm tied to it. */
+	function toggleCard(id: string) {
+		expandedId = expandedId === id ? null : id;
+		menuOpenId = null;
+		confirmArchiveId = null;
+		confirmRevokeId = null;
+		notesOpenId = null;
+		ordersOpenId = null;
+	}
 
 	// Progressive phone formatting as the contractor types.
 	function onPhoneInput(e: Event) {
@@ -59,7 +77,13 @@
 	<div class="search-row">
 		<div class="search-field">
 			<span class="search-icon" aria-hidden="true">🔍</span>
-			<input class="search" type="search" placeholder="Search" aria-label="Search subcontractors" bind:value={q} />
+			<input
+				class="search"
+				type="search"
+				placeholder="Search"
+				aria-label="Search subcontractors"
+				bind:value={q}
+			/>
 		</div>
 		<button
 			class="icon-btn add-btn"
@@ -99,10 +123,7 @@
 						</div>
 						<div class="meta small">{s.email}{s.phone ? ` · ${s.phone}` : ''}</div>
 					</div>
-					<button
-						class="btn ghost"
-						onclick={() => (expandedId = expandedId === s.id ? null : s.id)}
-					>
+					<button class="btn ghost" onclick={() => toggleCard(s.id)}>
 						{expandedId === s.id ? 'Close' : 'Open'}
 					</button>
 				</div>
@@ -114,20 +135,31 @@
 							<form
 								method="POST"
 								action="?/editSubcontractor"
-								use:enhance={() => async ({ update, result }) => {
-									await update({ reset: false });
-									if (result.type === 'success') editingId = null;
-								}}
+								use:enhance={() =>
+									async ({ update, result }) => {
+										await update({ reset: false });
+										if (result.type === 'success') editingId = null;
+									}}
 							>
 								<input type="hidden" name="id" value={s.id} />
 								<div class="fields">
 									<label>Name<input name="name" value={s.name} required /></label>
 									<label>
 										Email
-										<input name="email" type="email" value={s.email} required disabled={s.status === 'linked'} />
-										{#if s.status === 'linked'}<span class="hint">Locked — this sub has a linked login.</span>{/if}
+										<input
+											name="email"
+											type="email"
+											value={s.email}
+											required
+											disabled={s.status === 'linked'}
+										/>
+										{#if s.status === 'linked'}<span class="hint"
+												>Locked — this sub has a linked login.</span
+											>{/if}
 									</label>
-									<label>Phone<input name="phone" value={s.phone ?? ''} oninput={onPhoneInput} /></label>
+									<label
+										>Phone<input name="phone" value={s.phone ?? ''} oninput={onPhoneInput} /></label
+									>
 									<label>
 										Trade
 										<input name="trade" value={s.trade ?? ''} list="trades" />
@@ -140,101 +172,274 @@
 											<option value="trusted">Trusted Subcontractor</option>
 										</select>
 									</label>
-									<label>License #<input name="licenseNumber" value={s.licenseNumber ?? ''} /></label>
-									<label>Insurance carrier<input name="insuranceCarrier" value={s.insuranceCarrier ?? ''} /></label>
-									<label>Insurance expires<input name="insuranceExpiresAt" type="date" value={toDateInput(s.insuranceExpiresAt)} /></label>
+									<label
+										>License #<input name="licenseNumber" value={s.licenseNumber ?? ''} /></label
+									>
+									<label
+										>Insurance carrier<input
+											name="insuranceCarrier"
+											value={s.insuranceCarrier ?? ''}
+										/></label
+									>
+									<label
+										>Insurance expires<input
+											name="insuranceExpiresAt"
+											type="date"
+											value={toDateInput(s.insuranceExpiresAt)}
+										/></label
+									>
 									<label>Address<input name="address" value={s.address ?? ''} /></label>
-									<label class="wide">Tags<input name="tags" value={s.tags.join(', ')} placeholder="licensed, insured" /></label>
-									<label class="wide">Notes<textarea name="notes" rows="2">{s.notes ?? ''}</textarea></label>
+									<label class="wide"
+										>Tags<input
+											name="tags"
+											value={s.tags.join(', ')}
+											placeholder="licensed, insured"
+										/></label
+									>
+									<label class="wide"
+										>Notes<textarea name="notes" rows="2">{s.notes ?? ''}</textarea></label
+									>
 								</div>
 								<div class="row-actions">
 									<button class="btn primary" type="submit">Save</button>
-									<button class="btn ghost" type="button" onclick={() => (editingId = null)}>Cancel</button>
+									<button class="btn ghost" type="button" onclick={() => (editingId = null)}
+										>Cancel</button
+									>
 								</div>
 							</form>
 						{:else}
 							<!-- ---------- Read-only profile ---------- -->
 							<dl class="profile">
-								<div><dt>Tier</dt><dd>{label(s.tier)}</dd></div>
-								<div><dt>License #</dt><dd>{s.licenseNumber ?? '—'}</dd></div>
-								<div><dt>Insurance</dt><dd>{s.insuranceCarrier ?? '—'}{s.insuranceExpiresAt ? ` · exp ${toDateInput(s.insuranceExpiresAt)}` : ''}</dd></div>
-								<div><dt>Address</dt><dd>{s.address ?? '—'}</dd></div>
+								<div>
+									<dt>Tier</dt>
+									<dd>{label(s.tier)}</dd>
+								</div>
+								<div>
+									<dt>License #</dt>
+									<dd>{s.licenseNumber ?? '—'}</dd>
+								</div>
+								<div>
+									<dt>Insurance</dt>
+									<dd>
+										{s.insuranceCarrier ?? '—'}{s.insuranceExpiresAt
+											? ` · exp ${toDateInput(s.insuranceExpiresAt)}`
+											: ''}
+									</dd>
+								</div>
+								<div>
+									<dt>Address</dt>
+									<dd>{s.address ?? '—'}</dd>
+								</div>
 								{#if s.tags.length}
-									<div class="wide"><dt>Tags</dt><dd>{#each s.tags as t}<span class="tag">{t}</span>{/each}</dd></div>
+									<div class="wide">
+										<dt>Tags</dt>
+										<dd>
+											{#each s.tags as t (t)}<span class="tag">{t}</span>{/each}
+										</dd>
+									</div>
 								{/if}
-								{#if s.notes}<div class="wide"><dt>Notes</dt><dd>{s.notes}</dd></div>{/if}
 							</dl>
 
-							<div class="assigned">
-								<h3>Assigned orders</h3>
-								{#if s.assignedOrders.length === 0}
-									<p class="muted">Not assigned to any orders yet.</p>
-								{:else}
-									<ul>
-										{#each s.assignedOrders as o (o.id)}
-											<li>
-												<a href="/contractor/orders/{o.id}">{o.projectName ?? 'Untitled order'}</a>
-												<span class="chip small">{o.state}</span>
-											</li>
-										{/each}
-									</ul>
+							<!-- Optional sections stay tucked away behind toggles to keep the card calm. -->
+							<div class="reveals">
+								<button
+									type="button"
+									class="reveal-btn"
+									class:on={ordersOpenId === s.id}
+									aria-expanded={ordersOpenId === s.id}
+									onclick={() => (ordersOpenId = ordersOpenId === s.id ? null : s.id)}
+								>
+									<span class="chev">▸</span> Assigned orders ({s.assignedOrders.length})
+								</button>
+								{#if s.notes}
+									<button
+										type="button"
+										class="reveal-btn icon-only"
+										class:on={notesOpenId === s.id}
+										title="Notes"
+										aria-label={notesOpenId === s.id ? 'Hide notes' : 'Show notes'}
+										aria-expanded={notesOpenId === s.id}
+										onclick={() => (notesOpenId = notesOpenId === s.id ? null : s.id)}
+									>
+										📝
+									</button>
 								{/if}
 							</div>
 
+							{#if ordersOpenId === s.id}
+								<div class="assigned">
+									{#if s.assignedOrders.length === 0}
+										<p class="muted">Not assigned to any orders yet.</p>
+									{:else}
+										<ul>
+											{#each s.assignedOrders as o (o.id)}
+												<li>
+													<a href={resolve(`/contractor/orders/${o.id}`)}
+														>{o.projectName ?? 'Untitled order'}</a
+													>
+													<span class="chip small">{o.state}</span>
+												</li>
+											{/each}
+										</ul>
+									{/if}
+								</div>
+							{/if}
+
+							{#if notesOpenId === s.id && s.notes}
+								<p class="notes-reveal">{s.notes}</p>
+							{/if}
+
 							<div class="row-actions">
-								<button class="btn" onclick={() => (editingId = s.id)}>Edit profile</button>
-
-								<!-- Tier quick-toggle -->
-								<form
-									method="POST"
-									action="?/setTier"
-									use:enhance={() => async ({ update }) => update({ reset: false })}
-								>
-									<input type="hidden" name="id" value={s.id} />
-									<input type="hidden" name="tier" value={s.tier === 'trusted' ? 'guest' : 'trusted'} />
-									<button class="btn" type="submit">
-										Make {s.tier === 'trusted' ? 'Guest' : 'Trusted'}
+								<!-- All management actions live behind one "Manage" menu so the card
+								     isn't a wall of buttons. Destructive actions confirm first. -->
+								<div class="manage">
+									<button
+										class="btn"
+										aria-haspopup="menu"
+										aria-expanded={menuOpenId === s.id}
+										onclick={() => (menuOpenId = menuOpenId === s.id ? null : s.id)}
+									>
+										Manage ▾
 									</button>
-								</form>
+									{#if menuOpenId === s.id}
+										<!-- click-away backdrop -->
+										<button
+											class="menu-scrim"
+											type="button"
+											aria-label="Close menu"
+											onclick={() => (menuOpenId = null)}
+										></button>
+										<div class="menu" role="menu">
+											<button
+												class="menu-item"
+												role="menuitem"
+												onclick={() => {
+													editingId = s.id;
+													menuOpenId = null;
+												}}>Edit profile</button
+											>
 
-								<!-- Invite lifecycle -->
-								{#if s.status === 'unlinked'}
-									<form method="POST" action="?/sendInvite" use:enhance>
-										<input type="hidden" name="id" value={s.id} />
-										<button class="btn" type="submit">Send invite</button>
-									</form>
-								{:else if s.status === 'invited' && s.pendingInviteId}
-									<form method="POST" action="?/resendInvite" use:enhance>
-										<input type="hidden" name="inviteId" value={s.pendingInviteId} />
-										<button class="btn" type="submit">Resend invite</button>
-									</form>
-									<form method="POST" action="?/revokeInvite" use:enhance>
-										<input type="hidden" name="inviteId" value={s.pendingInviteId} />
-										<button class="btn danger" type="submit">Revoke</button>
-									</form>
-								{:else}
+											<form
+												method="POST"
+												action="?/setTier"
+												use:enhance={() =>
+													async ({ update }) => {
+														menuOpenId = null;
+														await update({ reset: false });
+													}}
+											>
+												<input type="hidden" name="id" value={s.id} />
+												<input
+													type="hidden"
+													name="tier"
+													value={s.tier === 'trusted' ? 'guest' : 'trusted'}
+												/>
+												<button class="menu-item" role="menuitem" type="submit">
+													Make {s.tier === 'trusted' ? 'Guest' : 'Trusted'}
+												</button>
+											</form>
+
+											{#if s.status === 'unlinked'}
+												<form
+													method="POST"
+													action="?/sendInvite"
+													use:enhance={() =>
+														async ({ update }) => {
+															menuOpenId = null;
+															await update();
+														}}
+												>
+													<input type="hidden" name="id" value={s.id} />
+													<button class="menu-item" role="menuitem" type="submit"
+														>Send invite</button
+													>
+												</form>
+											{:else if s.status === 'invited' && s.pendingInviteId}
+												<form
+													method="POST"
+													action="?/resendInvite"
+													use:enhance={() =>
+														async ({ update }) => {
+															menuOpenId = null;
+															await update();
+														}}
+												>
+													<input type="hidden" name="inviteId" value={s.pendingInviteId} />
+													<button class="menu-item" role="menuitem" type="submit"
+														>Resend invite</button
+													>
+												</form>
+												<button
+													class="menu-item danger"
+													role="menuitem"
+													onclick={() => {
+														confirmRevokeId = s.id;
+														menuOpenId = null;
+													}}>Revoke invite…</button
+												>
+											{/if}
+
+											<button
+												class="menu-item danger"
+												role="menuitem"
+												onclick={() => {
+													confirmArchiveId = s.id;
+													menuOpenId = null;
+												}}>Archive…</button
+											>
+										</div>
+									{/if}
+								</div>
+
+								{#if s.status === 'linked'}
 									<span class="chip chip-linked">Linked login</span>
 								{/if}
+							</div>
 
-								<!-- Archive with inline confirm -->
-								{#if confirmArchiveId === s.id}
+							<!-- Destructive confirms: an explicit "are you sure?" before firing. -->
+							{#if confirmRevokeId === s.id && s.pendingInviteId}
+								<div class="confirm-banner">
+									<span class="confirm"
+										>Revoke {s.name}’s pending invite? Their invite link stops working.</span
+									>
+									<form
+										method="POST"
+										action="?/revokeInvite"
+										use:enhance={() =>
+											async ({ update }) => {
+												confirmRevokeId = null;
+												await update();
+											}}
+									>
+										<input type="hidden" name="inviteId" value={s.pendingInviteId} />
+										<button class="btn danger" type="submit">Yes, revoke</button>
+									</form>
+									<button class="btn ghost" type="button" onclick={() => (confirmRevokeId = null)}
+										>No</button
+									>
+								</div>
+							{/if}
+
+							{#if confirmArchiveId === s.id}
+								<div class="confirm-banner">
+									<span class="confirm">Archive {s.name}? They’ll be hidden from your roster.</span>
 									<form
 										method="POST"
 										action="?/archiveSubcontractor"
-										use:enhance={() => async ({ update }) => {
-											confirmArchiveId = null;
-											await update();
-										}}
+										use:enhance={() =>
+											async ({ update }) => {
+												confirmArchiveId = null;
+												await update();
+											}}
 									>
 										<input type="hidden" name="id" value={s.id} />
-										<span class="confirm">Archive {s.name}?</span>
 										<button class="btn danger" type="submit">Yes, archive</button>
-										<button class="btn ghost" type="button" onclick={() => (confirmArchiveId = null)}>No</button>
 									</form>
-								{:else}
-									<button class="btn danger ghost" onclick={() => (confirmArchiveId = s.id)}>Archive</button>
-								{/if}
-							</div>
+									<button class="btn ghost" type="button" onclick={() => (confirmArchiveId = null)}
+										>No</button
+									>
+								</div>
+							{/if}
 						{/if}
 					</div>
 				{/if}
@@ -244,7 +449,7 @@
 </div>
 
 <datalist id="trades">
-	{#each TRADES as t}<option value={t}></option>{/each}
+	{#each TRADES as t (t)}<option value={t}></option>{/each}
 </datalist>
 
 <!-- ---------- Add-subcontractor modal ---------- -->
@@ -263,14 +468,17 @@
 				onclick={() => (showAdd = false)}>✕</button
 			>
 			<h2>Add subcontractor</h2>
-			<p class="modal-sub">Add a trade partner to your roster — you can assign them to jobs afterward.</p>
+			<p class="modal-sub">
+				Add a trade partner to your roster — you can assign them to jobs afterward.
+			</p>
 			<form
 				method="POST"
 				action="?/addSubcontractor"
-				use:enhance={() => async ({ update, result }) => {
-					await update();
-					if (result.type === 'success') showAdd = false;
-				}}
+				use:enhance={() =>
+					async ({ update, result }) => {
+						await update();
+						if (result.type === 'success') showAdd = false;
+					}}
 			>
 				<div class="fields">
 					<div class="group-label">Contact</div>
@@ -304,8 +512,8 @@
 						</select>
 					</label>
 					<p class="form-note">
-						Guests are read-only and never see customer contact details. Trusted subs get full
-						order access.
+						Guests are read-only and never see customer contact details. Trusted subs get full order
+						access.
 					</p>
 
 					<div class="group-label">Compliance <span class="opt">optional</span></div>
@@ -381,9 +589,14 @@
 		width: 100%;
 		box-sizing: border-box;
 		padding: 0.7rem 0.9rem 0.7rem 2.5rem;
-		border: 2px solid #111;
+		border: 1.5px solid #d9dde3;
 		border-radius: 10px;
 		font-size: 1rem;
+	}
+	.search:focus {
+		outline: none;
+		border-color: #a98be2;
+		box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.16);
 	}
 	.add-btn {
 		flex-shrink: 0;
@@ -396,11 +609,12 @@
 		gap: 0.9rem;
 	}
 	.card {
-		border: 3px solid #111;
-		border-radius: 14px;
+		border: 1px solid #e2e6ea;
+		border-radius: 16px;
 		background: #fff;
-		box-shadow: 5px 5px 0 #111;
-		overflow: hidden;
+		box-shadow:
+			0 1px 2px rgba(27, 31, 36, 0.05),
+			0 4px 12px rgba(27, 31, 36, 0.06);
 	}
 	.card-top {
 		display: flex;
@@ -413,15 +627,16 @@
 		height: 46px;
 		border-radius: 50%;
 		object-fit: cover;
-		border: 2px solid #111;
+		border: 1px solid #d0d7de;
 		flex-shrink: 0;
 	}
 	.avatar.placeholder {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: #ffcc00;
-		font-weight: 900;
+		background: linear-gradient(135deg, #e7edf3, #f6f8fa);
+		color: #44506b;
+		font-weight: 700;
 	}
 	.who {
 		flex: 1;
@@ -445,36 +660,43 @@
 	}
 	.chip {
 		font-size: 0.68rem;
-		font-weight: 800;
+		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
-		padding: 0.15rem 0.5rem;
+		padding: 0.15rem 0.55rem;
 		border-radius: 999px;
-		border: 2px solid #111;
+		border: 1px solid transparent;
 	}
 	.chip.small {
 		font-size: 0.62rem;
 	}
 	.chip-trusted {
-		background: #22c55e;
-		color: #04210f;
+		background: #e6f4ea;
+		border-color: #4ea866;
+		color: #1a7f37;
 	}
 	.chip-guest {
-		background: #e5e7eb;
+		background: #f6f8fa;
+		border-color: #d0d7de;
+		color: #57606a;
 	}
 	.chip-linked {
-		background: #0969da;
-		color: #fff;
+		background: #ddf4ff;
+		border-color: #54aeff;
+		color: #0757ba;
 	}
 	.chip-invited {
-		background: #ffcc00;
+		background: #fff4d6;
+		border-color: #d4a72c;
+		color: #8a5a00;
 	}
 	.chip-unlinked {
-		background: #fff;
-		color: #555;
+		background: #f6f8fa;
+		border-color: #e4e8ee;
+		color: #8c959f;
 	}
 	.detail {
-		border-top: 2px dashed #111;
+		border-top: 1px solid #eef1f4;
 		padding: 0.9rem;
 		display: grid;
 		gap: 1rem;
@@ -509,9 +731,56 @@
 		font-size: 0.78rem;
 		font-weight: 700;
 	}
-	.assigned h3 {
-		margin: 0 0 0.4rem;
+	/* Toggle row for the optional (notes / assigned orders) sections. */
+	.reveals {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.reveal-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.35rem 0.7rem;
+		border: 1.5px solid #d9dde3;
+		border-radius: 999px;
+		background: #fff;
+		color: #1f2328;
+		font-weight: 600;
+		font-size: 0.82rem;
+		cursor: pointer;
+	}
+	.reveal-btn:hover {
+		background: #f6f8fa;
+	}
+	.reveal-btn.on {
+		background: #eef1f5;
+		border-color: #c7ccd4;
+	}
+	.reveal-btn.icon-only {
+		padding: 0.35rem 0.55rem;
 		font-size: 0.95rem;
+		line-height: 1;
+	}
+	.reveal-btn .chev {
+		color: #8b949e;
+		font-size: 0.72rem;
+		transition: transform 0.15s ease;
+	}
+	.reveal-btn.on .chev {
+		transform: rotate(90deg);
+	}
+	.notes-reveal {
+		margin: 0;
+		white-space: pre-wrap;
+		font-weight: 500;
+		color: #444;
+		font-size: 0.9rem;
+		background: #f9fafb;
+		border: 1px solid #eef1f4;
+		border-radius: 10px;
+		padding: 0.6rem 0.7rem;
 	}
 	.assigned ul {
 		margin: 0;
@@ -638,37 +907,131 @@
 	.confirm {
 		font-weight: 800;
 	}
-	.btn {
-		padding: 0.5rem 0.9rem;
-		border: 2px solid #111;
+	/* "Manage" dropdown: one button opens the full action set. */
+	.manage {
+		position: relative;
+	}
+	.menu-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 30;
+		background: transparent;
+		border: none;
+		cursor: default;
+	}
+	.menu {
+		position: absolute;
+		left: 0;
+		top: calc(100% + 6px);
+		z-index: 40;
+		min-width: 190px;
+		background: #fff;
+		border: 1px solid #d0d7de;
+		border-radius: 12px;
+		box-shadow: 0 8px 24px rgba(27, 31, 36, 0.16);
+		padding: 0.3rem;
+		display: grid;
+		gap: 0.15rem;
+	}
+	.menu form {
+		display: block;
+	}
+	.menu-item {
+		width: 100%;
+		text-align: left;
+		padding: 0.5rem 0.6rem;
+		border: none;
+		border-radius: 7px;
+		background: #fff;
+		font-weight: 700;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.menu-item:hover {
+		background: #f2f4f7;
+	}
+	.menu-item.danger {
+		color: #b91c1c;
+	}
+	.menu-item.danger:hover {
+		background: #fdecec;
+	}
+	/* Destructive confirm prompt, visually flagged in red. */
+	.confirm-banner {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		margin-top: 0.6rem;
+		padding: 0.55rem 0.7rem;
+		border: 1px solid #f0c0c4;
+		border-radius: 10px;
+		background: #fff5f5;
+	}
+	.confirm-banner form {
+		display: inline-flex;
+	}
+	/* Reorder arrows on collapsed template/roster rows. */
+	.icon {
+		width: 1.9rem;
+		height: 1.9rem;
+		border: 1.5px solid #d9dde3;
 		border-radius: 8px;
 		background: #fff;
-		font-weight: 800;
+		cursor: pointer;
+		font-size: 0.9rem;
+		line-height: 1;
+	}
+	.icon:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+	.btn {
+		padding: 0.5rem 0.9rem;
+		border: 1.5px solid #d0d7de;
+		border-radius: 9px;
+		background: #fff;
+		color: #1f2328;
+		font-weight: 600;
 		cursor: pointer;
 		font-size: 0.85rem;
 	}
+	.btn:hover {
+		background: #f6f8fa;
+	}
 	.btn.primary {
 		background: #0969da;
+		border-color: #0969da;
 		color: #fff;
 	}
+	.btn.primary:hover {
+		background: #0757ba;
+	}
 	.btn.danger {
-		background: #ef4444;
+		background: #cf222e;
+		border-color: #cf222e;
 		color: #fff;
+	}
+	.btn.danger:hover {
+		background: #b91c1c;
 	}
 	.btn.danger.ghost {
 		background: #fff;
-		color: #b91c1c;
-		border-color: #b91c1c;
+		color: #cf222e;
+		border-color: #f0c0c4;
+	}
+	.btn.danger.ghost:hover {
+		background: #fdeff0;
 	}
 	.btn.ghost {
 		background: transparent;
 	}
 	.empty {
-		border: 2px dashed #999;
+		border: 1.5px dashed #d0d7de;
 		border-radius: 12px;
 		padding: 1.5rem;
 		text-align: center;
-		color: #666;
+		color: #57606a;
 		font-weight: 600;
 		margin-bottom: 1rem;
 	}
@@ -685,9 +1048,9 @@
 	.modal {
 		position: relative;
 		background: #fff;
-		border: 3px solid #111;
+		border: 1px solid #d0d7de;
 		border-radius: 16px;
-		box-shadow: 8px 8px 0 #111;
+		box-shadow: 0 20px 48px rgba(27, 31, 36, 0.28);
 		padding: 1.25rem;
 		width: 100%;
 		max-width: 560px;

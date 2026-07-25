@@ -48,7 +48,8 @@
 	// The lifecycle filter is a single button that opens a small menu.
 	let viewMenuOpen = $state(false);
 	// Close & reset the note field after it's submitted.
-	const noteThenClose = () =>
+	const noteThenClose =
+		() =>
 		async ({ update }: { update: () => Promise<void> }) => {
 			noteOpenId = null;
 			await update();
@@ -58,8 +59,12 @@
 	// is the shared ContactComposer (message + channel picker).
 	let customerDialog: HTMLDialogElement | undefined = $state();
 	let customerDetail: (typeof data.customers)[number] | null = $state(null);
-	function openContact(id: string | null) {
+	// The project of the order the composer was opened from, so `{{project}}`
+	// resolves in email templates.
+	let contactProject = $state<string | null>(null);
+	function openContact(id: string | null, project: string | null = null) {
 		customerDetail = id ? (data.customers.find((c) => c.id === id) ?? null) : null;
+		contactProject = project;
 		if (customerDetail) customerDialog?.showModal();
 	}
 
@@ -116,8 +121,7 @@
 		'padding: 0.4rem 0.75rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.85rem;';
 	const primaryBtn =
 		'padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
-	const iconBtn =
-		'width: 2.5rem; height: 2.5rem; font-size: 1.7rem;';
+	const iconBtn = 'width: 2.5rem; height: 2.5rem; font-size: 1.7rem;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
@@ -180,8 +184,9 @@
 							view = key;
 							viewMenuOpen = false;
 						}}
-						style="{menuItem} {view === key ? 'background: #ddf4ff; color: #0969da; font-weight: 700;' : ''}"
-						>{VIEW_LABELS[key]} ({buckets[key].length})</button
+						style="{menuItem} {view === key
+							? 'background: #ddf4ff; color: #0969da; font-weight: 700;'
+							: ''}">{VIEW_LABELS[key]} ({buckets[key].length})</button
 					>
 				{/each}
 			</div>
@@ -208,16 +213,15 @@
 				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start;">
 					<div style="display: grid; gap: 0.15rem; min-width: 0;">
 						<a
-							href={`/contractor/orders/${order.id}`}
+							href={resolve(`/contractor/orders/${order.id}`)}
 							style="font-size: 1.3rem; font-weight: 800; color: inherit; text-decoration: none; line-height: 1.15;"
 						>
 							{order.customerName}
 						</a>
 						<div style="font-size: 0.9rem; color: #57606a;">
-							{order.projectName ?? 'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)} · {typeSuffix(
-									order.projectName,
-									order.projectType
-								)}{/if}
+							{order.projectName ??
+								'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)}
+								· {typeSuffix(order.projectName, order.projectType)}{/if}
 						</div>
 					</div>
 
@@ -312,7 +316,7 @@
 				<!-- Action bar: explicit details link on the left, icon buttons on the right -->
 				<div class="action-bar" style="display: flex; gap: 0.7rem; align-items: center;">
 					<a
-						href={`/contractor/orders/${order.id}`}
+						href={resolve(`/contractor/orders/${order.id}`)}
 						class="view-details-link"
 						style="margin-right: auto; font-size: 0.9rem; font-weight: 600; color: #0969da; text-decoration: none; white-space: nowrap;"
 						>View order details →</a
@@ -322,7 +326,7 @@
 							type="button"
 							title="Contact customer"
 							aria-label="Contact customer"
-							onclick={() => openContact(order.customerId)}
+							onclick={() => openContact(order.customerId, order.projectName)}
 							class="icon-btn"
 							style={iconBtn}>✉️</button
 						>
@@ -356,10 +360,10 @@
 							></button>
 							<!-- opens upward since the bar sits at the card bottom -->
 							<div
-								style="position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; min-width: 180px; background: #fff; border: 2px solid #111; border-radius: 10px; box-shadow: 4px 4px 0 #111; overflow: hidden; display: grid;"
+								style="position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; min-width: 180px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
 							>
 								<a
-									href={`/contractor/orders/${order.id}`}
+									href={resolve(`/contractor/orders/${order.id}`)}
 									style="{menuItem} text-decoration: none;">View details</a
 								>
 								{#if order.customerId}
@@ -381,7 +385,8 @@
 										confirmingDeleteOrderId = order.id;
 										menuOpenId = null;
 									}}
-									style="{menuItem} color: #cf222e; border-top: 1px solid #eaeef2;">Delete order</button
+									style="{menuItem} color: #cf222e; border-top: 1px solid #eaeef2;"
+									>Delete order</button
 								>
 							</div>
 						{/if}
@@ -409,10 +414,15 @@
 					>✕</button
 				>
 			</div>
-			<ContactComposer customer={c} onsent={() => customerDialog?.close()} />
+			<ContactComposer
+				customer={c}
+				project={contactProject}
+				onsent={() => customerDialog?.close()}
+			/>
 			<div style="display: grid; gap: 0.4rem; font-size: 0.9rem;">
 				<div style="word-break: break-word;">
-					<span style="color: #57606a;">Email:</span> {c.email}
+					<span style="color: #57606a;">Email:</span>
+					{c.email}
 				</div>
 				{#if c.phone}<div><span style="color: #57606a;">Phone:</span> {c.phone}</div>{/if}
 				{#if c.address}<div><span style="color: #57606a;">Address:</span> {c.address}</div>{/if}

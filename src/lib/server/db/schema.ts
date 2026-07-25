@@ -284,6 +284,55 @@ export const attachment = pgTable(
 	(table) => [index('attachment_orderId_idx').on(table.orderId)]
 );
 
+// Contractor-owned, reusable email templates (name, subject, body) offered in the
+// contact composer. Scoped per contractor; ordered by `sortOrder` then `createdAt`.
+// Placeholders in the subject/body are resolved client-side at send time.
+export const emailTemplate = pgTable(
+	'email_template',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		contractorId: text('contractor_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		subject: text('subject').notNull().default(''),
+		body: text('body').notNull().default(''),
+		sortOrder: integer('sort_order').notNull().default(0),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+		updatedAt: timestamp('updated_at')
+			.defaultNow()
+			.$onUpdate(() => new Date())
+			.notNull()
+	},
+	(table) => [index('email_template_contractorId_idx').on(table.contractorId)]
+);
+
+// Per-contractor branding settings. One row per contractor, lazily created. The
+// signature is appended automatically to every templated email so branding never
+// has to live inside individual templates.
+export const contractorSettings = pgTable('contractor_settings', {
+	contractorId: text('contractor_id')
+		.primaryKey()
+		.references(() => user.id, { onDelete: 'cascade' }),
+	businessName: text('business_name').notNull().default(''),
+	signature: text('signature').notNull().default(''),
+	createdAt: timestamp('created_at').defaultNow().notNull(),
+	updatedAt: timestamp('updated_at')
+		.defaultNow()
+		.$onUpdate(() => new Date())
+		.notNull()
+});
+
+export const emailTemplateRelations = relations(emailTemplate, ({ one }) => ({
+	contractor: one(user, { fields: [emailTemplate.contractorId], references: [user.id] })
+}));
+
+export const contractorSettingsRelations = relations(contractorSettings, ({ one }) => ({
+	contractor: one(user, { fields: [contractorSettings.contractorId], references: [user.id] })
+}));
+
 export const customerRelations = relations(customer, ({ one, many }) => ({
 	contractor: one(user, { fields: [customer.contractorId], references: [user.id] }),
 	account: one(user, { fields: [customer.userId], references: [user.id] }),

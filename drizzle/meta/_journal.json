@@ -71,6 +71,13 @@
       "when": 1784988456679,
       "tag": "0009_majestic_shadowcat",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784993341266,
+      "tag": "0010_stale_starfox",
+      "breakpoints": true
     }
   ]
 }

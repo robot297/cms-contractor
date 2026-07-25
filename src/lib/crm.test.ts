@@ -21,7 +21,9 @@ import {
 	tierLabel,
 	validateCustomerContact,
 	validateOrderSetup,
-	validateSubcontractorContact
+	validateSubcontractorContact,
+	renderTemplate,
+	composeEmail
 } from './crm';
 
 describe('customer-visible state mapping', () => {
@@ -360,5 +362,54 @@ describe('support feedback', () => {
 		expect(body).toContain('Type: Feature request');
 		// Falls back gracefully when no submitter is provided.
 		expect(body).toContain('a contractor');
+	});
+});
+
+describe('email template rendering', () => {
+	it('substitutes known placeholders from vars', () => {
+		expect(
+			renderTemplate('Hi {{customer}}, about {{project}} from {{contractor}}', {
+				customer: 'Dana',
+				project: 'Backyard Pergola',
+				contractor: 'Oak & Iron'
+			})
+		).toBe('Hi Dana, about Backyard Pergola from Oak & Iron');
+	});
+
+	it('tolerates whitespace inside the braces', () => {
+		expect(renderTemplate('Hi {{ customer }}', { customer: 'Dana' })).toBe('Hi Dana');
+	});
+
+	it('resolves missing values to an empty string', () => {
+		expect(renderTemplate('Project: {{project}}.', {})).toBe('Project: .');
+		expect(renderTemplate('Project: {{project}}.', { project: null })).toBe('Project: .');
+	});
+
+	it('leaves unknown tokens untouched', () => {
+		expect(renderTemplate('Hello {{foo}} {{customer}}', { customer: 'Dana' })).toBe(
+			'Hello {{foo}} Dana'
+		);
+	});
+});
+
+describe('composeEmail', () => {
+	it('resolves subject + body and appends the signature block', () => {
+		const { subject, body } = composeEmail(
+			{ subject: 'Your {{project}} quote', body: 'Hi {{customer}},\n\nReady to go.' },
+			{ customer: 'Dana', project: 'Deck', contractor: 'Oak & Iron' },
+			'Thanks,\n{{contractor}}'
+		);
+		expect(subject).toBe('Your Deck quote');
+		expect(body).toBe('Hi Dana,\n\nReady to go.\n\nThanks,\nOak & Iron');
+	});
+
+	it('omits the signature when none is provided', () => {
+		const { body } = composeEmail({ subject: 's', body: 'Body' }, {}, '');
+		expect(body).toBe('Body');
+	});
+
+	it('uses the signature alone when the body is empty', () => {
+		const { body } = composeEmail({ subject: 's', body: '' }, {}, 'Cheers');
+		expect(body).toBe('Cheers');
 	});
 });

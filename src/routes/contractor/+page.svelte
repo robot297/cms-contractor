@@ -11,7 +11,8 @@
 	// Which due card's construction-icon picker is open.
 	let iconPickerId: string | null = $state(null);
 	// Close the icon picker once a choice is submitted.
-	const pickIconThenClose = () =>
+	const pickIconThenClose =
+		() =>
 		async ({ update }: { update: () => Promise<void> }) => {
 			iconPickerId = null;
 			await update();
@@ -35,155 +36,179 @@
 		style="display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap;"
 	>
 		<h1 class="page-title" style="margin: 0;">Dashboard</h1>
-		<span style="font-size: 0.85rem; color: #57606a;"
-			>Follow-ups due ({data.dueOrders.length})</span
+		<span style="font-size: 0.85rem; color: #57606a;">Follow-ups due ({data.dueOrders.length})</span
 		>
 	</header>
 
 	<!-- Follow-ups due -->
 	<section style="display: grid; gap: 0.5rem;">
-			{#if data.dueOrders.length === 0}
+		{#if data.dueOrders.length === 0}
+			<div
+				style="border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 16px; padding: 1.25rem; text-align: center; color: #57606a;"
+			>
+				You’re all caught up — no follow-ups due.
+			</div>
+		{:else}
+			{#each data.dueOrders as o (o.id)}
 				<div
-					style="border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 16px; padding: 1.25rem; text-align: center; color: #57606a;"
+					class="due-card"
+					style="padding: 0.85rem; border-radius: 12px; background: #fff; border: 1px solid #e2e6ea; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05); display: flex; justify-content: space-between; gap: 0.9rem; align-items: center;"
 				>
-					You’re all caught up — no follow-ups due.
-				</div>
-			{:else}
-				{#each data.dueOrders as o (o.id)}
-					<div
-						class="due-card"
-						style="padding: 0.85rem; border-radius: 12px; background: #fff; border: 1px solid #e2e6ea; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05); display: flex; justify-content: space-between; gap: 0.9rem; align-items: center;"
-					>
-						<!-- Settable construction icon -->
-						<div style="position: relative; flex-shrink: 0;">
-							<button
-								type="button"
-								title="Set order icon"
-								aria-label="Set order icon"
-								aria-expanded={iconPickerId === o.id}
-								onclick={() => (iconPickerId = iconPickerId === o.id ? null : o.id)}
-								style="{iconBubble} {o.icon ? '' : 'opacity: 0.55;'}">{o.icon ?? '🏗️'}</button
-							>
-							{#if iconPickerId === o.id}
-								<!-- click-away backdrop -->
-								<button
-									type="button"
-									aria-label="Close icon picker"
-									onclick={() => (iconPickerId = null)}
-									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
-								></button>
-								<form
-									method="POST"
-									action="?/setOrderIcon"
-									use:enhance={pickIconThenClose}
-									style="position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 13.5rem; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.2rem;"
-								>
-									<input type="hidden" name="orderId" value={o.id} />
-									{#each ORDER_ICONS as ic (ic)}
-										<button
-											type="submit"
-											name="icon"
-											value={ic}
-											title={ic}
-											style="{iconChoice} {o.icon === ic
-												? 'background: #ddf4ff; border-color: #0969da;'
-												: ''}">{ic}</button
-										>
-									{/each}
-									{#if o.icon}
-										<button
-											type="submit"
-											name="icon"
-											value=""
-											style="width: 100%; margin-top: 0.25rem; padding: 0.4rem; border-radius: 8px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.82rem; color: #57606a;"
-											>Clear icon</button
-										>
-									{/if}
-								</form>
-							{/if}
-						</div>
-
-						<div style="flex: 1; min-width: 0;">
-							<strong style="font-size: 1rem;">{o.customerName}</strong>
-							<div style="font-size: 0.85rem; color: #57606a;">
-								{o.projectName ?? 'Untitled project'}
-							</div>
-							{#if o.customerLocation}
-								<div style="font-size: 0.8rem; color: #8c959f; display: flex; align-items: center; gap: 0.2rem;">
-									<span aria-hidden="true">📍</span>{o.customerLocation}
-								</div>
-							{/if}
-						</div>
-
-						<div class="needs-update" style="flex-shrink: 0;">
-							<span
-								style="font-size: 0.72rem; font-weight: 700; color: #cf222e; background: #ffebe9; border: 1px solid #e5534b; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap;"
-								>Needs update</span
-							>
-						</div>
-
-						<!-- Open the order's details -->
-						<a
-							href={`/contractor/orders/${o.id}`}
-							title="View order details"
-							aria-label="View order details"
-							class="icon-btn"
-							style="{iconBtn} flex-shrink: 0; text-decoration: none;">📋</a
+					<!-- Settable construction icon -->
+					<div style="position: relative; flex-shrink: 0;">
+						<button
+							type="button"
+							title="Set order icon"
+							aria-label="Set order icon"
+							aria-expanded={iconPickerId === o.id}
+							onclick={() => (iconPickerId = iconPickerId === o.id ? null : o.id)}
+							style="{iconBubble} {o.icon ? '' : 'opacity: 0.55;'}">{o.icon ?? '🏗️'}</button
 						>
-
-						<!-- Send communication -->
-						<div style="position: relative; flex-shrink: 0;">
+						{#if iconPickerId === o.id}
+							<!-- click-away backdrop -->
 							<button
 								type="button"
-								title="Send communication"
-								aria-label="Send communication"
-								aria-expanded={contactOpenId === o.id}
-								onclick={() => (contactOpenId = contactOpenId === o.id ? null : o.id)}
-								class="icon-btn"
-								style={iconBtn}>💬</button
+								aria-label="Close icon picker"
+								onclick={() => (iconPickerId = null)}
+								style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+							></button>
+							<form
+								method="POST"
+								action="?/setOrderIcon"
+								use:enhance={pickIconThenClose}
+								style="position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 13.5rem; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.2rem;"
 							>
-							{#if contactOpenId === o.id}
-								<!-- click-away backdrop -->
-								<button
-									type="button"
-									aria-label="Close contact menu"
-									onclick={() => (contactOpenId = null)}
-									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
-								></button>
-								<div class="contact-pop">
-									<ContactComposer
-										customer={{
-											name: o.customerName,
-											email: o.customerEmail,
-											phone: o.customerPhone,
-											preferredContact: o.customerPreferredContact
-										}}
-										rows={2}
-										onsent={() => (contactOpenId = null)}
-									/>
-								</div>
-							{/if}
-						</div>
+								<input type="hidden" name="orderId" value={o.id} />
+								{#each ORDER_ICONS as ic (ic)}
+									<button
+										type="submit"
+										name="icon"
+										value={ic}
+										title={ic}
+										style="{iconChoice} {o.icon === ic
+											? 'background: #ddf4ff; border-color: #0969da;'
+											: ''}">{ic}</button
+									>
+								{/each}
+								{#if o.icon}
+									<button
+										type="submit"
+										name="icon"
+										value=""
+										style="width: 100%; margin-top: 0.25rem; padding: 0.4rem; border-radius: 8px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.82rem; color: #57606a;"
+										>Clear icon</button
+									>
+								{/if}
+							</form>
+						{/if}
 					</div>
-				{/each}
-			{/if}
-		</section>
+
+					<div style="flex: 1; min-width: 0;">
+						<strong style="font-size: 1rem;">{o.customerName}</strong>
+						<div style="font-size: 0.85rem; color: #57606a;">
+							{o.projectName ?? 'Untitled project'}
+						</div>
+						{#if o.customerLocation}
+							<div
+								style="font-size: 0.8rem; color: #8c959f; display: flex; align-items: center; gap: 0.2rem;"
+							>
+								<span aria-hidden="true">📍</span>{o.customerLocation}
+							</div>
+						{/if}
+					</div>
+
+					<div class="needs-update" style="flex-shrink: 0;">
+						<span
+							style="font-size: 0.72rem; font-weight: 700; color: #cf222e; background: #ffebe9; border: 1px solid #e5534b; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap;"
+							>Needs update</span
+						>
+					</div>
+
+					<!-- Open the order's details -->
+					<a
+						href={`/contractor/orders/${o.id}`}
+						title="View order details"
+						aria-label="View order details"
+						class="icon-btn"
+						style="{iconBtn} flex-shrink: 0; text-decoration: none;">📋</a
+					>
+
+					<!-- Send communication -->
+					<div style="position: relative; flex-shrink: 0;">
+						<button
+							type="button"
+							title="Send communication"
+							aria-label="Send communication"
+							aria-expanded={contactOpenId === o.id}
+							onclick={() => (contactOpenId = contactOpenId === o.id ? null : o.id)}
+							class="icon-btn"
+							style={iconBtn}>💬</button
+						>
+						{#if contactOpenId === o.id}
+							<!-- Dimmed click-away scrim so the composer is the focus. -->
+							<button
+								type="button"
+								aria-label="Close contact menu"
+								onclick={() => (contactOpenId = null)}
+								class="contact-scrim"
+							></button>
+							<div class="contact-pop">
+								<ContactComposer
+									customer={{
+										name: o.customerName,
+										email: o.customerEmail,
+										phone: o.customerPhone,
+										preferredContact: o.customerPreferredContact
+									}}
+									rows={2}
+									onsent={() => (contactOpenId = null)}
+									onclose={() => (contactOpenId = null)}
+								/>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/each}
+		{/if}
+	</section>
 </div>
 
 <style>
+	/* Dimmed full-screen scrim behind the composer so the rest of the page recedes.
+	   z-index sits above the mobile nav (50) so nothing pokes through the dim. */
+	.contact-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 90;
+		border: none;
+		cursor: default;
+		background: rgba(15, 23, 42, 0.45);
+	}
 	/* Contact composer popover anchored to the 💬 button. */
 	.contact-pop {
 		position: absolute;
 		right: 0;
 		top: calc(100% + 6px);
-		z-index: 20;
+		z-index: 100;
 		width: 270px;
 		max-width: 78vw;
-		background: #fff;
-		border: 1px solid #d0d7de;
+		background: #f6f4fc;
+		border: 1px solid #cdbff0;
 		border-radius: 12px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 		padding: 0.75rem;
+	}
+	/* Mobile: a fixed bottom sheet so the popover never overflows off-screen. */
+	@media (max-width: 480px) {
+		.contact-pop {
+			position: fixed;
+			inset: auto 0.6rem 0.6rem;
+			top: auto;
+			width: auto;
+			max-width: none;
+			max-height: 80vh;
+			overflow-y: auto;
+		}
 	}
 
 	/* Mobile: the "Needs update" pill is redundant (every card here is due) and

@@ -590,3 +590,89 @@ export function buildFeedbackIssue(
 	].join('\n');
 	return { title: `${prefix} ${feedback.title}`, body };
 }
+
+// ------------------------------------------------------------ Email templates
+
+/**
+ * The placeholders a contractor may use inside an email template's subject or
+ * body. Shown in the admin editor and used to resolve values in the composer.
+ */
+export const EMAIL_TEMPLATE_PLACEHOLDERS = [
+	{ token: 'customer', label: 'Customer name' },
+	{ token: 'contractor', label: 'Your business name' },
+	{ token: 'project', label: 'Project name' }
+] as const;
+
+export type TemplatePlaceholder = (typeof EMAIL_TEMPLATE_PLACEHOLDERS)[number]['token'];
+
+/** Values substituted into a template's placeholders at selection/send time. */
+export type TemplateVars = Partial<Record<TemplatePlaceholder, string | null | undefined>>;
+
+const KNOWN_PLACEHOLDERS = new Set<string>(EMAIL_TEMPLATE_PLACEHOLDERS.map((p) => p.token));
+
+/**
+ * Practical `mailto:` body length before some mail clients start truncating.
+ * Surfaced as guidance in the admin editor; not enforced.
+ */
+export const EMAIL_BODY_LENGTH_GUIDANCE = 1800;
+
+/**
+ * Substitute `{{customer}}`, `{{contractor}}`, `{{project}}` in `text` from `vars`.
+ * Known placeholders with no value resolve to an empty string; unknown tokens
+ * (e.g. `{{foo}}`) are left untouched so a contractor's typo stays visible rather
+ * than silently vanishing. Whitespace inside the braces is tolerated.
+ */
+export function renderTemplate(text: string, vars: TemplateVars): string {
+	return text.replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (match, token: string) => {
+		if (!KNOWN_PLACEHOLDERS.has(token)) return match;
+		return (vars[token as TemplatePlaceholder] ?? '').toString();
+	});
+}
+
+/**
+ * Resolve a template's subject + body against `vars` and append the contractor's
+ * signature block to the body (two blank-line separated). Pure so the composer can
+ * build the `mailto:` and the admin page can render a live preview from the same
+ * code path. The signature is itself placeholder-resolved so it can carry
+ * `{{contractor}}`.
+ */
+export function composeEmail(
+	template: { subject: string; body: string },
+	vars: TemplateVars,
+	signature?: string | null
+): { subject: string; body: string } {
+	const subject = renderTemplate(template.subject, vars);
+	const body = renderTemplate(template.body, vars);
+	const sig = renderTemplate((signature ?? '').trim(), vars).trim();
+	return { subject, body: sig ? (body ? `${body}\n\n${sig}` : sig) : body };
+}
+
+/**
+ * A default signature seeded for new contractors (and the demo). Carries the
+ * business name via `{{contractor}}` so a rebrand is a one-field edit. Contractors
+ * can rewrite it entirely from the admin page.
+ */
+export const DEFAULT_SIGNATURE = 'Thanks so much,\n{{contractor}}';
+
+/**
+ * Starter templates every new contractor begins with so the feature is useful
+ * without setup. Kept short to stay well within `mailto:` body limits. Seeded once
+ * (idempotent) and also inserted for the demo contractor.
+ */
+export const STARTER_EMAIL_TEMPLATES = [
+	{
+		name: 'Follow-up',
+		subject: 'Following up on your {{project}} project',
+		body: 'Hi {{customer}},\n\nJust checking in on your {{project}} project — happy to answer any questions or get things moving whenever you’re ready.\n\nLet me know how you’d like to proceed.'
+	},
+	{
+		name: 'Quote ready',
+		subject: 'Your {{project}} quote is ready',
+		body: 'Hi {{customer}},\n\nThanks for the opportunity to quote your {{project}} project. Your quote is ready — take a look and let me know if you have any questions or would like to make any changes.\n\nI’d be glad to walk you through it.'
+	},
+	{
+		name: 'Thank you',
+		subject: 'Thank you!',
+		body: 'Hi {{customer}},\n\nThank you for choosing us for your {{project}} project — it was a pleasure working with you. If anything comes up down the road, don’t hesitate to reach out.'
+	}
+] as const;

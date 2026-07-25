@@ -11,6 +11,7 @@
 	const onOrders = $derived(path.startsWith('/contractor/orders'));
 	const onCustomers = $derived(path.startsWith('/contractor/customers'));
 	const onSubcontractors = $derived(path.startsWith('/contractor/subcontractors'));
+	const onTemplates = $derived(path.startsWith('/contractor/settings/templates'));
 	const onSupport = $derived(path.startsWith('/contractor/support'));
 
 	const year = new Date().getFullYear();
@@ -83,6 +84,11 @@
 						href={resolve('/contractor/subcontractors')}
 						class="navlink"
 						class:is-active={onSubcontractors}>Subcontractors</a
+					>
+					<a
+						href={resolve('/contractor/settings/templates')}
+						class="navlink"
+						class:is-active={onTemplates}>Templates</a
 					>
 					<a href={resolve('/contractor/support')} class="navlink" class:is-active={onSupport}
 						>Support</a

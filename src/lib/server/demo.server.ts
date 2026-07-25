@@ -11,9 +11,12 @@ import {
 	subcontractor,
 	subcontractorInvite,
 	timelineEntry,
-	notification
+	notification,
+	emailTemplate,
+	contractorSettings
 } from './db/schema';
 import { auth } from './auth';
+import { STARTER_EMAIL_TEMPLATES } from '$lib/crm';
 // Single source of truth for the sample data — shared with scripts/seed.mjs.
 import {
 	DEMO_CUSTOMERS,
@@ -106,6 +109,24 @@ async function seedDemoData(contractorId: string): Promise<void> {
 	// Deleting subcontractors cascades their assignments + pending invites.
 	await db.delete(subcontractor).where(eq(subcontractor.contractorId, contractorId));
 	await db.delete(notification).where(eq(notification.userId, contractorId));
+	// Rebuild the demo's email templates + branding so every tour starts clean.
+	await db.delete(emailTemplate).where(eq(emailTemplate.contractorId, contractorId));
+	await db.delete(contractorSettings).where(eq(contractorSettings.contractorId, contractorId));
+
+	await db.insert(emailTemplate).values(
+		STARTER_EMAIL_TEMPLATES.map((t, i) => ({
+			contractorId,
+			name: t.name,
+			subject: t.subject,
+			body: t.body,
+			sortOrder: i
+		}))
+	);
+	await db.insert(contractorSettings).values({
+		contractorId,
+		businessName: 'Summit Structures',
+		signature: 'Thanks so much,\n{{contractor}}\n(555) 200-0100'
+	});
 
 	const idByKey = new Map<string, string>();
 	for (const c of DEMO_CUSTOMERS) {
