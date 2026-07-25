@@ -488,7 +488,9 @@ export async function assignSubcontractor(
 	const [ord] = await db
 		.select({ id: order.id })
 		.from(order)
-		.where(and(eq(order.id, orderId), eq(order.contractorId, contractorId)))
+		.where(
+			and(eq(order.id, orderId), eq(order.contractorId, contractorId), isNull(order.deletedAt))
+		)
 		.limit(1);
 	if (!ord) throw new Error('Order not found');
 	const sub = await ownedSubcontractor(contractorId, subcontractorId);
@@ -508,7 +510,9 @@ export async function unassignSubcontractor(
 	const [ord] = await db
 		.select({ id: order.id })
 		.from(order)
-		.where(and(eq(order.id, orderId), eq(order.contractorId, contractorId)))
+		.where(
+			and(eq(order.id, orderId), eq(order.contractorId, contractorId), isNull(order.deletedAt))
+		)
 		.limit(1);
 	if (!ord) throw new Error('Order not found');
 	await db
@@ -529,7 +533,9 @@ export async function listOrderSubcontractors(
 	const [ord] = await db
 		.select({ id: order.id })
 		.from(order)
-		.where(and(eq(order.id, orderId), eq(order.contractorId, contractorId)))
+		.where(
+			and(eq(order.id, orderId), eq(order.contractorId, contractorId), isNull(order.deletedAt))
+		)
 		.limit(1);
 	if (!ord) return [];
 	const rows = await db
@@ -560,7 +566,7 @@ export async function listSubcontractorOrders(
 		.select({ order })
 		.from(orderSubcontractor)
 		.innerJoin(order, eq(orderSubcontractor.orderId, order.id))
-		.where(eq(orderSubcontractor.subcontractorId, subcontractorId))
+		.where(and(eq(orderSubcontractor.subcontractorId, subcontractorId), isNull(order.deletedAt)))
 		.orderBy(desc(order.updatedAt));
 	return rows.map((r) => ({
 		id: r.order.id,
@@ -596,7 +602,7 @@ export async function listAssignedOrdersForUser(
 		.from(orderSubcontractor)
 		.innerJoin(order, eq(orderSubcontractor.orderId, order.id))
 		.leftJoin(customer, eq(order.customerId, customer.id))
-		.where(inArray(orderSubcontractor.subcontractorId, subIds))
+		.where(and(inArray(orderSubcontractor.subcontractorId, subIds), isNull(order.deletedAt)))
 		.orderBy(desc(order.updatedAt));
 	const orders: PortalOrderSummary[] = rows.map((r) => {
 		const tier = tierBySubId.get(r.subId) ?? 'guest';
@@ -668,7 +674,7 @@ export async function subcontractorOrderView(
 		.select({ order, customer })
 		.from(order)
 		.leftJoin(customer, eq(order.customerId, customer.id))
-		.where(eq(order.id, orderId))
+		.where(and(eq(order.id, orderId), isNull(order.deletedAt)))
 		.limit(1);
 	if (!row) return null;
 	const tier = sub.tier as SubcontractorTier;
@@ -750,7 +756,7 @@ export async function addSubcontractorAttachment(
 	const [ord] = await db
 		.select({ contractorId: order.contractorId })
 		.from(order)
-		.where(eq(order.id, orderId))
+		.where(and(eq(order.id, orderId), isNull(order.deletedAt)))
 		.limit(1);
 	if (!ord) throw new Error('Order not found');
 	await db.insert(attachment).values({

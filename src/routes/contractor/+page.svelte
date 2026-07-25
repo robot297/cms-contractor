@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { ORDER_ICONS } from '$lib/crm';
+	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -16,17 +17,13 @@
 			await update();
 		};
 
-	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
-
 	// Sizing only — the gold look comes from the shared `.icon-btn` class.
-	const iconBtn = 'width: 2.2rem; height: 2.2rem; font-size: 1.25rem;';
+	const iconBtn = 'width: 2.3rem; height: 2.3rem; font-size: 1.55rem;';
 	// The settable order-icon "avatar": just the glyph, no button chrome.
 	const iconBubble =
 		'width: 2.6rem; height: 2.6rem; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: none; background: none; border-radius: 999px; cursor: pointer; font-size: 1.6rem; line-height: 1; padding: 0;';
 	const iconChoice =
 		'width: 2.4rem; height: 2.4rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: none; border-radius: 10px; cursor: pointer; font-size: 1.3rem; line-height: 1; padding: 0;';
-	const contactItem =
-		'display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit; text-decoration: none;';
 </script>
 
 <svelte:head>
@@ -153,34 +150,17 @@
 									onclick={() => (contactOpenId = null)}
 									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
 								></button>
-								<div
-									style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 180px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
-								>
-									<a
-										href={`mailto:${o.customerEmail}`}
-										onclick={() => (contactOpenId = null)}
-										style="{contactItem} {o.customerPreferredContact === 'email'
-											? 'color: #0969da; font-weight: 700;'
-											: ''}"
-										>✉ Email{#if o.customerPreferredContact === 'email'}
-											<span style="font-size: 0.7rem; color: #8c959f; font-weight: 400;"
-												>· preferred</span
-											>{/if}</a
-									>
-									{#if o.customerPhone}
-										<a
-											href={telHref(o.customerPhone)}
-											onclick={() => (contactOpenId = null)}
-											style="{contactItem} border-top: 1px solid #eaeef2; {o.customerPreferredContact ===
-											'phone'
-												? 'color: #0969da; font-weight: 700;'
-												: ''}"
-											>📞 Call{#if o.customerPreferredContact === 'phone'}
-												<span style="font-size: 0.7rem; color: #8c959f; font-weight: 400;"
-													>· preferred</span
-												>{/if}</a
-										>
-									{/if}
+								<div class="contact-pop">
+									<ContactComposer
+										customer={{
+											name: o.customerName,
+											email: o.customerEmail,
+											phone: o.customerPhone,
+											preferredContact: o.customerPreferredContact
+										}}
+										rows={2}
+										onsent={() => (contactOpenId = null)}
+									/>
 								</div>
 							{/if}
 						</div>
@@ -191,6 +171,21 @@
 </div>
 
 <style>
+	/* Contact composer popover anchored to the 💬 button. */
+	.contact-pop {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 6px);
+		z-index: 20;
+		width: 270px;
+		max-width: 78vw;
+		background: #fff;
+		border: 1px solid #d0d7de;
+		border-radius: 12px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+		padding: 0.75rem;
+	}
+
 	/* Mobile: the "Needs update" pill is redundant (every card here is due) and
 	   only crowds the narrow row — drop it so the customer + location breathe. */
 	@media (max-width: 560px) {

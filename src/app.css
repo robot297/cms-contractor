@@ -135,31 +135,35 @@ a[style*='border: 1px solid #0969da'] {
 
 /* ------------------------------------------------------------ Icon buttons */
 
-/* One flat gold treatment for every round icon button — dashboard, orders and
-   the customer directory all share `.icon-btn`, so they read as a single set.
-   Size (width/height/font-size) stays inline since it varies per use; this
-   owns the look: gold fill, no heavy black border, no hard shadow. */
+/* Shared treatment for every icon button — dashboard, orders and the customer
+   directory all use `.icon-btn`. No standing fill: the bold glyph carries it,
+   with only a faint wash on hover/press. Size (width/height/font-size) stays
+   inline since it varies per use. */
 .icon-btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	border: none;
 	border-radius: 10px;
-	background: #efe6ff;
+	background: none;
 	color: var(--ink);
 	cursor: pointer;
 	line-height: 1;
 	padding: 0;
 	box-shadow: none;
-	transition: background 0.1s ease;
+	transition:
+		background 0.12s ease,
+		transform 0.06s ease;
 	/* Kill the square grey flash mobile webkit paints on tap. */
 	-webkit-tap-highlight-color: transparent;
 }
-.icon-btn:hover,
-.icon-btn:active {
-	background: #e0d0fb;
+.icon-btn:hover {
+	background: rgba(17, 17, 17, 0.06);
 }
-/* Keyboard focus gets a ring that hugs the circle; tap/click stays clean. */
+.icon-btn:active {
+	background: rgba(17, 17, 17, 0.1);
+	transform: scale(0.94);
+}
 .icon-btn:focus-visible {
 	outline: 2px solid var(--ink);
 	outline-offset: 2px;

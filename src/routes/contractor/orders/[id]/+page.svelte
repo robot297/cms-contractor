@@ -1,12 +1,24 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { afterNavigate } from '$app/navigation';
 	import { formatBytes, MAX_ATTACHMENT_BYTES, QUICK_UPDATE_STATES } from '$lib/crm';
+	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const order = $derived(data.order);
 	const customer = $derived(data.customer);
+
+	// Back link follows where you came from: the dashboard sends you back to the
+	// dashboard, the orders list back to orders. Falls back to Orders on a direct
+	// load / refresh.
+	let backTo = $state({ href: '/contractor/orders', label: 'Orders' });
+	afterNavigate((nav) => {
+		const from = nav.from?.url.pathname;
+		if (from === '/contractor') backTo = { href: '/contractor', label: 'Dashboard' };
+		else if (from?.startsWith('/contractor/orders')) backTo = { href: '/contractor/orders', label: 'Orders' };
+	});
 
 	let confirmingDelete = $state(false);
 	// Status editing hides behind a "Change" toggle under the badge.
@@ -51,7 +63,6 @@
 	function fmtDate(d: Date | string | null): string {
 		return d ? new Date(d).toLocaleDateString() : '—';
 	}
-	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 
 	// Status badge colour by health: green = on track / done, amber = waiting or
 	// stuck, red = cancelled. Mirrors the orders list.
@@ -98,8 +109,8 @@
 
 <div style="background: #f6f8fa; min-height: 100%;">
 	<div class="page">
-		<a href="/contractor/orders" style="color: #0969da; font-size: 0.9rem; text-decoration: none;"
-			>← Orders</a
+		<a href={backTo.href} style="color: #0969da; font-size: 0.9rem; text-decoration: none;"
+			>← {backTo.label}</a
 		>
 
 		<!-- Header: customer name leads, project is the subtitle -->
@@ -121,10 +132,12 @@
 				<div style="position: relative;">
 					<button
 						type="button"
+						class="icon-btn {statusOpen ? 'on' : ''}"
 						aria-expanded={statusOpen}
+						title="Change status"
+						aria-label="Change status"
 						onclick={() => (statusOpen = !statusOpen)}
-						style="padding: 0.2rem 0.7rem; border-radius: 999px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; font-size: 0.78rem; font-weight: 600; color: #57606a;"
-						>Change status</button
+						style="width: 1.9rem; height: 1.9rem; font-size: 1.05rem;">⚙️</button
 					>
 					{#if statusOpen}
 						<!-- click-away backdrop -->
@@ -176,7 +189,7 @@
 							<button
 								type="button"
 								class="icon-btn"
-								style="width: 2.4rem; height: 2.4rem; font-size: 1.35rem;"
+								style="width: 2.5rem; height: 2.5rem; font-size: 1.6rem;"
 								title="Snooze or set follow-up"
 								aria-label="Snooze or set follow-up"
 								aria-expanded={snoozeOpen}
@@ -241,7 +254,7 @@
 						<button
 							type="button"
 							class="icon-btn"
-							style="width: 2.2rem; height: 2.2rem; font-size: 1.35rem;"
+							style="width: 2.3rem; height: 2.3rem; font-size: 1.65rem;"
 							title="Add note"
 							aria-label="Add note"
 							aria-expanded={noteOpen}
@@ -313,7 +326,7 @@
 									<button
 										type="button"
 										class="icon-btn"
-										style="width: 2.2rem; height: 2.2rem; font-size: 1.15rem;"
+										style="width: 2.3rem; height: 2.3rem; font-size: 1.45rem;"
 										title="Contact customer"
 										aria-label="Contact customer"
 										aria-expanded={contactOpen}
@@ -327,23 +340,17 @@
 											onclick={() => (contactOpen = false)}
 											style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
 										></button>
-										<div
-											style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 200px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
-										>
-											<a
-												href={`mailto:${customer.email}`}
-												onclick={() => (contactOpen = false)}
-												style="padding: 0.55rem 0.8rem; text-decoration: none; color: inherit; font-size: 0.9rem;"
-												>✉ Email</a
-											>
-											{#if customer.phone}
-												<a
-													href={telHref(customer.phone)}
-													onclick={() => (contactOpen = false)}
-													style="padding: 0.55rem 0.8rem; text-decoration: none; color: inherit; font-size: 0.9rem; border-top: 1px solid #eaeef2;"
-													>📞 Call</a
-												>
-											{/if}
+										<div class="contact-pop">
+											<ContactComposer
+												customer={{
+													name: customer.name,
+													email: customer.email,
+													phone: customer.phone,
+													preferredContact: customer.preferredContact
+												}}
+												rows={2}
+												onsent={() => (contactOpen = false)}
+											/>
 											{#if order.customerId}
 												<form
 													method="POST"
@@ -354,11 +361,7 @@
 													}}
 												>
 													<input type="hidden" name="customerId" value={order.customerId} />
-													<button
-														type="submit"
-														style="width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; border-top: 1px solid #eaeef2; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;"
-														>🔗 Invite customer</button
-													>
+													<button type="submit" class="invite-link">🔗 Invite customer to portal</button>
 												</form>
 											{/if}
 										</div>
@@ -401,12 +404,12 @@
 						{#if data.availableSubs.length > 0}
 							<button
 								type="button"
-								class="icon-btn"
-								style="width: 2rem; height: 2rem; font-size: 1.3rem;"
-								title="Assign a subcontractor"
-								aria-label="Assign a subcontractor"
+								class="icon-btn {assignOpen ? 'on' : ''}"
+								style="width: 2.2rem; height: 2.2rem; font-size: {assignOpen ? '1.15rem' : '1.55rem'};"
+								title={assignOpen ? 'Hide' : 'Assign a subcontractor'}
+								aria-label={assignOpen ? 'Hide subcontractor picker' : 'Assign a subcontractor'}
 								aria-expanded={assignOpen}
-								onclick={() => (assignOpen = !assignOpen)}>＋</button
+								onclick={() => (assignOpen = !assignOpen)}>{assignOpen ? '✕' : '＋'}</button
 							>
 						{/if}
 					</div>
@@ -505,7 +508,7 @@
 							<button
 								type="button"
 								class="icon-btn"
-								style="width: 1.9rem; height: 1.9rem; font-size: 1rem;"
+								style="width: 2rem; height: 2rem; font-size: 1.2rem;"
 								title="Attachment rules"
 								aria-label="Attachment rules"
 								onclick={() => infoDialog?.showModal()}>ℹ️</button
@@ -634,6 +637,48 @@
 		justify-content: space-between;
 		gap: 1rem;
 		align-items: start;
+	}
+	/* Toggle icon button in its open state — filled accent so the "hide" (✕)
+	   state is clearly on. */
+	.icon-btn.on {
+		background: #ece7fb;
+		color: #4b2fa8;
+	}
+	.icon-btn.on:hover {
+		background: #e2daf7;
+	}
+	/* Contact composer popover anchored to the 💬 button, with an invite action
+	   tucked under the composer. */
+	.contact-pop {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 6px);
+		z-index: 20;
+		width: 280px;
+		max-width: 82vw;
+		background: #fff;
+		border: 1px solid #d0d7de;
+		border-radius: 12px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+		padding: 0.75rem;
+		display: grid;
+		gap: 0.6rem;
+	}
+	.invite-link {
+		width: 100%;
+		text-align: left;
+		padding: 0.5rem 0.6rem;
+		border: none;
+		border-top: 1px solid #eaeef2;
+		background: none;
+		cursor: pointer;
+		font-size: 0.88rem;
+		color: #0969da;
+		font-weight: 600;
+	}
+	.invite-link:hover {
+		background: #f6f8fa;
+		border-radius: 8px;
 	}
 	/* The order title should read as a title but stay subtle — no chunky yellow
 	   hero box, and a normal-weight font instead of the heavy display face. */

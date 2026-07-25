@@ -389,7 +389,7 @@
 		flex-shrink: 0;
 		width: 2.9rem;
 		height: 2.9rem;
-		font-size: 1.5rem;
+		font-size: 1.75rem;
 	}
 	.grid {
 		display: grid;

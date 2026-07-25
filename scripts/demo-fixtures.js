@@ -14,7 +14,7 @@
  * @typedef {{
  *   key: string, name: string, email: string,
  *   phone: string | null, address: string | null, notes: string | null,
- *   tags: string[], avatar: string | null, preferredContact: 'email' | 'phone'
+ *   tags: string[], avatar: string | null, preferredContact: 'email' | 'call' | 'text'
  * }} DemoCustomer
  */
 
@@ -40,7 +40,7 @@ export const DEMO_CUSTOMERS = [
 		notes: 'Prefers cedar. Repeat client — third project.',
 		tags: ['repeat', 'deck'],
 		avatar: '/img/maya.png',
-		preferredContact: 'phone'
+		preferredContact: 'call'
 	},
 	{
 		key: 'luis',
@@ -62,7 +62,7 @@ export const DEMO_CUSTOMERS = [
 		notes: 'HOA board contact — needs itemized quotes.',
 		tags: ['commercial'],
 		avatar: '/img/mia.png',
-		preferredContact: 'phone'
+		preferredContact: 'call'
 	},
 	{
 		key: 'sam',
@@ -86,7 +86,7 @@ export const DEMO_CUSTOMERS = [
 		notes: 'Wants a shaded patio before summer.',
 		tags: ['pergola'],
 		avatar: null,
-		preferredContact: 'phone'
+		preferredContact: 'call'
 	},
 	{
 		key: 'bianca',
@@ -108,7 +108,7 @@ export const DEMO_CUSTOMERS = [
 		notes: 'Referred by Bianca.',
 		tags: ['referral', 'deck'],
 		avatar: null,
-		preferredContact: 'phone'
+		preferredContact: 'call'
 	},
 	{
 		key: 'divya',
@@ -130,7 +130,7 @@ export const DEMO_CUSTOMERS = [
 		notes: null,
 		tags: [],
 		avatar: null,
-		preferredContact: 'phone'
+		preferredContact: 'call'
 	},
 	{
 		key: 'grace',
@@ -141,7 +141,7 @@ export const DEMO_CUSTOMERS = [
 		notes: 'Prefers weekend site visits.',
 		tags: ['carport'],
 		avatar: null,
-		preferredContact: 'email'
+		preferredContact: 'text'
 	},
 	{
 		key: 'hank',
@@ -152,7 +152,7 @@ export const DEMO_CUSTOMERS = [
 		notes: null,
 		tags: [],
 		avatar: null,
-		preferredContact: 'phone'
+		preferredContact: 'call'
 	},
 	{
 		key: 'priya',
@@ -185,7 +185,7 @@ export const DEMO_CUSTOMERS = [
 		notes: 'Bilingual — Spanish preferred.',
 		tags: ['referral'],
 		avatar: null,
-		preferredContact: 'phone'
+		preferredContact: 'call'
 	},
 	{
 		key: 'wendy',

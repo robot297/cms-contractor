@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { slide } from 'svelte/transition';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { PROJECT_TYPES } from '$lib/crm';
+	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -52,15 +54,14 @@
 			await update();
 		};
 
-	// Contact dialog, driven off the already-loaded customer directory.
+	// Contact dialog, driven off the already-loaded customer directory. The body
+	// is the shared ContactComposer (message + channel picker).
 	let customerDialog: HTMLDialogElement | undefined = $state();
 	let customerDetail: (typeof data.customers)[number] | null = $state(null);
 	function openContact(id: string | null) {
 		customerDetail = id ? (data.customers.find((c) => c.id === id) ?? null) : null;
 		if (customerDetail) customerDialog?.showModal();
 	}
-	// Digits-only form of a phone number for a tel: link.
-	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 
 	// New order modal
 	let newOrderDialog: HTMLDialogElement | undefined = $state();
@@ -116,7 +117,7 @@
 	const primaryBtn =
 		'padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
 	const iconBtn =
-		'width: 2.4rem; height: 2.4rem; font-size: 1.4rem;';
+		'width: 2.5rem; height: 2.5rem; font-size: 1.7rem;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
@@ -270,7 +271,7 @@
 					</div>
 
 					{#if noteOpenId === order.id}
-						<div style="display: grid; gap: 0.5rem;">
+						<div class="note-panel" transition:slide={{ duration: 220 }}>
 							<!-- Mobile: the disclosure below is hidden, so the note history lives
 							     here alongside the add field once "Add note" is pressed. -->
 							{#if (data.notesByOrder[order.id] ?? []).length > 0}
@@ -332,7 +333,7 @@
 						aria-label="Add note"
 						aria-expanded={noteOpenId === order.id}
 						onclick={() => (noteOpenId = noteOpenId === order.id ? null : order.id)}
-						class="icon-btn"
+						class="icon-btn {noteOpenId === order.id ? 'on' : ''}"
 						style={iconBtn}>📝</button
 					>
 					<div style="position: relative;">
@@ -408,20 +409,7 @@
 					>✕</button
 				>
 			</div>
-			<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-				<a
-					href={`mailto:${c.email}`}
-					style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; text-decoration: none; font-weight: 500;"
-					>✉️ Email</a
-				>
-				{#if c.phone}
-					<a
-						href={telHref(c.phone)}
-						style="padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none;"
-						>📞 Call</a
-					>
-				{/if}
-			</div>
+			<ContactComposer customer={c} onsent={() => customerDialog?.close()} />
 			<div style="display: grid; gap: 0.4rem; font-size: 0.9rem;">
 				<div style="word-break: break-word;">
 					<span style="color: #57606a;">Email:</span> {c.email}
@@ -549,6 +537,27 @@
 </dialog>
 
 <style>
+	/* Active state for a toggle icon button (e.g. the note ✎ while its panel is
+	   open) — a filled accent so it's clearly "on". */
+	.icon-btn.on {
+		background: #ece7fb;
+		color: #4b2fa8;
+	}
+	.icon-btn.on:hover {
+		background: #e2daf7;
+	}
+	/* The expanded add-note area, visually grouped so it reads as belonging to
+	   the note button that opened it. */
+	.note-panel {
+		display: grid;
+		gap: 0.5rem;
+		background: #faf9ff;
+		border: 1px solid #e4defb;
+		border-radius: 10px;
+		padding: 0.7rem;
+		box-shadow: 0 2px 10px rgba(75, 47, 168, 0.07);
+	}
+
 	/* The mobile-only note history inside the add-note panel is hidden on wider
 	   screens, where the disclosure below the card handles browsing instead. */
 	.notes-history-mobile {

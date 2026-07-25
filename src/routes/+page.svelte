@@ -10,34 +10,19 @@
 
 	const features = [
 		{
-			icon: '👥',
-			title: 'Customer directory',
-			body: 'Every contact in one searchable place — photos, tags, and one-tap invites to their own portal.'
+			icon: '🔒',
+			title: 'Secure',
+			body: 'Role-based access keeps customer details safe — trusted subcontractors see the job, guests never see personal info. Your data stays yours.'
 		},
 		{
-			icon: '📋',
-			title: 'Orders & timeline',
-			body: 'Track each job from first inquiry to final invoice, with status, internal notes, and a full activity trail.'
+			icon: '✨',
+			title: 'Simple',
+			body: 'No enterprise bloat. Search, tap, done — an interface that gets out of the way so you can get back to the work.'
 		},
 		{
-			icon: '⏰',
-			title: 'Follow-ups that stick',
-			body: 'Due reminders you can snooze in a tap — so no lead ever slips quietly through the cracks.'
-		},
-		{
-			icon: '🤝',
-			title: 'Subcontractors',
-			body: 'Assign trade partners with the right access — trusted teammates, or guests with customer details hidden.'
-		},
-		{
-			icon: '🔗',
-			title: 'Customer portal',
-			body: 'Invite clients to follow their own project status and paperwork, without the endless phone tag.'
-		},
-		{
-			icon: '📎',
-			title: 'Files where they belong',
-			body: 'Site photos, contracts, and PDFs attach straight to the order they document — never lost in a thread.'
+			icon: '⚡',
+			title: 'Streamlined',
+			body: 'Customers, orders, subcontractors, and follow-ups in one flow — from the first inquiry to the final invoice.'
 		}
 	];
 </script>
@@ -51,16 +36,9 @@
 </svelte:head>
 
 <div class="landing">
-	<!-- Top bar -->
-	<header class="topbar">
-		<span class="wordmark">🏗️ Contractor&nbsp;CRM</span>
-		<a class="signin" href={resolve('/login')}>Sign in</a>
-	</header>
-
 	<!-- Hero -->
 	<section class="hero">
 		<div class="hero-inner">
-			<span class="eyebrow">CRM for contractors</span>
 			<h1 class="headline">
 				Run every job from<br /><span class="accent">lead to last invoice.</span>
 			</h1>
@@ -83,13 +61,12 @@
 						}}
 					>
 						<button type="submit" class="btn primary" disabled={demoLoading}>
-							{demoLoading ? 'Setting up your demo…' : '▶  Explore the live demo'}
+							{demoLoading ? 'Setting up…' : 'Demo'}
 						</button>
 					</form>
 				{/if}
-				<a class="btn ghost" href={resolve('/login')}>Sign in →</a>
+				<a class="btn ghost" href={resolve('/login')}>Sign in</a>
 			</div>
-			<p class="cta-note">No sign-up needed — jump straight into a sample workspace.</p>
 		</div>
 	</section>
 
@@ -145,47 +122,20 @@
 </div>
 
 <style>
+	/* Keep padding inside every element's width so nothing overflows the
+	   viewport on mobile (the app doesn't set a global border-box). */
+	.landing,
+	.landing *,
+	.landing *::before,
+	.landing *::after {
+		box-sizing: border-box;
+	}
 	.landing {
 		font-family: 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif;
 		color: #1f2328;
 		background: #fff;
 		min-height: 100dvh;
-	}
-
-	/* ---------- Top bar ---------- */
-	.topbar {
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		z-index: 3;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		padding: 1.1rem clamp(1rem, 4vw, 2.5rem);
-	}
-	.wordmark {
-		font-weight: 800;
-		letter-spacing: -0.01em;
-		color: #fff;
-		font-size: 1.05rem;
-	}
-	.signin {
-		color: rgba(255, 255, 255, 0.85);
-		text-decoration: none;
-		font-weight: 600;
-		font-size: 0.9rem;
-		padding: 0.45rem 0.9rem;
-		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.25);
-		transition:
-			background 0.15s ease,
-			color 0.15s ease;
-	}
-	.signin:hover {
-		background: rgba(255, 255, 255, 0.12);
-		color: #fff;
+		overflow-x: hidden;
 	}
 
 	/* ---------- Hero ---------- */
@@ -224,20 +174,8 @@
 		text-align: center;
 		color: #fff;
 	}
-	.eyebrow {
-		display: inline-block;
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.16em;
-		text-transform: uppercase;
-		color: #ffd23f;
-		background: rgba(255, 204, 0, 0.12);
-		border: 1px solid rgba(255, 204, 0, 0.28);
-		padding: 0.35rem 0.8rem;
-		border-radius: 999px;
-	}
 	.headline {
-		margin: 1.1rem 0 0;
+		margin: 0;
 		font-size: clamp(2.2rem, 6vw, 3.6rem);
 		line-height: 1.05;
 		font-weight: 800;
@@ -268,14 +206,17 @@
 		display: flex;
 		gap: 0.75rem;
 		justify-content: center;
+		align-items: center;
 		flex-wrap: wrap;
 	}
-	.cta-note {
-		margin: 1rem 0 0;
-		font-size: 0.85rem;
-		color: rgba(255, 255, 255, 0.5);
+	/* Let the demo form's button participate directly in the flex row so both
+	   CTAs are treated as equal, centered siblings. */
+	.cta-row form {
+		display: contents;
 	}
-
+	.cta-row .btn {
+		min-width: 8.5rem;
+	}
 	/* ---------- Buttons ---------- */
 	.btn {
 		display: inline-flex;
@@ -346,7 +287,7 @@
 	}
 	.grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 		gap: 1.1rem;
 	}
 	.card {
@@ -430,9 +371,11 @@
 	}
 
 	@media (max-width: 480px) {
-		.cta-row .btn,
-		.cta-row form,
-		.cta-row form .btn {
+		.cta-row {
+			flex-direction: column;
+			align-items: stretch;
+		}
+		.cta-row .btn {
 			width: 100%;
 		}
 	}

@@ -2,7 +2,8 @@
 	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
-	import { customerContactSchema, formatPhone } from '$lib/crm';
+	import { customerContactSchema, formatPhone, normalizePreferredContact } from '$lib/crm';
+	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -290,17 +291,9 @@
 
 	const fieldStyle =
 		'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
-	const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
-
-	// Email/Call buttons: the customer's preferred method is the primary (blue)
-	// action, the other is secondary (grey).
-	const contactPrimary =
-		'padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; text-decoration: none; font-weight: 600; font-size: 0.9rem;';
-	const contactSecondary =
-		'padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; color: inherit; text-decoration: none; font-weight: 500; font-size: 0.9rem;';
 	// Gear (⚙) menu that holds Edit / Send app invite / Archive.
 	// Sizing only — the gold look comes from the shared `.icon-btn` class.
-	const gearBtn = 'width: 2.2rem; height: 2.2rem; font-size: 1.25rem;';
+	const gearBtn = 'width: 2.3rem; height: 2.3rem; font-size: 1.55rem;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
@@ -372,7 +365,7 @@
 				addDialog?.showModal();
 			}}
 			class="icon-btn"
-			style="flex-shrink: 0; width: 2.9rem; height: 2.9rem; font-size: 1.5rem;"
+			style="flex-shrink: 0; width: 2.9rem; height: 2.9rem; font-size: 1.75rem;"
 			>＋</button
 		>
 	</div>
@@ -618,8 +611,21 @@
 											<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
 												Preferred contact method
 												<select name="preferredContact" style={fieldStyle}>
-													<option value="email" selected={c.preferredContact !== 'phone'}>Email</option>
-													<option value="phone" selected={c.preferredContact === 'phone'}>Phone</option>
+													<option
+														value="email"
+														selected={normalizePreferredContact(c.preferredContact) === 'email'}
+														>Email</option
+													>
+													<option
+														value="call"
+														selected={normalizePreferredContact(c.preferredContact) === 'call'}
+														>Call</option
+													>
+													<option
+														value="text"
+														selected={normalizePreferredContact(c.preferredContact) === 'text'}
+														>Text</option
+													>
 												</select>
 											</label>
 											<textarea
@@ -646,25 +652,8 @@
 											</div>
 										</form>
 									{:else}
-										{@const preferPhone = c.preferredContact === 'phone' && !!c.phone}
-										<!-- Quick contact actions — preferred method is highlighted -->
-										<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-											<a
-												href={`mailto:${c.email}`}
-												title={preferPhone ? 'Email' : 'Preferred contact method'}
-												style={preferPhone ? contactSecondary : contactPrimary}>✉ Email</a
-											>
-											{#if c.phone}
-												<a
-													href={telHref(c.phone)}
-													title={preferPhone ? 'Preferred contact method' : 'Call'}
-													style={preferPhone ? contactPrimary : contactSecondary}>📞 Call</a
-												>
-											{/if}
-											<span style="font-size: 0.75rem; color: #8c959f;"
-												>Prefers {preferPhone ? 'phone' : 'email'}</span
-											>
-										</div>
+										<!-- Message the customer; pick the channel inline -->
+										<ContactComposer customer={c} rows={2} />
 
 										<!-- Contact details -->
 										<div style="display: grid; gap: 0.3rem; font-size: 0.9rem;">
@@ -743,7 +732,7 @@
 														aria-expanded={gearOpenId === c.id}
 														onclick={() => (gearOpenId = gearOpenId === c.id ? null : c.id)}
 														class="icon-btn"
-														style={gearBtn}>⚙</button
+														style={gearBtn}>⚙️</button
 													>
 													{#if gearOpenId === c.id}
 														<!-- click-away backdrop -->
@@ -906,7 +895,8 @@
 			Preferred contact method
 			<select name="preferredContact" style={fieldStyle}>
 				<option value="email" selected>Email</option>
-				<option value="phone">Phone</option>
+				<option value="call">Call</option>
+				<option value="text">Text</option>
 			</select>
 		</label>
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">

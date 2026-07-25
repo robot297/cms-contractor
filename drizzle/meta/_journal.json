@@ -64,6 +64,13 @@
       "when": 1784686599031,
       "tag": "0008_abnormal_black_panther",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784988456679,
+      "tag": "0009_majestic_shadowcat",
+      "breakpoints": true
     }
   ]
 }

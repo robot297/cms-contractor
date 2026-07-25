@@ -33,8 +33,9 @@ export const customer = pgTable(
 		name: text('name').notNull(),
 		email: text('email').notNull(),
 		phone: text('phone'),
-		// The contractor's preferred way to reach this customer: 'email' | 'phone'.
-		// Drives which contact action is highlighted as primary in the UI.
+		// The contractor's preferred way to reach this customer: 'email' | 'call' |
+		// 'text' (legacy 'phone' is read as 'call'). Drives which contact action is
+		// highlighted as preferred in the UI.
 		preferredContact: text('preferred_contact').notNull().default('email'),
 		// Service / mailing address, free-form for the MVP.
 		address: text('address'),
@@ -132,6 +133,9 @@ export const order = pgTable(
 		state: text('state').notNull().default('Inquiry'),
 		// Contractor-set date for the next follow-up (defaults to +3 days on create).
 		nextFollowUpAt: timestamp('next_follow_up_at'),
+		// Soft-delete: "Delete order" sets this timestamp; rows with it set are
+		// treated as gone everywhere in the app and never shown.
+		deletedAt: timestamp('deleted_at'),
 		createdAt: timestamp('created_at').defaultNow().notNull(),
 		updatedAt: timestamp('updated_at')
 			.defaultNow()

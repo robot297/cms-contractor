@@ -16,8 +16,10 @@ import {
 	isFollowUpDue,
 	isValidAvatarDataUrl,
 	normalizeEmail,
+	normalizePreferredContact,
 	snoozeDate,
 	type ContractorOrderState,
+	type PreferredContact,
 	type SnoozePreset,
 	type TimelineKind
 } from '$lib/crm';
@@ -36,7 +38,7 @@ export type ContractorOrderView = OrderRow & {
 	customerEmail: string;
 	customerPhone: string | null;
 	customerAddress: string | null;
-	customerPreferredContact: 'email' | 'phone';
+	customerPreferredContact: PreferredContact;
 	customerVisibleState: string;
 	followUpDue: boolean;
 };
@@ -68,7 +70,7 @@ function toContractorView(row: OrderRow, cust: CustomerRow | null): ContractorOr
 		customerEmail: cust?.email ?? '',
 		customerPhone: cust?.phone ?? null,
 		customerAddress: cust?.address ?? null,
-		customerPreferredContact: cust?.preferredContact === 'phone' ? 'phone' : 'email',
+		customerPreferredContact: normalizePreferredContact(cust?.preferredContact),
 		customerVisibleState: getVisibleCustomerState(row.state as ContractorOrderState),
 		followUpDue: isFollowUpDue(row.nextFollowUpAt)
 	};
@@ -105,7 +107,7 @@ export type CustomerDetailsInput = {
 	address?: string | null;
 	notes?: string | null;
 	tags?: string[];
-	preferredContact?: 'email' | 'phone';
+	preferredContact?: PreferredContact;
 };
 
 export async function createCustomer(
@@ -298,7 +300,7 @@ export async function listContractorOrders(contractorId: string): Promise<Contra
 		.select()
 		.from(order)
 		.leftJoin(customer, eq(order.customerId, customer.id))
-		.where(eq(order.contractorId, contractorId))
+		.where(and(eq(order.contractorId, contractorId), isNull(order.deletedAt)))
 		.orderBy(desc(order.updatedAt));
 	return rows.map((r) => toContractorView(r.order, r.customer));
 }
@@ -370,7 +372,9 @@ async function contractorOrder(
 	const [row] = await db
 		.select()
 		.from(order)
-		.where(and(eq(order.id, orderId), eq(order.contractorId, contractorId)))
+		.where(
+			and(eq(order.id, orderId), eq(order.contractorId, contractorId), isNull(order.deletedAt))
+		)
 		.limit(1);
 	return row;
 }
@@ -470,7 +474,9 @@ export async function getOrderDetail(
 		.select()
 		.from(order)
 		.leftJoin(customer, eq(order.customerId, customer.id))
-		.where(and(eq(order.id, orderId), eq(order.contractorId, contractorId)))
+		.where(
+			and(eq(order.id, orderId), eq(order.contractorId, contractorId), isNull(order.deletedAt))
+		)
 		.limit(1);
 	if (!row) return null;
 	const [timeline, attachments] = await Promise.all([
@@ -558,11 +564,15 @@ export async function addOrderNote(
 	});
 }
 
-/** Permanently delete an order (cascades its timeline, notifications, and invites). */
+/**
+ * Archive an order (soft delete). We never hard-delete the record; instead we
+ * stamp `deletedAt`, and every read path filters those out so it disappears
+ * from the app while the data (timeline, attachments) is preserved.
+ */
 export async function deleteOrder(orderId: string, contractorId: string): Promise<void> {
 	const owned = await contractorOrder(orderId, contractorId);
 	if (!owned) throw new Error('Order not found');
-	await db.delete(order).where(eq(order.id, orderId));
+	await db.update(order).set({ deletedAt: new Date() }).where(eq(order.id, orderId));
 }
 
 // ------------------------------------------------------------------ Customer portal
@@ -579,7 +589,7 @@ export async function getCustomerPortal(userId: string): Promise<CustomerPortal>
 		.select()
 		.from(order)
 		.innerJoin(customer, eq(order.customerId, customer.id))
-		.where(eq(customer.userId, userId))
+		.where(and(eq(customer.userId, userId), isNull(order.deletedAt)))
 		.orderBy(desc(order.updatedAt));
 
 	const active = rows.find((r) => isActiveState(r.order.state as ContractorOrderState)) ?? null;
@@ -632,7 +642,7 @@ export async function addCustomerRequest(
 		})
 		.from(order)
 		.innerJoin(customer, eq(order.customerId, customer.id))
-		.where(and(eq(order.id, orderId), eq(customer.userId, account.id)))
+		.where(and(eq(order.id, orderId), eq(customer.userId, account.id), isNull(order.deletedAt)))
 		.limit(1);
 	if (!row) throw new Error('Order not found');
 

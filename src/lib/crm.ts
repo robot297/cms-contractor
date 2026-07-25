@@ -67,7 +67,22 @@ export function parseTags(value: string): string[] {
 }
 
 /** Contact fields for a customer. Name and email are required; the rest are optional. */
-export type PreferredContact = 'email' | 'phone';
+export type PreferredContact = 'email' | 'call' | 'text';
+
+/** The ways a contractor can reach a customer, in display order. */
+export const CONTACT_METHODS = ['email', 'call', 'text'] as const;
+
+/** Normalize a stored/submitted value, mapping the legacy 'phone' to 'call'. */
+export function normalizePreferredContact(value: string | null | undefined): PreferredContact {
+	if (value === 'call' || value === 'phone') return 'call';
+	if (value === 'text' || value === 'sms') return 'text';
+	return 'email';
+}
+
+/** Human label for a contact method. */
+export function preferredContactLabel(p: PreferredContact): string {
+	return p === 'call' ? 'Call' : p === 'text' ? 'Text' : 'Email';
+}
 
 export type CustomerContact = {
 	name: string;
@@ -116,7 +131,7 @@ export const customerContactSchema = z.object({
 	preferredContact: z
 		.string()
 		.optional()
-		.transform((v): PreferredContact => (v === 'phone' ? 'phone' : 'email'))
+		.transform((v): PreferredContact => normalizePreferredContact(v))
 });
 
 /**
