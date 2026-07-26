@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+	<defs>
+		<pattern id="hazard" width="56" height="56" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+			<rect width="56" height="56" fill="#ffcc00" />
+			<rect width="28" height="56" fill="#111318" />
+		</pattern>
+		<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0" stop-color="#171a21" />
+			<stop offset="1" stop-color="#0b0d11" />
+		</linearGradient>
+		<clipPath id="chip"><rect width="44" height="44" rx="9" /></clipPath>
+	</defs>
+
+	<!-- Background -->
+	<rect width="1200" height="630" fill="url(#bg)" />
+
+	<!-- Hazard stripe bars, top and bottom -->
+	<rect x="0" y="0" width="1200" height="18" fill="url(#hazard)" />
+	<rect x="0" y="612" width="1200" height="18" fill="url(#hazard)" />
+
+	<!-- Brand lockup -->
+	<g transform="translate(90, 92)">
+		<g clip-path="url(#chip)"><rect width="44" height="44" fill="url(#hazard)" /></g>
+		<text x="62" y="31" font-size="30" font-weight="700" fill="#ffffff" letter-spacing="4">CONTRACTOR CRM</text>
+	</g>
+
+	<!-- Headline -->
+	<g transform="translate(90, 248)">
+		<text x="0" y="0" font-size="80" font-weight="800" fill="#ffffff">Run every job from</text>
+		<text x="0" y="96" font-size="80" font-weight="800" fill="#ffcc00">lead to last invoice.</text>
+	</g>
+
+	<!-- Subhead -->
+	<g transform="translate(90, 438)" fill="#c3c9d4" font-size="30" font-weight="400">
+		<text x="0" y="0">Customers, orders, subcontractors &amp; follow-ups —</text>
+		<text x="0" y="44">tracked from first inquiry to final invoice.</text>
+	</g>
+
+	<!-- Footer tag -->
+	<text x="90" y="566" font-size="23" font-weight="700" fill="#ffcc00" letter-spacing="2">BUILT FOR THOSE WHO DO</text>
+</svg>

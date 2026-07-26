@@ -3,3 +3,10 @@ packages:
 
 onlyBuiltDependencies:
   - esbuild
+
+# Optional peer deps of drizzle-orm / better-auth for drivers we don't use
+# (we're on postgres). Their postinstall scripts compile a native SQLite
+# binding and generate a Prisma client — both dead weight here.
+ignoredBuiltDependencies:
+  - better-sqlite3
+  - '@prisma/client'

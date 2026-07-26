@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import { ORDER_ICONS } from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData } from './$types';
@@ -18,11 +19,22 @@
 			await update();
 		};
 
+	// Which due card's snooze menu is open, its presets, and a close-on-submit hook.
+	let snoozeOpenId: string | null = $state(null);
+	const SNOOZE_PRESETS = [
+		{ preset: '1d', label: '+1 day' },
+		{ preset: '3d', label: '+3 days' },
+		{ preset: '1w', label: '+1 week' }
+	];
+	const snoozeThenClose =
+		() =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			snoozeOpenId = null;
+			await update();
+		};
+
 	// Sizing only — the gold look comes from the shared `.icon-btn` class.
 	const iconBtn = 'width: 2.3rem; height: 2.3rem; font-size: 1.55rem;';
-	// The settable order-icon "avatar": just the glyph, no button chrome.
-	const iconBubble =
-		'width: 2.6rem; height: 2.6rem; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: none; background: none; border-radius: 999px; cursor: pointer; font-size: 1.6rem; line-height: 1; padding: 0;';
 	const iconChoice =
 		'width: 2.4rem; height: 2.4rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: none; border-radius: 10px; cursor: pointer; font-size: 1.3rem; line-height: 1; padding: 0;';
 </script>
@@ -51,18 +63,20 @@
 		{:else}
 			{#each data.dueOrders as o (o.id)}
 				<div
-					class="due-card"
-					style="padding: 0.85rem; border-radius: 12px; background: #fff; border: 1px solid #e2e6ea; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05); display: flex; justify-content: space-between; gap: 0.9rem; align-items: center;"
+					class="due-card card"
+					style="display: flex; justify-content: space-between; gap: 0.9rem; align-items: center;"
 				>
 					<!-- Settable construction icon -->
 					<div style="position: relative; flex-shrink: 0;">
 						<button
 							type="button"
+							class="icon-btn icon-bubble"
+							class:dim={!o.icon}
 							title="Set order icon"
 							aria-label="Set order icon"
 							aria-expanded={iconPickerId === o.id}
 							onclick={() => (iconPickerId = iconPickerId === o.id ? null : o.id)}
-							style="{iconBubble} {o.icon ? '' : 'opacity: 0.55;'}">{o.icon ?? '🏗️'}</button
+							>{o.icon ?? '🏗️'}</button
 						>
 						{#if iconPickerId === o.id}
 							<!-- click-away backdrop -->
@@ -126,12 +140,49 @@
 
 					<!-- Open the order's details -->
 					<a
-						href={`/contractor/orders/${o.id}`}
+						href={resolve(`/contractor/orders/${o.id}`)}
 						title="View order details"
 						aria-label="View order details"
 						class="icon-btn"
 						style="{iconBtn} flex-shrink: 0; text-decoration: none;">📋</a
 					>
+
+					<!-- Snooze the follow-up (drops the card off the due list) -->
+					<div style="position: relative; flex-shrink: 0;">
+						<button
+							type="button"
+							title="Snooze follow-up"
+							aria-label="Snooze follow-up"
+							aria-expanded={snoozeOpenId === o.id}
+							onclick={() => (snoozeOpenId = snoozeOpenId === o.id ? null : o.id)}
+							class="icon-btn"
+							style={iconBtn}>⏰</button
+						>
+						{#if snoozeOpenId === o.id}
+							<!-- click-away backdrop -->
+							<button
+								type="button"
+								aria-label="Close snooze menu"
+								onclick={() => (snoozeOpenId = null)}
+								style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+							></button>
+							<div
+								style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 150px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.4rem; display: grid; gap: 0.2rem;"
+							>
+								{#each SNOOZE_PRESETS as s (s.preset)}
+									<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+										<input type="hidden" name="orderId" value={o.id} />
+										<input type="hidden" name="preset" value={s.preset} />
+										<button
+											type="submit"
+											style="display: block; width: 100%; text-align: left; padding: 0.5rem 0.7rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; border-radius: 7px; color: inherit;"
+											>{s.label}</button
+										>
+									</form>
+								{/each}
+							</div>
+						{/if}
+					</div>
 
 					<!-- Send communication -->
 					<div style="position: relative; flex-shrink: 0;">
@@ -174,41 +225,16 @@
 </div>
 
 <style>
-	/* Dimmed full-screen scrim behind the composer so the rest of the page recedes.
-	   z-index sits above the mobile nav (50) so nothing pokes through the dim. */
-	.contact-scrim {
-		position: fixed;
-		inset: 0;
-		z-index: 90;
-		border: none;
-		cursor: default;
-		background: rgba(15, 23, 42, 0.45);
+	/* The settable order-icon "avatar" is a round icon button: the raised/pressable
+	   feel comes from the global .icon-btn; this only makes it round + sized. */
+	.icon-bubble {
+		width: 2.6rem;
+		height: 2.6rem;
+		border-radius: 999px;
+		font-size: 1.6rem;
 	}
-	/* Contact composer popover anchored to the 💬 button. */
-	.contact-pop {
-		position: absolute;
-		right: 0;
-		top: calc(100% + 6px);
-		z-index: 100;
-		width: 270px;
-		max-width: 78vw;
-		background: #f6f4fc;
-		border: 1px solid #cdbff0;
-		border-radius: 12px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-		padding: 0.75rem;
-	}
-	/* Mobile: a fixed bottom sheet so the popover never overflows off-screen. */
-	@media (max-width: 480px) {
-		.contact-pop {
-			position: fixed;
-			inset: auto 0.6rem 0.6rem;
-			top: auto;
-			width: auto;
-			max-width: none;
-			max-height: 80vh;
-			overflow-y: auto;
-		}
+	.icon-bubble.dim {
+		opacity: 0.55;
 	}
 
 	/* Mobile: the "Needs update" pill is redundant (every card here is due) and

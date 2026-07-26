@@ -29,6 +29,8 @@ COPY --from=build /app/static ./static
 # Migrations + runtime migrator (drizzle-orm only — no drizzle-kit/config needed).
 COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/scripts ./scripts
+# varlock validates the runtime env against this schema at container start.
+COPY --from=build /app/.env.schema ./.env.schema
 EXPOSE 3000
 # Migrate → (optional seed) → start. See scripts/docker-entrypoint.sh.
 # Absolute path so the entrypoint is found regardless of the launch CWD.

@@ -1,4 +1,4 @@
-import { env } from '$env/dynamic/private';
+import { ENV } from 'varlock/env';
 import { buildFeedbackIssue, type Feedback } from '$lib/crm';
 
 /**
@@ -17,13 +17,49 @@ export class SupportError extends Error {
 
 /** True when the repo + token are both configured, so the form can accept input. */
 export function isSupportConfigured(): boolean {
-	return Boolean(env.GITHUB_REPO?.trim() && env.GITHUB_TOKEN?.trim());
+	return Boolean(ENV.GITHUB_REPO?.trim() && ENV.GITHUB_TOKEN?.trim());
+}
+
+// ------------------------------------------------------------ Bot protection
+
+/** True when Cloudflare Turnstile keys are configured (challenge is enforced). */
+export function isCaptchaConfigured(): boolean {
+	return Boolean(ENV.TURNSTILE_SITE_KEY?.trim() && ENV.TURNSTILE_SECRET_KEY?.trim());
+}
+
+/** The public Turnstile site key to render client-side, or null when disabled. */
+export function captchaSiteKey(): string | null {
+	return isCaptchaConfigured() ? ENV.TURNSTILE_SITE_KEY!.trim() : null;
+}
+
+/**
+ * Verify a Turnstile token with Cloudflare. Returns true when the challenge
+ * passes — or when captcha is not configured, so the form still works without
+ * keys (the honeypot guard stays active regardless). Never throws.
+ */
+export async function verifyCaptcha(token: string | null, remoteip?: string): Promise<boolean> {
+	if (!isCaptchaConfigured()) return true;
+	if (!token) return false;
+	try {
+		const body = new URLSearchParams();
+		body.set('secret', ENV.TURNSTILE_SECRET_KEY!.trim());
+		body.set('response', token);
+		if (remoteip) body.set('remoteip', remoteip);
+		const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+			method: 'POST',
+			body
+		});
+		const data = (await res.json()) as { success?: boolean };
+		return data.success === true;
+	} catch {
+		return false;
+	}
 }
 
 /** The label to tag an issue with, per feedback type (env-overridable). */
 function labelFor(type: Feedback['type']): string {
-	if (type === 'bug') return env.GITHUB_LABEL_BUG?.trim() || 'bug';
-	return env.GITHUB_LABEL_FEATURE?.trim() || 'enhancement';
+	if (type === 'bug') return ENV.GITHUB_LABEL_BUG?.trim() || 'bug';
+	return ENV.GITHUB_LABEL_FEATURE?.trim() || 'enhancement';
 }
 
 export type FiledIssue = { url: string; number: number };
@@ -37,8 +73,8 @@ export async function submitFeedback(
 	feedback: Feedback,
 	submittedBy?: { name?: string | null; email?: string | null }
 ): Promise<FiledIssue> {
-	const repo = env.GITHUB_REPO?.trim();
-	const token = env.GITHUB_TOKEN?.trim();
+	const repo = ENV.GITHUB_REPO?.trim();
+	const token = ENV.GITHUB_TOKEN?.trim();
 	if (!repo || !token) {
 		throw new SupportError('The support form is not configured yet. Please contact your admin.');
 	}

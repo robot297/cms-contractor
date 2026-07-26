@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { formatLocation, isOrderIcon } from '$lib/crm';
-import { listContractorOrders, setOrderIcon } from '$lib/server/crm.server';
+import { formatLocation, isOrderIcon, isSnoozePreset } from '$lib/crm';
+import { listContractorOrders, setOrderIcon, snoozeFollowUp } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
 
 function requireContractor(locals: App.Locals) {
@@ -45,6 +45,18 @@ export const actions: Actions = {
 		// Empty clears the icon; any other value must be one of the fixed set.
 		if (raw !== '' && !isOrderIcon(raw)) return fail(400, { message: 'Unknown icon' });
 		await setOrderIcon(orderId, user.id, raw === '' ? null : raw);
+		return { success: true };
+	},
+
+	// Snooze a due follow-up straight from the dashboard, so it drops off the list.
+	snoozeFollowUp: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const orderId = form.get('orderId')?.toString() ?? '';
+		const preset = form.get('preset')?.toString() ?? '';
+		if (!orderId) return fail(400, { message: 'Order is required' });
+		if (!isSnoozePreset(preset)) return fail(400, { message: 'Invalid snooze' });
+		await snoozeFollowUp(orderId, user.id, preset);
 		return { success: true };
 	}
 };

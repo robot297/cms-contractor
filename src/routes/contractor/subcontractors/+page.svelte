@@ -1,12 +1,17 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
+	import { invalidateAll } from '$app/navigation';
 	import { formatPhone, tierLabel, TRADES, type SubcontractorTier } from '$lib/crm';
+	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData } from './$types';
 
 	const label = (tier: string) => tierLabel(tier as SubcontractorTier);
 
 	let { data }: { data: PageData } = $props();
+
+	type SubRow = (typeof data.subcontractors)[number];
 
 	// Live client-side search over the loaded roster (no round-trip).
 	let q = $state('');
@@ -31,9 +36,12 @@
 	// Destructive actions require an explicit confirm before firing.
 	let confirmArchiveId = $state<string | null>(null);
 	let confirmRevokeId = $state<string | null>(null);
-	// Optional detail sections stay collapsed until toggled, to keep the card calm.
-	let notesOpenId = $state<string | null>(null);
-	let ordersOpenId = $state<string | null>(null);
+	// The detail pane is tabbed; each card opens on its first tab.
+	let detailTab = $state<'details' | 'orders' | 'notes'>('details');
+	// Which card's link-status tooltip is currently pinned open (mobile tap).
+	let statusTipId = $state<string | null>(null);
+	// Which card's contact composer popover is open.
+	let contactOpenId = $state<string | null>(null);
 
 	/** Collapse a card and clear any open menu / pending confirm tied to it. */
 	function toggleCard(id: string) {
@@ -41,8 +49,17 @@
 		menuOpenId = null;
 		confirmArchiveId = null;
 		confirmRevokeId = null;
-		notesOpenId = null;
-		ordersOpenId = null;
+		statusTipId = null;
+		detailTab = 'details';
+	}
+
+	/** Human label for a subcontractor's account-link status. */
+	function statusLabel(status: string): string {
+		return status === 'linked'
+			? 'Linked — has an account'
+			: status === 'invited'
+				? 'Invite pending'
+				: 'Not linked yet';
 	}
 
 	// Progressive phone formatting as the contractor types.
@@ -57,21 +74,227 @@
 		return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
 	}
 
+	// --- Avatar photo (take / upload / remove) — mirrors the customer directory ---
+	const AVATAR_MAX = 256;
+	let savingAvatarId: string | null = $state(null);
+	let cameraDialog: HTMLDialogElement | undefined = $state();
+	let cameraVideo: HTMLVideoElement | undefined = $state();
+	let cameraSubId: string | null = $state(null);
+	let cameraError = $state('');
+	let cameraStream: MediaStream | undefined;
+	// 'choose' shows the options first; 'camera' is the live capture view.
+	let cameraMode: 'choose' | 'camera' = $state('choose');
+	const cameraSub = $derived(
+		cameraSubId ? (data.subcontractors.find((s) => s.id === cameraSubId) ?? null) : null
+	);
+
+	/** Downscale a source (image or video frame) to a small JPEG data URL. */
+	function toAvatarDataUrl(source: HTMLImageElement | HTMLVideoElement): string | null {
+		const sw = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
+		const sh = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+		if (!sw || !sh) return null;
+		const scale = Math.min(1, AVATAR_MAX / Math.max(sw, sh));
+		const canvas = document.createElement('canvas');
+		canvas.width = Math.max(1, Math.round(sw * scale));
+		canvas.height = Math.max(1, Math.round(sh * scale));
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return null;
+		ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+		return canvas.toDataURL('image/jpeg', 0.8);
+	}
+
+	async function persistAvatar(id: string, dataUrl: string) {
+		savingAvatarId = id;
+		try {
+			const body = new FormData();
+			body.set('id', id);
+			body.set('avatar', dataUrl);
+			const res = await fetch('?/setAvatar', {
+				method: 'POST',
+				headers: { 'x-sveltekit-action': 'true' },
+				body
+			});
+			if (!res.ok) throw new Error('Upload failed');
+			await invalidateAll();
+		} catch {
+			alert('Sorry — that photo could not be saved.');
+		} finally {
+			savingAvatarId = null;
+		}
+	}
+
+	function loadImage(file: File): Promise<HTMLImageElement> {
+		return new Promise((resolve, reject) => {
+			const img = new Image();
+			img.onload = () => {
+				URL.revokeObjectURL(img.src);
+				resolve(img);
+			};
+			img.onerror = () => {
+				URL.revokeObjectURL(img.src);
+				reject(new Error('Could not read image'));
+			};
+			img.src = URL.createObjectURL(file);
+		});
+	}
+
+	/** File-picker fallback (desktop, or when the camera is unavailable). */
+	async function onAvatarPick(id: string, e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+		closeCamera();
+		const img = await loadImage(file);
+		const dataUrl = toAvatarDataUrl(img);
+		if (dataUrl) await persistAvatar(id, dataUrl);
+	}
+
+	/** Open the photo modal on its chooser — does NOT turn the camera on yet. */
+	function openCamera(id: string) {
+		cameraSubId = id;
+		cameraError = '';
+		cameraMode = 'choose';
+		cameraDialog?.showModal();
+	}
+
+	/** Explicitly start the live camera once the user chooses "Take photo". */
+	async function startCamera() {
+		cameraError = '';
+		cameraMode = 'camera';
+		if (!navigator.mediaDevices?.getUserMedia) {
+			cameraError = 'This device has no camera access. Upload a photo instead.';
+			return;
+		}
+		try {
+			cameraStream = await navigator.mediaDevices.getUserMedia({
+				video: { facingMode: 'environment' },
+				audio: false
+			});
+			await tick();
+			if (cameraVideo) cameraVideo.srcObject = cameraStream;
+		} catch {
+			cameraError = 'Camera permission was denied or unavailable. Upload a photo instead.';
+		}
+	}
+
+	function stopCamera() {
+		cameraStream?.getTracks().forEach((t) => t.stop());
+		cameraStream = undefined;
+		if (cameraVideo) cameraVideo.srcObject = null;
+	}
+
+	function closeCamera() {
+		stopCamera();
+		cameraMode = 'choose';
+		cameraDialog?.close();
+	}
+
+	/** Clear a subcontractor's photo back to the initials placeholder. */
+	async function removeAvatar(id: string) {
+		savingAvatarId = id;
+		try {
+			const body = new FormData();
+			body.set('id', id);
+			body.set('avatar', '');
+			const res = await fetch('?/setAvatar', {
+				method: 'POST',
+				headers: { 'x-sveltekit-action': 'true' },
+				body
+			});
+			if (!res.ok) throw new Error('Remove failed');
+			closeCamera();
+			await invalidateAll();
+		} catch {
+			alert('Sorry — that photo could not be removed.');
+		} finally {
+			savingAvatarId = null;
+		}
+	}
+
+	async function capturePhoto() {
+		if (!cameraVideo || !cameraSubId) return;
+		const dataUrl = toAvatarDataUrl(cameraVideo);
+		const id = cameraSubId;
+		closeCamera();
+		if (dataUrl) await persistAvatar(id, dataUrl);
+	}
+
 	const tierChip = (tier: string) => (tier === 'trusted' ? 'chip-trusted' : 'chip-guest');
-	const statusChip = (status: string) =>
-		status === 'linked' ? 'chip-linked' : status === 'invited' ? 'chip-invited' : 'chip-unlinked';
+	const tierShort = (tier: string) => (tier === 'trusted' ? 'Trusted' : 'Guest');
 </script>
 
 <svelte:head><title>Subcontractors · Contractor CRM</title></svelte:head>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && showAdd && (showAdd = false)} />
 
+<!-- Account-link status as a small icon with a hover/tap tooltip. -->
+{#snippet statusBadge(sub: SubRow)}
+	<span class="status status-{sub.status}">
+		<button
+			type="button"
+			class="status-icon"
+			title={statusLabel(sub.status)}
+			aria-label={statusLabel(sub.status)}
+			onclick={() => (statusTipId = statusTipId === sub.id ? null : sub.id)}
+		>
+			{#if sub.status === 'linked'}
+				<svg
+					viewBox="0 0 24 24"
+					width="15"
+					height="15"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path d="M9 17H7A5 5 0 0 1 7 7h2" />
+					<path d="M15 7h2a5 5 0 0 1 0 10h-2" />
+					<line x1="8" y1="12" x2="16" y2="12" />
+				</svg>
+			{:else if sub.status === 'invited'}
+				<svg
+					viewBox="0 0 24 24"
+					width="15"
+					height="15"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="9" />
+					<path d="M12 8v4l2.5 1.5" />
+				</svg>
+			{:else}
+				<svg
+					viewBox="0 0 24 24"
+					width="15"
+					height="15"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path d="M9 17H7A5 5 0 0 1 7 7" />
+					<path d="M15 7h2a5 5 0 0 1 4 8" />
+					<line x1="8" y1="12" x2="12" y2="12" />
+					<line x1="3" y1="3" x2="21" y2="21" />
+				</svg>
+			{/if}
+		</button>
+		<span class="status-tip" class:show={statusTipId === sub.id}>{statusLabel(sub.status)}</span>
+	</span>
+{/snippet}
+
 <div class="wrap">
 	<header class="head">
-		<div>
-			<h1 class="page-title">Subcontractors</h1>
-			<p class="sub">Your trade partners — roster, tier, and job assignments.</p>
-		</div>
+		<h1 class="page-title">Subcontractors</h1>
 	</header>
 
 	<div class="search-row">
@@ -107,25 +330,99 @@
 		{#each filtered as s (s.id)}
 			<article class="card">
 				<div class="card-top">
-					{#if s.avatar}
-						<img class="avatar" src={s.avatar} alt="" />
-					{:else}
-						<div class="avatar placeholder">{s.name.slice(0, 1).toUpperCase()}</div>
-					{/if}
+					<button
+						type="button"
+						class="avatar-btn"
+						onclick={() => openCamera(s.id)}
+						title="Take or upload a photo"
+						aria-label="Set subcontractor photo"
+					>
+						{#if s.avatar}
+							<img
+								class="avatar"
+								class:saving={savingAvatarId === s.id}
+								src={s.avatar}
+								alt={s.name}
+							/>
+						{:else}
+							<div class="avatar placeholder" class:saving={savingAvatarId === s.id}>
+								{s.name.slice(0, 1).toUpperCase()}
+							</div>
+						{/if}
+						<span class="avatar-cam">📷</span>
+					</button>
 					<div class="who">
 						<div class="name-row">
 							<strong>{s.name}</strong>
-							<span class="chip {tierChip(s.tier)}">{label(s.tier)}</span>
-							<span class="chip {statusChip(s.status)}">{s.status}</span>
+							{@render statusBadge(s)}
 						</div>
-						<div class="meta">
-							{s.trade ?? 'Trade not set'}{s.company ? ` · ${s.company}` : ''}
+						<div class="meta">{s.company ?? s.trade ?? 'No company set'}</div>
+						<div class="tier-row">
+							<span class="chip {tierChip(s.tier)}">{tierShort(s.tier)}</span>
 						</div>
-						<div class="meta small">{s.email}{s.phone ? ` · ${s.phone}` : ''}</div>
 					</div>
-					<button class="btn ghost" onclick={() => toggleCard(s.id)}>
-						{expandedId === s.id ? 'Close' : 'Open'}
-					</button>
+					<div class="card-actions">
+						<!-- Message the subcontractor (email / text / call) -->
+						<div style="position: relative;">
+							<button
+								type="button"
+								class="icon-btn"
+								title="Message subcontractor"
+								aria-label="Message subcontractor"
+								aria-expanded={contactOpenId === s.id}
+								onclick={() => (contactOpenId = contactOpenId === s.id ? null : s.id)}>💬</button
+							>
+							{#if contactOpenId === s.id}
+								<button
+									type="button"
+									class="contact-scrim"
+									aria-label="Close message composer"
+									onclick={() => (contactOpenId = null)}
+								></button>
+								<div class="contact-pop">
+									<ContactComposer
+										customer={{
+											name: s.name,
+											email: s.email,
+											phone: s.phone,
+											preferredContact: 'email'
+										}}
+										rows={2}
+										onsent={() => (contactOpenId = null)}
+										onclose={() => (contactOpenId = null)}
+									/>
+								</div>
+							{/if}
+						</div>
+						<!-- Open the profile / ID-card detail view -->
+						<button
+							type="button"
+							class="icon-btn"
+							class:on={expandedId === s.id}
+							title={expandedId === s.id ? 'Hide profile' : 'View profile'}
+							aria-label={expandedId === s.id ? 'Hide profile' : 'View profile'}
+							aria-expanded={expandedId === s.id}
+							onclick={() => toggleCard(s.id)}
+						>
+							<svg
+								viewBox="0 0 24 24"
+								width="18"
+								height="18"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.8"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<rect x="3" y="5" width="18" height="14" rx="2" />
+								<circle cx="9" cy="11" r="1.8" />
+								<path d="M6.5 16c0-1.4 1.1-2.3 2.5-2.3s2.5 0.9 2.5 2.3" />
+								<line x1="14.5" y1="10.5" x2="18" y2="10.5" />
+								<line x1="14.5" y1="14" x2="18" y2="14" />
+							</svg>
+						</button>
+					</div>
 				</div>
 
 				{#if expandedId === s.id}
@@ -208,65 +505,88 @@
 								</div>
 							</form>
 						{:else}
-							<!-- ---------- Read-only profile ---------- -->
-							<dl class="profile">
-								<div>
-									<dt>Tier</dt>
-									<dd>{label(s.tier)}</dd>
-								</div>
-								<div>
-									<dt>License #</dt>
-									<dd>{s.licenseNumber ?? '—'}</dd>
-								</div>
-								<div>
-									<dt>Insurance</dt>
-									<dd>
-										{s.insuranceCarrier ?? '—'}{s.insuranceExpiresAt
-											? ` · exp ${toDateInput(s.insuranceExpiresAt)}`
-											: ''}
-									</dd>
-								</div>
-								<div>
-									<dt>Address</dt>
-									<dd>{s.address ?? '—'}</dd>
-								</div>
-								{#if s.tags.length}
-									<div class="wide">
-										<dt>Tags</dt>
-										<dd>
-											{#each s.tags as t (t)}<span class="tag">{t}</span>{/each}
-										</dd>
-									</div>
-								{/if}
-							</dl>
-
-							<!-- Optional sections stay tucked away behind toggles to keep the card calm. -->
-							<div class="reveals">
+							<!-- ---------- Read-only profile (tabbed) ---------- -->
+							<div class="tabs" role="tablist">
 								<button
 									type="button"
-									class="reveal-btn"
-									class:on={ordersOpenId === s.id}
-									aria-expanded={ordersOpenId === s.id}
-									onclick={() => (ordersOpenId = ordersOpenId === s.id ? null : s.id)}
+									role="tab"
+									class="tab"
+									class:active={detailTab === 'details'}
+									aria-selected={detailTab === 'details'}
+									onclick={() => (detailTab = 'details')}>Details</button
 								>
-									<span class="chev">▸</span> Assigned orders ({s.assignedOrders.length})
-								</button>
+								<button
+									type="button"
+									role="tab"
+									class="tab"
+									class:active={detailTab === 'orders'}
+									aria-selected={detailTab === 'orders'}
+									onclick={() => (detailTab = 'orders')}>Orders ({s.assignedOrders.length})</button
+								>
 								{#if s.notes}
 									<button
 										type="button"
-										class="reveal-btn icon-only"
-										class:on={notesOpenId === s.id}
-										title="Notes"
-										aria-label={notesOpenId === s.id ? 'Hide notes' : 'Show notes'}
-										aria-expanded={notesOpenId === s.id}
-										onclick={() => (notesOpenId = notesOpenId === s.id ? null : s.id)}
+										role="tab"
+										class="tab"
+										class:active={detailTab === 'notes'}
+										aria-selected={detailTab === 'notes'}
+										onclick={() => (detailTab = 'notes')}>Notes</button
 									>
-										📝
-									</button>
 								{/if}
 							</div>
 
-							{#if ordersOpenId === s.id}
+							{#if detailTab === 'details'}
+								<dl class="profile">
+									<div>
+										<dt>Email</dt>
+										<dd>{s.email}</dd>
+									</div>
+									<div>
+										<dt>Phone</dt>
+										<dd>{s.phone ?? '—'}</dd>
+									</div>
+									<div>
+										<dt>Trade</dt>
+										<dd>{s.trade ?? '—'}</dd>
+									</div>
+									<div>
+										<dt>Company</dt>
+										<dd>{s.company ?? '—'}</dd>
+									</div>
+									<div>
+										<dt>Tier</dt>
+										<dd>{label(s.tier)}</dd>
+									</div>
+									<div>
+										<dt>Account</dt>
+										<dd>{statusLabel(s.status)}</dd>
+									</div>
+									<div>
+										<dt>License #</dt>
+										<dd>{s.licenseNumber ?? '—'}</dd>
+									</div>
+									<div>
+										<dt>Insurance</dt>
+										<dd>
+											{s.insuranceCarrier ?? '—'}{s.insuranceExpiresAt
+												? ` · exp ${toDateInput(s.insuranceExpiresAt)}`
+												: ''}
+										</dd>
+									</div>
+									<div class="wide">
+										<dt>Address</dt>
+										<dd>{s.address ?? '—'}</dd>
+									</div>
+									{#if s.tags.length}
+										<div class="wide">
+											<dt>Tags</dt>
+											<dd>
+												{#each s.tags as t (t)}<span class="tag">{t}</span>{/each}
+											</dd>
+										</div>
+									{/if}
+								</dl>
+							{:else if detailTab === 'orders'}
 								<div class="assigned">
 									{#if s.assignedOrders.length === 0}
 										<p class="muted">Not assigned to any orders yet.</p>
@@ -283,9 +603,7 @@
 										</ul>
 									{/if}
 								</div>
-							{/if}
-
-							{#if notesOpenId === s.id && s.notes}
+							{:else if s.notes}
 								<p class="notes-reveal">{s.notes}</p>
 							{/if}
 
@@ -543,6 +861,118 @@
 	</div>
 {/if}
 
+<!-- Camera / photo capture modal -->
+<dialog
+	bind:this={cameraDialog}
+	onclose={stopCamera}
+	style="border: none; border-radius: 16px; padding: 0; max-width: 460px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
+>
+	<div style="display: grid; gap: 0.9rem; padding: 1.25rem;">
+		<div style="display: flex; justify-content: space-between; align-items: center;">
+			<h2 style="margin: 0; font-size: 1.1rem;">
+				{cameraSub ? `${cameraSub.name}’s photo` : 'Subcontractor photo'}
+			</h2>
+			<button
+				type="button"
+				onclick={closeCamera}
+				style="border: none; background: none; font-size: 1.2rem; cursor: pointer; color: #57606a;"
+				>✕</button
+			>
+		</div>
+
+		{#if cameraMode === 'choose'}
+			{@const choiceBtn =
+				'box-sizing: border-box; width: 100%; display: block; text-align: center; padding: 0.65rem 1rem; border-radius: 999px; font-size: 1rem; font-weight: 600; line-height: 1.2; cursor: pointer;'}
+			<div style="display: flex; flex-direction: column; align-items: center; gap: 0.9rem;">
+				{#if cameraSub?.avatar}
+					<img
+						src={cameraSub.avatar}
+						alt={cameraSub.name}
+						style="width: 96px; height: 96px; border-radius: 999px; object-fit: cover; border: 1px solid #d0d7de;"
+					/>
+				{:else}
+					<span
+						style="width: 96px; height: 96px; border-radius: 999px; border: 1px solid #d0d7de; background: linear-gradient(135deg, #e7edf3, #f6f8fa); color: #445; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 2rem;"
+						>{cameraSub?.name.charAt(0).toUpperCase() ?? '?'}</span
+					>
+				{/if}
+
+				<div style="display: grid; gap: 0.5rem; width: 100%;">
+					<button
+						type="button"
+						onclick={startCamera}
+						style="{choiceBtn} border: 1px solid #0969da; background: #0969da; color: #fff;"
+						>📸 Take photo</button
+					>
+					<label style="{choiceBtn} border: 1px solid #d0d7de; background: #f6f8fa;">
+						⬆ Upload photo
+						<input
+							type="file"
+							accept="image/*"
+							onchange={(e) => cameraSubId && onAvatarPick(cameraSubId, e)}
+							style="display: none;"
+						/>
+					</label>
+					{#if cameraSub?.avatar}
+						<button
+							type="button"
+							onclick={() => cameraSubId && removeAvatar(cameraSubId)}
+							style="{choiceBtn} border: 1px solid #ffd7d5; background: none; color: #cf222e;"
+							>Remove photo</button
+						>
+					{/if}
+				</div>
+			</div>
+		{:else}
+			{#if cameraError}
+				<p style="margin: 0; color: #cf222e; font-size: 0.9rem;">{cameraError}</p>
+			{:else}
+				<video
+					bind:this={cameraVideo}
+					autoplay
+					playsinline
+					muted
+					style="width: 100%; max-height: 60vh; border-radius: 12px; background: #000;"
+				></video>
+			{/if}
+
+			<div style="display: flex; gap: 0.5rem; justify-content: space-between; flex-wrap: wrap;">
+				<button
+					type="button"
+					onclick={() => {
+						stopCamera();
+						cameraError = '';
+						cameraMode = 'choose';
+					}}
+					style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+					>← Back</button
+				>
+				<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+					<label
+						style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+					>
+						Upload instead
+						<input
+							type="file"
+							accept="image/*"
+							onchange={(e) => cameraSubId && onAvatarPick(cameraSubId, e)}
+							style="display: none;"
+						/>
+					</label>
+					{#if !cameraError}
+						<button
+							type="button"
+							onclick={capturePhoto}
+							style="padding: 0.55rem 1.1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600;"
+							>📸 Capture</button
+						>
+					{/if}
+				</div>
+			</div>
+		{/if}
+	</div>
+</dialog>
+
 <style>
 	.wrap {
 		max-width: 860px;
@@ -555,15 +985,6 @@
 		justify-content: space-between;
 		gap: 1rem;
 		flex-wrap: wrap;
-	}
-	h1 {
-		margin: 0;
-		font-size: 1.6rem;
-	}
-	.sub {
-		margin: 0.2rem 0 0;
-		color: #555;
-		font-weight: 600;
 	}
 	.search-row {
 		display: flex;
@@ -608,19 +1029,26 @@
 		display: grid;
 		gap: 0.9rem;
 	}
+	/* Global `.card` provides surface styling; the card's own children supply
+	   their padding, so cancel the global padding here. */
 	.card {
-		border: 1px solid #e2e6ea;
-		border-radius: 16px;
-		background: #fff;
-		box-shadow:
-			0 1px 2px rgba(27, 31, 36, 0.05),
-			0 4px 12px rgba(27, 31, 36, 0.06);
+		padding: 0;
 	}
 	.card-top {
 		display: flex;
 		gap: 0.8rem;
 		align-items: center;
 		padding: 0.9rem;
+	}
+	/* Clickable avatar → opens the photo (take / upload / remove) modal. */
+	.avatar-btn {
+		position: relative;
+		flex-shrink: 0;
+		border: none;
+		background: none;
+		padding: 0;
+		cursor: pointer;
+		line-height: 0;
 	}
 	.avatar {
 		width: 46px;
@@ -629,6 +1057,10 @@
 		object-fit: cover;
 		border: 1px solid #d0d7de;
 		flex-shrink: 0;
+		display: block;
+	}
+	.avatar.saving {
+		opacity: 0.5;
 	}
 	.avatar.placeholder {
 		display: flex;
@@ -637,6 +1069,22 @@
 		background: linear-gradient(135deg, #e7edf3, #f6f8fa);
 		color: #44506b;
 		font-weight: 700;
+		font-size: 1.1rem;
+	}
+	.avatar-cam {
+		position: absolute;
+		right: -2px;
+		bottom: -2px;
+		width: 18px;
+		height: 18px;
+		border-radius: 999px;
+		background: #0969da;
+		color: #fff;
+		font-size: 0.6rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 1px solid #fff;
 	}
 	.who {
 		flex: 1;
@@ -654,9 +1102,26 @@
 		font-size: 0.9rem;
 		margin-top: 0.15rem;
 	}
-	.meta.small {
-		font-size: 0.82rem;
-		color: #777;
+	.tier-row {
+		margin-top: 0.35rem;
+	}
+	/* Right-side icon actions on the card header: message + expand. */
+	.card-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-shrink: 0;
+	}
+	.card-actions .icon-btn {
+		width: 2.1rem;
+		height: 2.1rem;
+		font-size: 1.05rem;
+	}
+	/* The profile (ID-card) button reads as "active" while its detail is open. */
+	.card-actions .icon-btn.on {
+		background: #ece7fb;
+		border-color: #cdbff0;
+		color: #4b2fa8;
 	}
 	.chip {
 		font-size: 0.68rem;
@@ -685,15 +1150,52 @@
 		border-color: #54aeff;
 		color: #0757ba;
 	}
-	.chip-invited {
-		background: #fff4d6;
-		border-color: #d4a72c;
-		color: #8a5a00;
+	/* Account-link status: a small colored icon with a hover/tap tooltip. */
+	.status {
+		position: relative;
+		display: inline-flex;
 	}
-	.chip-unlinked {
-		background: #f6f8fa;
-		border-color: #e4e8ee;
-		color: #8c959f;
+	.status-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: none;
+		background: none;
+		padding: 0.1rem;
+		cursor: pointer;
+		border-radius: 6px;
+	}
+	.status-linked {
+		color: #1a7f37;
+	}
+	.status-invited {
+		color: #b5730a;
+	}
+	.status-unlinked {
+		color: #97a0ab;
+	}
+	.status-tip {
+		position: absolute;
+		top: calc(100% + 6px);
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 30;
+		white-space: nowrap;
+		background: #1f2328;
+		color: #fff;
+		font-size: 0.72rem;
+		font-weight: 600;
+		padding: 0.25rem 0.5rem;
+		border-radius: 6px;
+		opacity: 0;
+		visibility: hidden;
+		transition: opacity 0.12s ease;
+		pointer-events: none;
+	}
+	.status:hover .status-tip,
+	.status-tip.show {
+		opacity: 1;
+		visibility: visible;
 	}
 	.detail {
 		border-top: 1px solid #eef1f4;
@@ -731,45 +1233,29 @@
 		font-size: 0.78rem;
 		font-weight: 700;
 	}
-	/* Toggle row for the optional (notes / assigned orders) sections. */
-	.reveals {
+	/* Tab strip for the detail pane. */
+	.tabs {
 		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		flex-wrap: wrap;
+		gap: 0.25rem;
+		border-bottom: 1px solid #eef1f4;
 	}
-	.reveal-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.35rem;
-		padding: 0.35rem 0.7rem;
-		border: 1.5px solid #d9dde3;
-		border-radius: 999px;
-		background: #fff;
-		color: #1f2328;
-		font-weight: 600;
+	.tab {
+		padding: 0.4rem 0.7rem;
+		border: none;
+		background: none;
+		color: #57606a;
+		font-weight: 700;
 		font-size: 0.82rem;
 		cursor: pointer;
+		border-bottom: 2px solid transparent;
+		margin-bottom: -1px;
 	}
-	.reveal-btn:hover {
-		background: #f6f8fa;
+	.tab:hover {
+		color: #1f2328;
 	}
-	.reveal-btn.on {
-		background: #eef1f5;
-		border-color: #c7ccd4;
-	}
-	.reveal-btn.icon-only {
-		padding: 0.35rem 0.55rem;
-		font-size: 0.95rem;
-		line-height: 1;
-	}
-	.reveal-btn .chev {
-		color: #8b949e;
-		font-size: 0.72rem;
-		transition: transform 0.15s ease;
-	}
-	.reveal-btn.on .chev {
-		transform: rotate(90deg);
+	.tab.active {
+		color: #1f2328;
+		border-bottom-color: #1f2328;
 	}
 	.notes-reveal {
 		margin: 0;
@@ -971,21 +1457,6 @@
 	.confirm-banner form {
 		display: inline-flex;
 	}
-	/* Reorder arrows on collapsed template/roster rows. */
-	.icon {
-		width: 1.9rem;
-		height: 1.9rem;
-		border: 1.5px solid #d9dde3;
-		border-radius: 8px;
-		background: #fff;
-		cursor: pointer;
-		font-size: 0.9rem;
-		line-height: 1;
-	}
-	.icon:disabled {
-		opacity: 0.35;
-		cursor: default;
-	}
 	.btn {
 		padding: 0.5rem 0.9rem;
 		border: 1.5px solid #d0d7de;
@@ -1112,5 +1583,104 @@
 		.modal .row-actions.end .btn {
 			width: 100%;
 		}
+	}
+
+	/* Dark theme
+	   Appended dark-only overrides. These map the hardcoded light colors above
+	   onto the global dark tokens; light rules remain untouched. */
+	:global(:root[data-theme='dark']) .search {
+		background: var(--field-bg);
+		border-color: var(--field-border);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .fields input,
+	:global(:root[data-theme='dark']) .fields select,
+	:global(:root[data-theme='dark']) .fields textarea {
+		background: var(--field-bg);
+		border-color: var(--field-border);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .fields input:disabled {
+		background: var(--surface-sunken);
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .detail {
+		border-top-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .tabs {
+		border-bottom-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .tab {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .tab:hover,
+	:global(:root[data-theme='dark']) .tab.active {
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .tab.active {
+		border-bottom-color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .profile dd {
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .profile dt,
+	:global(:root[data-theme='dark']) .meta,
+	:global(:root[data-theme='dark']) .meta.small,
+	:global(:root[data-theme='dark']) .muted,
+	:global(:root[data-theme='dark']) .hint {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .tag {
+		background: var(--surface-sunken);
+		border-color: var(--line);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .menu {
+		background: var(--surface);
+		border-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .menu-item {
+		background: var(--surface);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .menu-item:hover {
+		background: var(--surface-sunken);
+	}
+	:global(:root[data-theme='dark']) .menu-item.danger {
+		color: #f87171;
+	}
+	:global(:root[data-theme='dark']) .confirm-banner {
+		background: #2a1416;
+		border-color: #7a2a2f;
+	}
+	:global(:root[data-theme='dark']) .notes-reveal {
+		background: var(--surface-sunken);
+		border-color: var(--line);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .avatar {
+		border-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .avatar.placeholder {
+		background: linear-gradient(135deg, #2a3038, #20242b);
+		color: #c3c9d4;
+	}
+	:global(:root[data-theme='dark']) .btn {
+		background: var(--surface);
+		border-color: var(--line-strong);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .btn:hover {
+		background: var(--surface-sunken);
+	}
+	:global(:root[data-theme='dark']) .btn.primary {
+		background: #e8ebf0;
+		color: #14171c;
+		border-color: #e8ebf0;
+	}
+	:global(:root[data-theme='dark']) .card-actions .icon-btn.on {
+		background: #2e2a44;
+		border-color: #4a3f6b;
+		color: #cabff5;
 	}
 </style>

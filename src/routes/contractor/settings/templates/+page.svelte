@@ -195,13 +195,21 @@
 							<form method="POST" action="?/reorderTemplate" use:enhance>
 								<input type="hidden" name="id" value={t.id} />
 								<input type="hidden" name="direction" value="up" />
-								<button class="icon" title="Move up" disabled={i === 0}>↑</button>
+								<button
+									class="icon-btn"
+									style="width: 1.9rem; height: 1.9rem; font-size: 0.9rem;"
+									title="Move up"
+									disabled={i === 0}>↑</button
+								>
 							</form>
 							<form method="POST" action="?/reorderTemplate" use:enhance>
 								<input type="hidden" name="id" value={t.id} />
 								<input type="hidden" name="direction" value="down" />
-								<button class="icon" title="Move down" disabled={i === data.templates.length - 1}
-									>↓</button
+								<button
+									class="icon-btn"
+									style="width: 1.9rem; height: 1.9rem; font-size: 0.9rem;"
+									title="Move down"
+									disabled={i === data.templates.length - 1}>↓</button
 								>
 							</form>
 						</div>
@@ -278,12 +286,6 @@
 		padding: 1.5rem 1rem 3rem;
 		display: grid;
 		gap: 1.1rem;
-	}
-	.card {
-		background: #fff;
-		border: 1.5px solid #e4e8ee;
-		border-radius: 14px;
-		padding: 1.1rem 1.15rem;
 	}
 	.card h2 {
 		margin: 0 0 0.6rem;
@@ -511,20 +513,6 @@
 	.btn.danger-ghost:hover {
 		background: #fdeff0;
 	}
-	.icon {
-		width: 1.9rem;
-		height: 1.9rem;
-		border: 1.5px solid #d9dde3;
-		border-radius: 8px;
-		background: #fff;
-		cursor: pointer;
-		font-size: 0.9rem;
-		line-height: 1;
-	}
-	.icon:disabled {
-		opacity: 0.35;
-		cursor: default;
-	}
 	.ok {
 		color: #1a7f37;
 		font-size: 0.85rem;
@@ -534,5 +522,70 @@
 		color: #cf222e;
 		font-size: 0.85rem;
 		margin: 0;
+	}
+
+	/* Dark theme */
+	:global(:root[data-theme='dark']) .muted {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .chips li {
+		background: var(--surface-sunken);
+		border-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) code {
+		background: var(--surface-sunken);
+	}
+	:global(:root[data-theme='dark']) .field > span {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .field input,
+	:global(:root[data-theme='dark']) .field textarea {
+		background: var(--field-bg);
+		border-color: var(--field-border);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .preview {
+		background: var(--surface-inset);
+		border-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .preview-label {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .preview pre {
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .titem {
+		border-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .titem.open {
+		border-color: #4a3f6b;
+	}
+	:global(:root[data-theme='dark']) .titem-toggle:hover {
+		background: var(--surface-sunken);
+	}
+	:global(:root[data-theme='dark']) .chev {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .tsubject {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .editor {
+		border-top-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .btn {
+		background: var(--surface);
+		border-color: var(--line-strong);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .btn:hover {
+		background: var(--surface-sunken);
+	}
+	:global(:root[data-theme='dark']) .btn.primary {
+		background: #e8ebf0;
+		border-color: #e8ebf0;
+		color: #14171c;
+	}
+	:global(:root[data-theme='dark']) .btn.primary:hover {
+		background: #f4f6fa;
 	}
 </style>

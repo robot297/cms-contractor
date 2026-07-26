@@ -12,9 +12,10 @@ node_modules
 .DS_Store
 Thumbs.db
 
-# Env
+# Env — .env.schema is the committed source of truth (varlock); values stay local.
 .env
 .env.*
+!.env.schema
 !.env.example
 !.env.test
 

@@ -1,6 +1,12 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { validateFeedback } from '$lib/crm';
-import { isSupportConfigured, submitFeedback, SupportError } from '$lib/server/support.server';
+import {
+	captchaSiteKey,
+	isSupportConfigured,
+	submitFeedback,
+	SupportError,
+	verifyCaptcha
+} from '$lib/server/support.server';
 import type { Actions, PageServerLoad } from './$types';
 
 function requireContractor(locals: App.Locals) {
@@ -11,13 +17,29 @@ function requireContractor(locals: App.Locals) {
 
 export const load: PageServerLoad = ({ locals }) => {
 	requireContractor(locals);
-	return { configured: isSupportConfigured() };
+	return { configured: isSupportConfigured(), captchaSiteKey: captchaSiteKey() };
 };
 
 export const actions: Actions = {
-	submit: async ({ request, locals }) => {
+	submit: async ({ request, locals, getClientAddress }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
+
+		// Honeypot ("bot candy"): a field hidden from humans. Anything in it is a bot,
+		// so reject with a generic message that never hints at the trap.
+		if (form.get('website')?.toString().trim()) {
+			return fail(400, { message: 'Something went wrong — please try again.' });
+		}
+
+		// CAPTCHA: verify the Turnstile token (a no-op when captcha isn't configured).
+		const passed = await verifyCaptcha(
+			form.get('cf-turnstile-response')?.toString() ?? null,
+			getClientAddress()
+		);
+		if (!passed) {
+			return fail(400, { message: 'Please complete the verification challenge and try again.' });
+		}
+
 		const parsed = validateFeedback({
 			type: form.get('type')?.toString(),
 			title: form.get('title')?.toString(),

@@ -1,10 +1,27 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import type { LayoutData } from './$types';
 	import type { Snippet } from 'svelte';
 
 	let { data, children }: { data: LayoutData; children: Snippet } = $props();
+
+	// Light / dark theme. The initial value is applied pre-paint in app.html; here we
+	// just read it back and let the toggle flip <html data-theme> + persist the choice.
+	let theme = $state<'light' | 'dark'>('light');
+	onMount(() => {
+		theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+	});
+	function toggleTheme() {
+		theme = theme === 'dark' ? 'light' : 'dark';
+		document.documentElement.dataset.theme = theme;
+		try {
+			localStorage.setItem('theme', theme);
+		} catch {
+			/* storage may be unavailable (private mode) — the toggle still works for the session */
+		}
+	}
 
 	const path = $derived(page.url.pathname);
 	const onDashboard = $derived(path === '/contractor');
@@ -20,8 +37,44 @@
 	let menuOpen = $state(false);
 	// Close the menu whenever the route changes (a link was followed).
 	$effect(() => {
-		path;
+		void path; // track route changes so the mobile menu closes on navigation
 		menuOpen = false;
+	});
+
+	// The gliding rail indicator. Rather than six links each painting their own
+	// active state, one pill slides to whichever link is current. Its position is
+	// measured from the DOM so it tracks the real label widths (which shift with
+	// the webfont and the viewport) instead of hardcoded geometry.
+	let railEl = $state<HTMLElement | null>(null);
+	let railX = $state(0);
+	let railW = $state(0);
+	// Until we've measured, `.ready` is off and CSS falls back to painting the
+	// active link directly — so the nav is correct with JS disabled or still loading.
+	let railReady = $state(false);
+
+	function measureRail() {
+		const active = railEl?.querySelector<HTMLElement>('.navlink.is-active');
+		if (!active?.offsetWidth) {
+			railReady = false;
+			return;
+		}
+		railX = active.offsetLeft;
+		railW = active.offsetWidth;
+		railReady = true;
+	}
+
+	// Runs after Svelte flushes the DOM, so `.is-active` is already up to date.
+	$effect(() => {
+		void path;
+		measureRail();
+	});
+
+	onMount(() => {
+		// Label widths settle late: the webfont swaps in, and the bar reflows.
+		document.fonts?.ready.then(measureRail);
+		const ro = new ResizeObserver(measureRail);
+		if (railEl) ro.observe(railEl);
+		return () => ro.disconnect();
 	});
 </script>
 
@@ -29,6 +82,37 @@
 	<div style="background: #111;">
 		<nav class="nav">
 			<a href={resolve('/')} class="brand">🛠 Contractor&nbsp;CRM</a>
+
+			<button
+				type="button"
+				class="theme-toggle"
+				title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+				aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+				onclick={toggleTheme}
+			>
+				{#if theme === 'dark'}
+					<svg
+						width="20"
+						height="20"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<circle cx="12" cy="12" r="4.5" />
+						<path
+							d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+						/>
+					</svg>
+				{:else}
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+						<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+					</svg>
+				{/if}
+			</button>
 
 			<button
 				type="button"
@@ -70,7 +154,9 @@
 			</button>
 
 			<div class="nav-collapse" class:open={menuOpen}>
-				<div class="nav-links">
+				<div class="nav-links" class:ready={railReady} bind:this={railEl}>
+					<span class="rail-glide" style="--x: {railX}px; --w: {railW}px;" aria-hidden="true"
+					></span>
 					<a href={resolve('/contractor')} class="navlink" class:is-active={onDashboard}
 						>Dashboard</a
 					>
@@ -158,10 +244,20 @@
 		justify-content: space-between;
 		gap: 1rem;
 	}
+	/* The rail: one continuous track holding all six links, so the nav reads as a
+	   single control instead of six separate outlined buttons. */
 	.nav-links {
+		position: relative;
 		display: flex;
-		gap: 0.4rem;
-		flex-wrap: wrap;
+		gap: 0.15rem;
+		/* No wrapping — the glide pill only travels horizontally, and below 1025px
+		   the whole rail collapses into the hamburger overlay anyway. */
+		flex-wrap: nowrap;
+		padding: 0.25rem;
+		border-radius: 999px;
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 	}
 	.nav-right {
 		display: flex;
@@ -169,7 +265,60 @@
 		gap: 0.75rem;
 	}
 
+	/* The pill that glides between links. Kept out of the layout (absolute) so it
+	   can tween freely, and behind the labels (z-index) so type stays crisp.
+	   Only shown once measured — see the `:not(.ready)` fallback below. */
+	.rail-glide {
+		display: none;
+	}
+	.nav-links.ready .rail-glide {
+		display: block;
+		position: absolute;
+		top: 0.25rem;
+		bottom: 0.25rem;
+		left: 0;
+		width: var(--w);
+		transform: translateX(var(--x));
+		border-radius: 999px;
+		background: linear-gradient(180deg, var(--yellow), var(--yellow-deep));
+		box-shadow:
+			0 2px 12px rgba(255, 204, 0, 0.35),
+			inset 0 1px 0 rgba(255, 255, 255, 0.5);
+		overflow: hidden;
+		pointer-events: none;
+		/* Decelerating ease — the pill arrives rather than snaps. */
+		transition:
+			transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+			width 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+	}
+	/* The shimmer: a highlight drifts across the pill, then rests. The long tail on
+	   the keyframe is the pause — it sweeps in the first ~45%, waits out the rest. */
+	.nav-links.ready .rail-glide::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(
+			100deg,
+			transparent 35%,
+			rgba(255, 255, 255, 0.75) 50%,
+			transparent 65%
+		);
+		transform: translateX(-100%);
+		animation: rail-shimmer 3.6s ease-in-out 1s infinite;
+	}
+	@keyframes rail-shimmer {
+		0% {
+			transform: translateX(-100%);
+		}
+		45%,
+		100% {
+			transform: translateX(100%);
+		}
+	}
+
 	.navlink {
+		position: relative;
+		z-index: 1; /* above the glide pill */
 		padding: 0.4rem 0.9rem;
 		border-radius: 999px;
 		text-decoration: none;
@@ -177,15 +326,40 @@
 		font-weight: 800;
 		text-transform: uppercase;
 		letter-spacing: 0.02em;
-		border: 2px solid #fff;
-		background: transparent;
-		color: #fff;
+		white-space: nowrap;
+		color: rgba(255, 255, 255, 0.72);
+		transition:
+			color 0.2s ease,
+			background 0.2s ease;
 	}
-	.navlink.is-active {
-		background: #ffcc00;
-		color: #111;
-		border-color: #111;
-		box-shadow: 2px 2px 0 #fff;
+	.navlink:hover {
+		color: #fff;
+		background: rgba(255, 255, 255, 0.08);
+	}
+	/* Dark type once the yellow pill is underneath. Pinned, not var(--ink): yellow
+	   stays light in both themes, so its label must always be dark. */
+	.navlink.is-active,
+	.navlink.is-active:hover {
+		color: #14171c;
+		background: transparent;
+	}
+	/* No-JS / pre-measure fallback: without the pill, the active link paints its own. */
+	.nav-links:not(.ready) .navlink.is-active {
+		background: var(--yellow);
+	}
+	.navlink:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.nav-links.ready .rail-glide {
+			transition: none;
+		}
+		.nav-links.ready .rail-glide::after {
+			animation: none;
+			opacity: 0;
+		}
 	}
 
 	.username {
@@ -196,37 +370,84 @@
 	.signout {
 		padding: 0.4rem 0.9rem;
 		border-radius: 999px;
-		border: 2px solid #fff;
-		background: transparent;
+		border: 2px solid #e5534b;
+		background: #cf222e;
 		color: #fff;
 		cursor: pointer;
 		font-weight: 800;
 		text-transform: uppercase;
 		font-size: 0.8rem;
 	}
+	.signout:hover {
+		background: #b3202a;
+		border-color: #b3202a;
+	}
 
-	.hamburger {
+	/* Nav utility buttons (theme toggle + hamburger) share a soft, tactile chrome:
+	   a faint glassy fill, hairline border, and a lift-on-hover with a warm glow. */
+	.hamburger,
+	.theme-toggle {
 		display: none;
-		margin-left: auto;
-		width: 2.6rem;
-		height: 2.6rem;
 		align-items: center;
 		justify-content: center;
+		width: 2.6rem;
+		height: 2.6rem;
 		padding: 0;
-		border: 2px solid #fff;
-		background: transparent;
+		flex-shrink: 0;
+		border: 1.5px solid rgba(255, 255, 255, 0.22);
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
 		color: #fff;
-		border-radius: 10px;
+		border-radius: 12px;
 		cursor: pointer;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			transform 0.12s ease,
+			box-shadow 0.16s ease;
 	}
-	.hamburger svg {
+	.theme-toggle {
+		display: inline-flex;
+	}
+	.hamburger:hover,
+	.theme-toggle:hover {
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.09));
+		border-color: rgba(255, 204, 0, 0.75);
+		transform: translateY(-1px);
+		box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+	}
+	.hamburger:active,
+	.theme-toggle:active {
+		transform: translateY(0) scale(0.95);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+	}
+	.hamburger svg,
+	.theme-toggle svg {
 		display: block;
+		transition: transform 0.25s ease;
+	}
+	/* A little life: the theme icon eases as you hover. */
+	.theme-toggle:hover svg {
+		transform: rotate(-18deg) scale(1.05);
 	}
 
-	/* Tablet + mobile: collapse behind the hamburger as an animated overlay. */
-	@media (max-width: 820px) {
+	/* Hide the signed-in name below wide desktop — it only crowds the bar and the
+	   overlay doesn't need it. */
+	@media (max-width: 1180px) {
+		.username {
+			display: none;
+		}
+	}
+
+	/* Tablet + mobile: collapse behind the hamburger as an animated overlay. The
+	   inline bar can't fit six links, so tablets get the menu too. */
+	@media (max-width: 1024px) {
 		.hamburger {
 			display: inline-flex;
+		}
+		/* Push the toggle to the right so it groups next to the hamburger. */
+		.theme-toggle {
+			margin-left: auto;
 		}
 		/* Overlay panel: absolutely positioned so it floats over the page
 		   content instead of pushing it down, and tweens on open/close. */
@@ -259,9 +480,19 @@
 				transform 0.18s ease,
 				visibility 0s;
 		}
+		/* Stacked overlay: the rail chrome and its gliding pill are a horizontal
+		   idea, so both are dropped here in favour of plain full-width rows. */
 		.nav-links {
 			flex-direction: column;
 			gap: 0.4rem;
+			padding: 0;
+			border: none;
+			background: none;
+			box-shadow: none;
+		}
+		.rail-glide,
+		.nav-links.ready .rail-glide {
+			display: none;
 		}
 		.navlink {
 			text-transform: none;
@@ -269,14 +500,14 @@
 			font-size: 0.95rem;
 			font-weight: 700;
 			border-radius: 10px;
-			border-color: transparent;
 			background: rgba(255, 255, 255, 0.06);
+			color: #fff;
 			padding: 0.7rem 0.9rem;
 		}
-		.navlink.is-active {
-			background: #ffcc00;
-			color: #111;
-			border-color: #111;
+		.navlink.is-active,
+		.navlink.is-active:hover {
+			background: var(--yellow);
+			color: #14171c;
 			box-shadow: none;
 		}
 		.nav-right {

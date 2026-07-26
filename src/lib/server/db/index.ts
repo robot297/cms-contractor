@@ -2,11 +2,11 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import * as schema from './schema';
-import { env } from '$env/dynamic/private';
+import { ENV } from 'varlock/env';
 
-if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not set');
+if (!ENV.DATABASE_URL) throw new Error('DATABASE_URL is not set');
 
-const client = postgres(env.DATABASE_URL, { max: 1 });
+const client = postgres(ENV.DATABASE_URL, { max: 1 });
 
 export const db = drizzle(client, { schema });
 
@@ -21,7 +21,7 @@ export const db = drizzle(client, { schema });
  * app is ever launched from somewhere other than the app root.
  */
 export async function runMigrations(): Promise<void> {
-	const migrationsFolder = env.MIGRATIONS_FOLDER ?? 'drizzle';
+	const migrationsFolder = ENV.MIGRATIONS_FOLDER ?? 'drizzle';
 	console.log(`→ Applying database migrations from ./${migrationsFolder} …`);
 	await migrate(db, { migrationsFolder });
 	console.log('\x1b[32m✓ Migrations applied\x1b[0m');
@@ -44,7 +44,7 @@ function safeUrl(url: string): string {
  * Call once at server startup (see hooks.server.ts).
  */
 export async function checkDatabaseConnection(): Promise<void> {
-	const target = safeUrl(env.DATABASE_URL);
+	const target = safeUrl(ENV.DATABASE_URL);
 	console.log(`Checking database connection → ${target}`);
 	try {
 		await client`select 1`;

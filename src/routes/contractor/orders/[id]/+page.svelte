@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { afterNavigate } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { formatBytes, MAX_ATTACHMENT_BYTES, QUICK_UPDATE_STATES } from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData, ActionData } from './$types';
@@ -13,7 +14,10 @@
 	// Back link follows where you came from: the dashboard sends you back to the
 	// dashboard, the orders list back to orders. Falls back to Orders on a direct
 	// load / refresh.
-	let backTo = $state({ href: '/contractor/orders', label: 'Orders' });
+	let backTo = $state<{ href: '/contractor' | '/contractor/orders'; label: string }>({
+		href: '/contractor/orders',
+		label: 'Orders'
+	});
 	afterNavigate((nav) => {
 		const from = nav.from?.url.pathname;
 		if (from === '/contractor') backTo = { href: '/contractor', label: 'Dashboard' };
@@ -94,8 +98,6 @@
 		'padding: 0.4rem 0.75rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.85rem;';
 	const primaryBtn =
 		'padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
-	const card =
-		'background: #fff; border: 1px solid #e2e6ea; border-radius: 16px; padding: 1.1rem 1.2rem; display: grid; gap: 0.75rem; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 4px 12px rgba(27, 31, 36, 0.06);';
 	const sectionTitle =
 		'margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: #8c959f;';
 
@@ -114,7 +116,7 @@
 
 <div style="background: #f6f8fa; min-height: 100%;">
 	<div class="page">
-		<a href={backTo.href} style="color: #0969da; font-size: 0.9rem; text-decoration: none;"
+		<a href={resolve(backTo.href)} style="color: #0969da; font-size: 0.9rem; text-decoration: none;"
 			>← {backTo.label}</a
 		>
 
@@ -181,7 +183,7 @@
 			<!-- Main column: the working surface — follow-up, activity -->
 			<div class="col">
 				<!-- Follow-up: one snooze (⏰) button opens presets + a date picker -->
-				<section style={card}>
+				<section class="card">
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;"
 					>
@@ -254,7 +256,7 @@
 				</section>
 
 				<!-- Timeline: the + button reveals the note input -->
-				<section style={card}>
+				<section class="card">
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
 					>
@@ -324,7 +326,7 @@
 			<!-- Side column: who / what / files / danger -->
 			<div class="col">
 				<!-- Customer -->
-				<section style={card}>
+				<section class="card">
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
 					>
@@ -415,7 +417,7 @@
 				</section>
 
 				<!-- Assigned subcontractors -->
-				<section style={card}>
+				<section class="card">
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
 					>
@@ -499,14 +501,15 @@
 						</p>
 					{:else if data.availableSubs.length === 0}
 						<p style="margin: 0; color: #57606a; font-size: 0.82rem;">
-							Add subcontractors in the <a href="/contractor/subcontractors">Subcontractors</a> page to
-							assign them here.
+							Add subcontractors in the <a href={resolve('/contractor/subcontractors')}
+								>Subcontractors</a
+							> page to assign them here.
 						</p>
 					{/if}
 				</section>
 
 				<!-- Attachments -->
-				<section style={card}>
+				<section class="card">
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;"
 					>
@@ -566,7 +569,7 @@
 					{:else}
 						<div style="display: grid; gap: 0.5rem;">
 							{#each data.attachments as att (att.id)}
-								{@const href = `/contractor/orders/${order.id}/attachment/${att.id}`}
+								{@const href = resolve(`/contractor/orders/${order.id}/attachment/${att.id}`)}
 								<div
 									style="display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem 0.65rem; border: 1px solid #eaeef2; border-radius: 10px;"
 								>
@@ -614,7 +617,7 @@
 				</section>
 
 				<!-- Danger zone -->
-				<section style={card}>
+				<section class="card">
 					<h2 style={sectionTitle}>Danger zone</h2>
 					{#if confirmingDelete}
 						<div
@@ -675,45 +678,6 @@
 	}
 	.icon-btn.on:hover {
 		background: #e2daf7;
-	}
-	/* Contact composer popover anchored to the 💬 button, with an invite action
-	   tucked under the composer. */
-	/* Dimmed full-screen scrim behind the composer so the rest of the page recedes.
-	   z-index sits above the mobile nav (50) so nothing pokes through the dim. */
-	.contact-scrim {
-		position: fixed;
-		inset: 0;
-		z-index: 90;
-		border: none;
-		cursor: default;
-		background: rgba(15, 23, 42, 0.45);
-	}
-	.contact-pop {
-		position: absolute;
-		right: 0;
-		top: calc(100% + 6px);
-		z-index: 100;
-		width: 280px;
-		max-width: 82vw;
-		background: #f6f4fc;
-		border: 1px solid #cdbff0;
-		border-radius: 12px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-		padding: 0.75rem;
-		display: grid;
-		gap: 0.6rem;
-	}
-	/* Mobile: a fixed bottom sheet so the popover never overflows off-screen. */
-	@media (max-width: 480px) {
-		.contact-pop {
-			position: fixed;
-			inset: auto 0.6rem 0.6rem;
-			top: auto;
-			width: auto;
-			max-width: none;
-			max-height: 80vh;
-			overflow-y: auto;
-		}
 	}
 	.invite-link {
 		width: 100%;
@@ -818,5 +782,44 @@
 		.detail-grid {
 			grid-template-columns: 1fr;
 		}
+	}
+
+	/* Dark theme */
+	:global(:root[data-theme='dark']) .icon-btn.on {
+		background: #2e2a44;
+		border-color: #4a3f6b;
+		color: #cabff5;
+	}
+	:global(:root[data-theme='dark']) .icon-btn.on:hover {
+		background: #383352;
+	}
+	:global(:root[data-theme='dark']) .invite-link {
+		border-top-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .invite-link:hover {
+		background: var(--surface-sunken);
+	}
+	:global(:root[data-theme='dark']) .order-title {
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .sub-pick {
+		background: var(--surface);
+		border-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .sub-pick:hover,
+	:global(:root[data-theme='dark']) .sub-pick:focus-visible {
+		background: #2a2640;
+		border-color: #4a3f6b;
+	}
+	:global(:root[data-theme='dark']) .sub-pick:active {
+		background: #332b52;
+	}
+	:global(:root[data-theme='dark']) .sub-pick-avatar {
+		background: #2e2a44;
+		color: #cabff5;
+	}
+	:global(:root[data-theme='dark']) .sub-pick-add {
+		background: #2e2a44;
+		color: #cabff5;
 	}
 </style>

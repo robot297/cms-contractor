@@ -358,24 +358,24 @@
 		gap: 0.9rem;
 		flex-wrap: wrap;
 	}
-	/* Shared by the message Send button and the Call anchor so the primary action
-	   looks the same whichever channel is selected. */
+	/* The primary action button — the app's safety-yellow so it clearly reads as the
+	   send CTA in both themes. (Call reuses the base but is green.) */
 	.send {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.3rem;
-		padding: 0.5rem 1rem;
-		border: none;
+		padding: 0.5rem 1.1rem;
+		border: 2px solid #14171c;
 		border-radius: 10px;
-		background: #1f2328;
-		color: #fff;
-		font-weight: 600;
+		background: var(--yellow);
+		color: #14171c;
+		font-weight: 800;
 		font-size: 0.88rem;
 		cursor: pointer;
 		text-decoration: none;
 	}
 	.send:hover:not(:disabled) {
-		background: #000;
+		background: var(--yellow-deep);
 	}
 	.send:disabled {
 		opacity: 0.45;
@@ -384,8 +384,62 @@
 	/* Call is a positive, one-tap action — green sets it apart from Send. */
 	.call-btn {
 		background: #1f883d;
+		border-color: #146c2e;
+		color: #fff;
 	}
 	.call-btn:hover {
 		background: #1a7f37;
+	}
+
+	/* Dark theme */
+	:global(:root[data-theme='dark']) .composer-title {
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .compose-box {
+		background: var(--surface-sunken);
+		border-color: var(--line);
+	}
+	:global(:root[data-theme='dark']) .picker-label {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .picker select {
+		background: var(--field-bg);
+		border-color: var(--field-border);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .composer-subject {
+		background: var(--field-bg);
+		border-color: var(--field-border);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .composer-text {
+		background: var(--field-bg);
+		border-color: var(--field-border);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .sig-note {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .call-note {
+		background: var(--surface-sunken);
+		border-color: var(--line);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .via {
+		color: var(--fg-muted);
+	}
+	:global(:root[data-theme='dark']) .chip {
+		background: var(--surface-sunken);
+		border-color: var(--line-strong);
+		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .chip:hover {
+		background: #2c333d;
+	}
+	/* Selected channel: a clearly brighter purple so the choice is obvious. */
+	:global(:root[data-theme='dark']) .chip.sel {
+		background: #4a3f7a;
+		border-color: #8271c8;
+		color: #ece7fb;
 	}
 </style>

@@ -206,9 +206,7 @@
 
 		{#each visibleOrders as order (order.id)}
 			{@const badge = statusBadge(order.state)}
-			<article
-				style="border: 1px solid #d0d7de; border-radius: 16px; padding: 1rem 1.1rem; display: grid; gap: 0.85rem;"
-			>
+			<article class="card">
 				<!-- Header: customer name leads, project subtitle; health badges on the right -->
 				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start;">
 					<div style="display: grid; gap: 0.15rem; min-width: 0;">
@@ -591,5 +589,22 @@
 		.notes-history-mobile {
 			display: block;
 		}
+	}
+
+	/* Dark theme — override the hardcoded light surfaces above so they read
+	   correctly under [data-theme='dark']. Only touches color-bearing rules;
+	   layout/display rules above are theme-agnostic. */
+	:global(:root[data-theme='dark']) .icon-btn.on {
+		background: #2e2a44;
+		border-color: #4a3f6b;
+		color: #cabff5;
+	}
+	:global(:root[data-theme='dark']) .icon-btn.on:hover {
+		background: #373251;
+	}
+	:global(:root[data-theme='dark']) .note-panel {
+		background: var(--surface-sunken);
+		border-color: var(--line);
+		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 	}
 </style>

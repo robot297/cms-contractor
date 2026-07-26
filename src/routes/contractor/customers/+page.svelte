@@ -482,9 +482,7 @@
 
 						{#each group.items as c (c.id)}
 							{@const expanded = expandedId === c.id}
-							<article
-								style="background: #fff; border: 1px solid #e2e6ea; border-radius: 14px; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 4px 12px rgba(27, 31, 36, 0.05);"
-							>
+							<article class="card">
 								<!-- Contact row -->
 								<div
 									style="display: flex; align-items: center; gap: 0.7rem; padding: 0.65rem 0.8rem;"
@@ -754,7 +752,7 @@
 																onclick={() => (contactOpenId = null)}
 																class="contact-scrim"
 															></button>
-															<div class="contact-pop">
+															<div class="contact-pop up">
 																<ContactComposer
 																	customer={c}
 																	rows={2}
@@ -1081,41 +1079,4 @@
 </dialog>
 
 <style>
-	/* Dimmed full-screen scrim behind the composer so the rest of the page recedes.
-	   z-index sits above the sticky search bar (20), its suggestions (30) and the
-	   mobile nav (50) so nothing pokes through the dim. */
-	.contact-scrim {
-		position: fixed;
-		inset: 0;
-		z-index: 90;
-		border: none;
-		cursor: default;
-		background: rgba(15, 23, 42, 0.45);
-	}
-	/* Message composer popover, anchored above the 💬 button on desktop. */
-	.contact-pop {
-		position: absolute;
-		right: 0;
-		bottom: calc(100% + 8px);
-		z-index: 100;
-		width: 300px;
-		max-width: 82vw;
-		background: #f6f4fc;
-		border: 1px solid #cdbff0;
-		border-radius: 12px;
-		box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
-		padding: 0.8rem;
-	}
-	/* Mobile: a fixed bottom sheet spanning the viewport (minus margins) so it can
-	   never overflow off-screen next to a right-aligned button. */
-	@media (max-width: 480px) {
-		.contact-pop {
-			position: fixed;
-			inset: auto 0.6rem 0.6rem;
-			width: auto;
-			max-width: none;
-			max-height: 80vh;
-			overflow-y: auto;
-		}
-	}
 </style>
