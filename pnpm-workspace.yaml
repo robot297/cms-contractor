@@ -1,12 +1,15 @@
 packages:
   - '.'
 
-onlyBuiltDependencies:
-  - esbuild
-
-# Optional peer deps of drizzle-orm / better-auth for drivers we don't use
-# (we're on postgres). Their postinstall scripts compile a native SQLite
-# binding and generate a Prisma client — both dead weight here.
-ignoredBuiltDependencies:
-  - better-sqlite3
-  - '@prisma/client'
+# Which dependencies may run postinstall build scripts. pnpm 11 replaced the
+# older onlyBuiltDependencies / ignoredBuiltDependencies lists with this map,
+# and treats anything unlisted as a hard install error (ERR_PNPM_IGNORED_BUILDS)
+# — so every package pnpm asks about has to get an explicit answer here.
+allowBuilds:
+  # esbuild ships a platform binary and genuinely needs its install script.
+  esbuild: true
+  # Optional peer deps of drizzle-orm / better-auth for drivers we don't use
+  # (we're on postgres). Their scripts compile a native SQLite binding and
+  # generate a Prisma client — both dead weight in this image.
+  better-sqlite3: false
+  '@prisma/client': false
