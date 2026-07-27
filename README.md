@@ -10,7 +10,7 @@ Contractor CRM to help enable better customer transparency for contractors who m
 - Varlock (Secure .env variable handling)
 - Prettier and ESLint (Style and format)
 - Vite (build)
-- Coolify (uses Nix for deployment)
+- Coolify (deploys the `Dockerfile` — **not** Nixpacks; see Deployment)
 
 ## Local Development
 
@@ -59,8 +59,12 @@ the container runs `node scripts/migrate.mjs` before `node build/index.js`
 (see the `Dockerfile` entrypoint and the `start` script). It fails fast if a
 migration errors, so the server never boots against an out-of-sync schema.
 
-- **Build pack:** use the **Dockerfile** build pack in Coolify, or set the start
-  command to `pnpm start` — both run migrations first.
+- **Build pack:** the Coolify app **must** use the **Dockerfile** build pack. It is
+  the only path that pins Node 22, installs with the frozen lockfile, and supplies
+  the build-time `DATABASE_URL` / `ORIGIN` / `BETTER_AUTH_SECRET` that `vite build`
+  needs. Coolify defaults to **Nixpacks**, which ignores the `Dockerfile` entirely
+  and fails the build with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`. The Dockerfile
+  entrypoint runs migrations before starting the server.
 - Migrations are idempotent (tracked in a `__drizzle_migrations` table); redeploys
   only apply new ones.
 - To migrate a database manually: `DATABASE_URL='<prod-url>' pnpm migrate`.

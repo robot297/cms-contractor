@@ -14,8 +14,10 @@
 
 	let savingAvatarId: string | null = $state(null);
 
-	// Customer invites live here (moved off the dashboard): a collapsible panel.
-	let showInvites = $state(false);
+	// Customer invites live here (moved off the dashboard). They're a side errand
+	// rather than part of browsing the directory, so they sit behind an icon button
+	// next to "Add customer" and open in their own modal.
+	let invitesDialog: HTMLDialogElement | undefined = $state();
 	let confirmingDeleteInviteId: string | null = $state(null);
 	function inviteLabel(status: string, expiresAt: Date): string {
 		if (status === 'revoked') return 'Revoked';
@@ -358,6 +360,22 @@
 					</ul>
 				{/if}
 			</div>
+			{#if data.invites.length > 0}
+				<div style="position: relative; flex-shrink: 0;">
+					<button
+						type="button"
+						title="Customer invites"
+						aria-label="Customer invites ({data.invites.length})"
+						onclick={() => {
+							confirmingDeleteInviteId = null;
+							invitesDialog?.showModal();
+						}}
+						class="icon-btn"
+						style="width: 2.9rem; height: 2.9rem; font-size: 1.4rem;">✉️</button
+					>
+					<span class="invite-badge" aria-hidden="true">{data.invites.length}</span>
+				</div>
+			{/if}
 			<button
 				type="button"
 				title="Add customer"
@@ -370,91 +388,6 @@
 				style="flex-shrink: 0; width: 2.9rem; height: 2.9rem; font-size: 1.75rem;">＋</button
 			>
 		</div>
-
-		<!-- Customer invites (moved here from the dashboard): collapsed by default -->
-		{#if data.invites.length > 0}
-			<section style="display: grid; gap: 0.5rem;">
-				<button
-					type="button"
-					aria-expanded={showInvites}
-					onclick={() => (showInvites = !showInvites)}
-					style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; width: 100%; padding: 0.6rem 0.9rem; border-radius: 12px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; font-weight: 700; font-size: 0.9rem; color: inherit;"
-				>
-					<span>✉️ Customer invites ({data.invites.length})</span>
-					<span aria-hidden="true" style="color: #8c959f;">{showInvites ? '▲' : '▼'}</span>
-				</button>
-				{#if showInvites}
-					{#each data.invites as invite (invite.id)}
-						<div
-							style="padding: 0.7rem 0.85rem; border-radius: 12px; background: #fff; border: 1px solid #e2e6ea; display: flex; justify-content: space-between; gap: 1rem; align-items: center; flex-wrap: wrap;"
-						>
-							<div style="min-width: 0;">
-								<strong style="word-break: break-word;">{invite.customerEmail}</strong>
-								<div style="font-size: 0.82rem; color: #57606a;">
-									{inviteLabel(invite.status, invite.expiresAt)} · expires {new Date(
-										invite.expiresAt
-									).toLocaleDateString()}
-								</div>
-							</div>
-							<div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-								{#if confirmingDeleteInviteId === invite.id}
-									<span style="font-size: 0.85rem; color: #57606a;">Delete this invite?</span>
-									<form
-										method="POST"
-										action="?/deleteInvite"
-										use:enhance={() =>
-											async ({ update }) => {
-												confirmingDeleteInviteId = null;
-												await update();
-											}}
-									>
-										<input type="hidden" name="inviteId" value={invite.id} />
-										<button
-											type="submit"
-											style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #cf222e; background: #cf222e; color: #fff; cursor: pointer;"
-											>Yes, delete</button
-										>
-									</form>
-									<button
-										type="button"
-										onclick={() => (confirmingDeleteInviteId = null)}
-										style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-										>Cancel</button
-									>
-								{:else}
-									<form method="POST" action="?/resendInvite" use:enhance>
-										<input type="hidden" name="inviteId" value={invite.id} />
-										<button
-											type="submit"
-											style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #0969da; background: none; cursor: pointer;"
-											>Resend</button
-										>
-									</form>
-									{#if invite.status === 'pending'}
-										<form method="POST" action="?/revokeInvite" use:enhance>
-											<input type="hidden" name="inviteId" value={invite.id} />
-											<button
-												type="submit"
-												style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #cf222e; color: #cf222e; background: none; cursor: pointer;"
-												>Revoke</button
-											>
-										</form>
-									{/if}
-									<button
-										type="button"
-										title="Delete invite"
-										aria-label="Delete invite"
-										onclick={() => (confirmingDeleteInviteId = invite.id)}
-										style="border: none; background: none; cursor: pointer; font-size: 1rem; line-height: 1; color: #cf222e; padding: 0.2rem 0.35rem;"
-										>🗑</button
-									>
-								{/if}
-							</div>
-						</div>
-					{/each}
-				{/if}
-			</section>
-		{/if}
 
 		<!-- Directory: grouped list on the left, A–Z jump rail on the right -->
 		<div style="display: flex; gap: 0.5rem; align-items: flex-start;">
@@ -866,6 +799,92 @@
 	</div>
 </div>
 
+<!-- Customer-invites modal, opened from the ✉️ button beside "Add customer" -->
+<dialog
+	bind:this={invitesDialog}
+	style="border: none; border-radius: 16px; padding: 0; max-width: 520px; width: 92vw; box-shadow: 0 12px 40px rgba(0,0,0,0.2);"
+>
+	<div style="display: grid; gap: 0.8rem; padding: 1.25rem;">
+		<div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+			<h2 style="margin: 0; font-size: 1.1rem;">Customer invites</h2>
+			<button
+				type="button"
+				onclick={() => invitesDialog?.close()}
+				aria-label="Close"
+				style="border: none; background: none; font-size: 1.2rem; cursor: pointer; color: #57606a;"
+				>✕</button
+			>
+		</div>
+
+		{#if data.invites.length === 0}
+			<p style="margin: 0; color: #57606a; font-size: 0.9rem;">
+				No invites yet. Send one from a customer’s ⚙ menu.
+			</p>
+		{:else}
+			<div class="invite-list">
+				{#each data.invites as invite (invite.id)}
+					<div class="invite-row">
+						<div style="min-width: 0;">
+							<strong style="word-break: break-word;">{invite.customerEmail}</strong>
+							<div style="font-size: 0.82rem; color: #57606a;">
+								{inviteLabel(invite.status, invite.expiresAt)} · expires {new Date(
+									invite.expiresAt
+								).toLocaleDateString()}
+							</div>
+						</div>
+						<div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+							{#if confirmingDeleteInviteId === invite.id}
+								<span style="font-size: 0.85rem; color: #57606a;">Delete this invite?</span>
+								<form
+									method="POST"
+									action="?/deleteInvite"
+									use:enhance={() =>
+										async ({ update }) => {
+											confirmingDeleteInviteId = null;
+											await update();
+										}}
+								>
+									<input type="hidden" name="inviteId" value={invite.id} />
+									<button
+										type="submit"
+										style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #cf222e; background: #cf222e; color: #fff; cursor: pointer;"
+										>Yes, delete</button
+									>
+								</form>
+								<button
+									type="button"
+									onclick={() => (confirmingDeleteInviteId = null)}
+									style="padding: 0.4rem 0.7rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+									>Cancel</button
+								>
+							{:else}
+								<form method="POST" action="?/resendInvite" use:enhance>
+									<input type="hidden" name="inviteId" value={invite.id} />
+									<button type="submit" class="invite-action">Resend</button>
+								</form>
+								{#if invite.status === 'pending'}
+									<form method="POST" action="?/revokeInvite" use:enhance>
+										<input type="hidden" name="inviteId" value={invite.id} />
+										<button type="submit" class="invite-action danger">Revoke</button>
+									</form>
+								{/if}
+								<button
+									type="button"
+									title="Delete invite"
+									aria-label="Delete invite"
+									onclick={() => (confirmingDeleteInviteId = invite.id)}
+									style="border: none; background: none; cursor: pointer; font-size: 1rem; line-height: 1; color: #cf222e; padding: 0.2rem 0.35rem;"
+									>🗑</button
+								>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
+</dialog>
+
 <!-- Add-customer modal -->
 <dialog
 	bind:this={addDialog}
@@ -1079,4 +1098,64 @@
 </dialog>
 
 <style>
+	/* Count on the ✉️ invites button, so the badge carries the number the old
+	   always-visible panel header used to. */
+	.invite-badge {
+		position: absolute;
+		top: -0.25rem;
+		right: -0.25rem;
+		min-width: 1.05rem;
+		height: 1.05rem;
+		padding: 0 0.25rem;
+		box-sizing: border-box;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 999px;
+		background: var(--yellow);
+		border: 1.5px solid #14171c;
+		color: #14171c;
+		font-size: 0.68rem;
+		font-weight: 800;
+		line-height: 1;
+		pointer-events: none;
+	}
+	.invite-list {
+		display: grid;
+		gap: 0.5rem;
+		max-height: 60vh;
+		overflow-y: auto;
+	}
+	.invite-row {
+		padding: 0.7rem 0.85rem;
+		border-radius: 12px;
+		background: var(--surface-sunken);
+		border: 1px solid var(--line);
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		align-items: center;
+		flex-wrap: wrap;
+	}
+	.invite-action {
+		padding: 0.4rem 0.7rem;
+		border-radius: 999px;
+		border: 1px solid var(--line-strong);
+		background: var(--surface);
+		color: var(--fg);
+		font-weight: 600;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.invite-action:hover {
+		background: var(--surface-sunken);
+	}
+	.invite-action.danger {
+		color: #cf222e;
+		border-color: #f0c0c4;
+	}
+	:global(:root[data-theme='dark']) .invite-action.danger {
+		color: #ff8f8a;
+		border-color: #6b2f33;
+	}
 </style>

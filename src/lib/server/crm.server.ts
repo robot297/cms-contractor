@@ -397,7 +397,9 @@ export async function updateOrderState(
 			orderId,
 			kind: milestone ? 'milestone' : 'status',
 			title: newState,
-			detail: '',
+			// Record the transition, not just the destination — otherwise the history
+			// reads as a bare list of states with no way to see what actually moved.
+			detail: `Status changed from ${existing.state} to ${newState}`,
 			authorRole: 'contractor',
 			internal: false
 		});
@@ -423,7 +425,9 @@ export async function updateOrderState(
 		await db.insert(timelineEntry).values({
 			orderId,
 			kind: 'note',
-			title: 'Note',
+			// Title the note after the state it accompanies so the internal-notes
+			// surface shows which status change it explains.
+			title: newState !== existing.state ? `Note · ${newState}` : 'Note',
 			detail: trimmedNote,
 			authorRole: 'contractor',
 			internal: true
@@ -487,7 +491,12 @@ export async function getOrderDetail(
 			.orderBy(desc(timelineEntry.createdAt)),
 		listOrderAttachments(orderId, contractorId)
 	]);
-	return { order: toContractorView(row.order, row.customer), customer: row.customer, timeline, attachments };
+	return {
+		order: toContractorView(row.order, row.customer),
+		customer: row.customer,
+		timeline,
+		attachments
+	};
 }
 
 /** Metadata for an order's attachments (no bytes), newest first. */

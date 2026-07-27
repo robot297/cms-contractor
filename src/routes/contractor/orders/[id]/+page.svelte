@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -26,12 +27,25 @@
 	});
 
 	let confirmingDelete = $state(false);
-	// Status editing hides behind a "Change" toggle under the badge.
+	// Status editing hides behind a "Change" toggle under the badge. The draft is
+	// re-seeded from the saved state each time the popover opens, so "Save" only
+	// becomes active once the picked state actually differs from what's stored.
 	let statusOpen = $state(false);
+	let statusDraft = $state(untrack(() => data.order.state));
+	let statusNote = $state('');
+	const statusDirty = $derived(statusDraft !== order.state);
+	function toggleStatus() {
+		if (!statusOpen) {
+			statusDraft = order.state;
+			statusNote = '';
+		}
+		statusOpen = !statusOpen;
+	}
 	const statusThenClose =
 		() =>
 		async ({ update }: { update: () => Promise<void> }) => {
 			statusOpen = false;
+			statusNote = '';
 			await update();
 		};
 	// Follow-up controls collapse behind a single snooze (⏰) button.
@@ -114,7 +128,7 @@
 	<title>{order.projectName ?? 'Order'}</title>
 </svelte:head>
 
-<div style="background: #f6f8fa; min-height: 100%;">
+<div class="order-shell">
 	<div class="page">
 		<a href={resolve(backTo.href)} style="color: #0969da; font-size: 0.9rem; text-decoration: none;"
 			>← {backTo.label}</a
@@ -142,7 +156,7 @@
 						aria-expanded={statusOpen}
 						title="Change status"
 						aria-label="Change status"
-						onclick={() => (statusOpen = !statusOpen)}
+						onclick={toggleStatus}
 						style="width: 1.9rem; height: 1.9rem; font-size: 1.05rem;">⚙️</button
 					>
 					{#if statusOpen}
@@ -159,12 +173,31 @@
 							use:enhance={statusThenClose}
 							style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 240px; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.6rem; display: grid; gap: 0.5rem;"
 						>
-							<select name="state" aria-label="Order status" style="{field} width: 100%;">
+							<select
+								name="state"
+								aria-label="Order status"
+								bind:value={statusDraft}
+								style="{field} width: 100%;"
+							>
 								{#each QUICK_UPDATE_STATES as s (s)}
-									<option value={s} selected={s === order.state}>{s}</option>
+									<option value={s}>{s}</option>
 								{/each}
 							</select>
-							<button type="submit" style="{primaryBtn} width: 100%;">Save status</button>
+							<!-- Optional annotation recorded as an internal note alongside the
+							     status change, so the "why" lands in the timeline too. -->
+							<input
+								name="note"
+								bind:value={statusNote}
+								placeholder="Why? (optional internal note)"
+								style="{field} width: 100%; box-sizing: border-box; font-size: 0.85rem;"
+							/>
+							<button
+								type="submit"
+								class="save-status"
+								disabled={!statusDirty}
+								title={statusDirty ? 'Save status' : 'Pick a different status first'}
+								style="{primaryBtn} width: 100%;">Save status</button
+							>
 						</form>
 					{/if}
 				</div>
@@ -291,34 +324,20 @@
 					{#if data.timeline.length === 0}
 						<p style="margin: 0; color: #57606a; font-size: 0.9rem;">No activity yet.</p>
 					{:else}
-						<div style="display: grid; gap: 0.5rem;">
+						<ol class="timeline">
 							{#each data.timeline as entry (entry.id)}
-								<div
-									style="padding: 0.65rem 0.75rem; border-radius: 10px; background: {entry.internal
-										? '#fffdf5'
-										: '#f6f8fa'}; border: 1px solid {entry.internal
-										? '#f0e6c0'
-										: '#eaeef2'}; display: grid; gap: 0.2rem;"
-								>
-									<div
-										style="display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline;"
-									>
-										<strong style="font-size: 0.92rem;">{entry.title}</strong>
-										{#if entry.internal}
-											<span style="font-size: 0.7rem; color: #9a6700;">internal</span>
-										{/if}
+								<li class="tl-entry" class:internal={entry.internal}>
+									<div class="tl-head">
+										<strong class="tl-title">{entry.title}</strong>
+										{#if entry.internal}<span class="tl-tag">internal</span>{/if}
 									</div>
-									{#if entry.detail}<div
-											style="font-size: 0.9rem; color: #57606a; white-space: pre-wrap;"
-										>
-											{entry.detail}
-										</div>{/if}
-									<div style="font-size: 0.75rem; color: #8c959f;">
+									{#if entry.detail}<div class="tl-detail">{entry.detail}</div>{/if}
+									<div class="tl-meta">
 										{new Date(entry.createdAt).toLocaleString()} · {entry.authorRole}
 									</div>
-								</div>
+								</li>
 							{/each}
-						</div>
+						</ol>
 					{/if}
 				</section>
 			</div>
@@ -657,6 +676,13 @@
 </div>
 
 <style>
+	/* Page canvas. In light this is the familiar sunken grey; in dark it has to be
+	   *darker* than the cards sitting on it (the old #f6f8fa literal got remapped
+	   to a raised grey, so cards read as holes punched into the page). */
+	.order-shell {
+		background: var(--surface-sunken);
+		min-height: 100%;
+	}
 	.page {
 		max-width: 1040px;
 		margin: 0 auto;
@@ -679,6 +705,86 @@
 	.icon-btn.on:hover {
 		background: #e2daf7;
 	}
+	/* ------------------------------------------------------------- Timeline
+	   A rail with a dot per entry. Everything is token-driven; the internal
+	   (contractor-only) entries carry a warm amber tint that has a dark
+	   counterpart instead of the old cream-on-dark literals. */
+	.timeline {
+		list-style: none;
+		margin: 0;
+		padding: 0 0 0 0.9rem;
+		display: grid;
+		gap: 0.5rem;
+		border-left: 2px solid var(--line);
+	}
+	.tl-entry {
+		position: relative;
+		padding: 0.65rem 0.75rem;
+		border-radius: 10px;
+		background: var(--surface-sunken);
+		border: 1px solid var(--line);
+		display: grid;
+		gap: 0.2rem;
+	}
+	/* The dot on the rail, aligned with the entry's title line. */
+	.tl-entry::before {
+		content: '';
+		position: absolute;
+		left: -1.24rem;
+		top: 0.95rem;
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 999px;
+		background: var(--line-strong);
+		/* Ring in the card colour so the dot punches through the rail cleanly. */
+		border: 2px solid var(--surface);
+		box-sizing: content-box;
+	}
+	.tl-entry.internal {
+		background: #fffdf5;
+		border-color: #f0e6c0;
+	}
+	.tl-entry.internal::before {
+		background: #d4a72c;
+	}
+	.tl-title {
+		font-size: 0.92rem;
+		color: var(--fg);
+	}
+	.tl-head {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.5rem;
+		align-items: baseline;
+	}
+	.tl-tag {
+		flex-shrink: 0;
+		font-size: 0.68rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #9a6700;
+	}
+	.tl-detail {
+		font-size: 0.9rem;
+		color: var(--fg-muted);
+		white-space: pre-wrap;
+	}
+	.tl-meta {
+		font-size: 0.75rem;
+		color: var(--fg-muted);
+	}
+
+	/* Status "Save" stays inert until a different state is picked. The accent is
+	   greyed out (not just dimmed) so "nothing to save" reads without hovering. */
+	.save-status:disabled {
+		cursor: not-allowed;
+		filter: grayscale(1);
+		opacity: 0.5;
+		box-shadow: none;
+		transform: none;
+	}
+
 	.invite-link {
 		width: 100%;
 		text-align: left;
@@ -785,6 +891,20 @@
 	}
 
 	/* Dark theme */
+	:global(:root[data-theme='dark']) .order-shell {
+		/* Sit the canvas *below* the cards in elevation. */
+		background: var(--paper);
+	}
+	:global(:root[data-theme='dark']) .tl-entry.internal {
+		background: #2a2415;
+		border-color: #4a3f22;
+	}
+	:global(:root[data-theme='dark']) .tl-entry.internal::before {
+		background: #e3b341;
+	}
+	:global(:root[data-theme='dark']) .tl-tag {
+		color: #e3b341;
+	}
 	:global(:root[data-theme='dark']) .icon-btn.on {
 		background: #2e2a44;
 		border-color: #4a3f6b;

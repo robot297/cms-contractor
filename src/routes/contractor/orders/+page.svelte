@@ -117,8 +117,6 @@
 	}
 
 	const field = 'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
-	const pill =
-		'padding: 0.4rem 0.75rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.85rem;';
 	const primaryBtn =
 		'padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
 	const iconBtn = 'width: 2.5rem; height: 2.5rem; font-size: 1.7rem;';
@@ -158,36 +156,40 @@
 		>
 	</header>
 
-	<div style="position: relative; align-self: start;">
+	<div class="view-filter">
 		<button
 			type="button"
+			class="view-trigger"
 			aria-expanded={viewMenuOpen}
 			onclick={() => (viewMenuOpen = !viewMenuOpen)}
-			style="{pill} display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600;"
-			>{VIEW_LABELS[view]} ({buckets[view].length}) <span style="color: #8c959f;">▾</span></button
 		>
+			{VIEW_LABELS[view]}
+			<span class="view-count">{buckets[view].length}</span>
+			<span class="view-caret" aria-hidden="true">▾</span>
+		</button>
 		{#if viewMenuOpen}
 			<!-- click-away backdrop -->
 			<button
 				type="button"
 				aria-label="Close filter menu"
 				onclick={() => (viewMenuOpen = false)}
-				style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+				class="menu-scrim"
 			></button>
-			<div
-				style="position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; min-width: 200px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
-			>
+			<div class="view-menu">
 				{#each VIEWS as key (key)}
 					<button
 						type="button"
+						class="view-option"
+						class:selected={view === key}
+						aria-current={view === key}
 						onclick={() => {
 							view = key;
 							viewMenuOpen = false;
 						}}
-						style="{menuItem} {view === key
-							? 'background: #ddf4ff; color: #0969da; font-weight: 700;'
-							: ''}">{VIEW_LABELS[key]} ({buckets[key].length})</button
 					>
+						<span>{VIEW_LABELS[key]}</span>
+						<span class="view-count">{buckets[key].length}</span>
+					</button>
 				{/each}
 			</div>
 		{/if}
@@ -545,6 +547,99 @@
 </dialog>
 
 <style>
+	/* ---------------------------------------------------- Lifecycle filter
+	   Trigger + menu are token-driven (no inline color literals) so light and
+	   dark both come out right instead of relying on the global interception
+	   rules, which left the selected row a bright light-blue on dark. */
+	.view-filter {
+		position: relative;
+		align-self: start;
+	}
+	.view-trigger {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0.4rem 0.8rem;
+		border-radius: 999px;
+		border: 2px solid var(--pop-line);
+		background: var(--surface);
+		color: var(--fg);
+		font-size: 0.85rem;
+		font-weight: 700;
+		cursor: pointer;
+		box-shadow: var(--pop-shadow-sm);
+	}
+	.view-trigger:hover {
+		background: var(--surface-sunken);
+	}
+	.view-caret {
+		color: var(--fg-muted);
+		font-size: 0.75rem;
+	}
+	/* The count sits in its own chip so it reads as metadata, not part of the label. */
+	.view-count {
+		font-size: 0.75rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+		background: var(--surface-sunken);
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		padding: 0.05rem 0.45rem;
+	}
+	.menu-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 10;
+		background: transparent;
+		border: none;
+		cursor: default;
+	}
+	.view-menu {
+		position: absolute;
+		left: 0;
+		top: calc(100% + 6px);
+		z-index: 20;
+		min-width: 210px;
+		display: grid;
+		gap: 0.1rem;
+		padding: 0.25rem;
+		background: var(--surface);
+		border: 1px solid var(--line-strong);
+		border-radius: 12px;
+		box-shadow: var(--card-shadow);
+	}
+	.view-option {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		width: 100%;
+		text-align: left;
+		padding: 0.5rem 0.6rem;
+		border: none;
+		border-radius: 8px;
+		background: none;
+		color: var(--fg);
+		font-size: 0.9rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.view-option:hover {
+		background: var(--surface-sunken);
+	}
+	/* Selected row uses the app's safety-yellow accent — legible in both themes,
+	   unlike the old light-blue wash. */
+	.view-option.selected {
+		background: var(--yellow);
+		color: #14171c;
+		font-weight: 800;
+	}
+	.view-option.selected .view-count {
+		background: rgba(20, 23, 28, 0.12);
+		border-color: rgba(20, 23, 28, 0.25);
+		color: #14171c;
+	}
+
 	/* Active state for a toggle icon button (e.g. the note ✎ while its panel is
 	   open) — a filled accent so it's clearly "on". */
 	.icon-btn.on {

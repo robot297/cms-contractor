@@ -40,6 +40,20 @@
 		editBody = t.body;
 	}
 
+	/**
+	 * Every field on this page is `bind:value`-bound to component state, so the
+	 * form element is a view of that state rather than the source of truth.
+	 * `update()` defaults to calling the native form.reset(), which rewrites the
+	 * DOM inputs without firing `input` events — Svelte never hears about it, and
+	 * the inputs silently drift out of sync with the state driving the preview and
+	 * the dirty checks (it only looked right again after a reload). Opting out of
+	 * the reset keeps the two in agreement; `invalidateAll` still refreshes `data`.
+	 */
+	const keepFields =
+		() =>
+		async ({ update }: { update: (o?: object) => Promise<void> }) =>
+			await update({ reset: false });
+
 	function openCreate() {
 		creating = true;
 		openId = null;
@@ -48,6 +62,23 @@
 		newSubject = '';
 		newBody = '';
 	}
+
+	// Save buttons stay inert until their form actually differs from what's saved,
+	// so an active button always means "there is a pending change".
+	// Trim-compared because the action trims before saving — otherwise a stray
+	// trailing space would leave the button armed forever after a successful save.
+	const signatureDirty = $derived(
+		businessName.trim() !== data.businessName || signature.trim() !== data.signature
+	);
+	const openTemplate = $derived(data.templates.find((t) => t.id === openId) ?? null);
+	const editDirty = $derived(
+		openTemplate != null &&
+			editName.trim() !== '' &&
+			(editName.trim() !== openTemplate.name ||
+				editSubject.trim() !== openTemplate.subject ||
+				editBody.trim() !== openTemplate.body)
+	);
+	const createDirty = $derived(newName.trim() !== '');
 
 	const editPreview = $derived(
 		composeEmail(
@@ -83,7 +114,7 @@
 	<!-- Signature / branding -->
 	<section class="card">
 		<h2>Signature &amp; branding</h2>
-		<form method="POST" action="?/saveSignature" use:enhance class="grid">
+		<form method="POST" action="?/saveSignature" use:enhance={keepFields} class="grid">
 			<label class="field">
 				<span>Business name</span>
 				<input
@@ -109,8 +140,13 @@
 					).body || '—'}</pre>
 			</div>
 			<div class="row-actions">
-				<button type="submit" class="btn primary">Save signature</button>
-				{#if form?.saved === 'signature'}<span class="ok">Saved ✓</span>{/if}
+				<button
+					type="submit"
+					class="btn primary"
+					disabled={!signatureDirty}
+					title={signatureDirty ? 'Save signature' : 'No changes to save'}>Save signature</button
+				>
+				{#if form?.saved === 'signature' && !signatureDirty}<span class="ok">Saved ✓</span>{/if}
 			</div>
 		</form>
 	</section>
@@ -129,7 +165,7 @@
 					action="?/createTemplate"
 					use:enhance={() =>
 						async ({ update, result }) => {
-							await update();
+							await update({ reset: false });
 							if (result.type === 'success') creating = false;
 						}}
 					class="grid"
@@ -169,7 +205,13 @@
 						<p class="err">{form.message}</p>
 					{/if}
 					<div class="row-actions">
-						<button type="submit" class="btn primary">Add template</button>
+						<button
+							type="submit"
+							class="btn primary"
+							disabled={!createDirty}
+							title={createDirty ? 'Add template' : 'Give the template a name first'}
+							>Add template</button
+						>
 						<button type="button" class="btn" onclick={() => (creating = false)}>Cancel</button>
 					</div>
 				</form>
@@ -222,7 +264,16 @@
 								action="?/updateTemplate"
 								use:enhance={() =>
 									async ({ update, result }) => {
-										await update();
+										await update({ reset: false });
+										// Re-seed the buffers from the freshly-loaded row so a
+										// still-open editor (e.g. after a failed save) shows what
+										// is actually stored, not what was typed.
+										const saved = data.templates.find((x) => x.id === t.id);
+										if (saved) {
+											editName = saved.name;
+											editSubject = saved.subject;
+											editBody = saved.body;
+										}
 										if (result.type === 'success') openId = null;
 									}}
 								class="grid"
@@ -248,7 +299,12 @@
 									<pre>{editPreview.body || '—'}</pre>
 								</div>
 								<div class="row-actions">
-									<button type="submit" class="btn primary">Save</button>
+									<button
+										type="submit"
+										class="btn primary"
+										disabled={!editDirty}
+										title={editDirty ? 'Save changes' : 'No changes to save'}>Save</button
+									>
 									<button type="button" class="btn" onclick={() => (openId = null)}>Cancel</button>
 									<span class="spacer"></span>
 									{#if confirmingId === t.id}
@@ -480,26 +536,54 @@
 		font-size: 0.85rem;
 		color: #cf222e;
 	}
+	/* Token-driven in both themes on purpose. A `[data-theme='dark'] .btn` override
+	   would carry higher specificity than `.btn.primary` / `.btn:disabled` and quietly
+	   repaint them in dark mode — which is exactly how the primary lost its colour and
+	   the disabled state lost its fade. Tokens keep one rule per state. */
 	.btn {
 		padding: 0.4rem 0.75rem;
-		border: 1.5px solid #d9dde3;
+		border: 1.5px solid var(--field-border);
 		border-radius: 9px;
-		background: #fff;
-		color: #1f2328;
+		background: var(--surface);
+		color: var(--fg);
 		font-weight: 600;
 		font-size: 0.82rem;
 		cursor: pointer;
+		transition:
+			background 0.12s ease,
+			border-color 0.12s ease,
+			color 0.12s ease;
 	}
-	.btn:hover {
-		background: #f6f8fa;
+	.btn:hover:not(:disabled) {
+		background: var(--surface-sunken);
 	}
+	/* Primary carries the app's safety-yellow accent in both themes rather than an
+	   inverted near-white slab, which read as "lit up" against the dark UI. Yellow
+	   is light in either theme, so its text/border stay pinned dark. */
 	.btn.primary {
-		background: #1f2328;
-		color: #fff;
-		border-color: #1f2328;
+		background: var(--yellow);
+		color: #14171c;
+		border-color: #14171c;
+		box-shadow: var(--pop-shadow-sm);
 	}
-	.btn.primary:hover {
-		background: #000;
+	.btn.primary:hover:not(:disabled) {
+		background: var(--yellow-deep);
+	}
+	/* Nothing to commit → the accent drains away and the button goes flat, faded
+	   and dashed-outlined, so "inert" is obvious at a glance rather than something
+	   you discover by hovering. Listed per-variant so it outranks .btn.primary /
+	   .btn.danger instead of losing on specificity. */
+	.btn:disabled,
+	.btn.primary:disabled,
+	.btn.danger:disabled,
+	.btn.danger-ghost:disabled {
+		cursor: not-allowed;
+		background: transparent;
+		color: var(--fg-muted);
+		border-color: var(--line);
+		border-style: dashed;
+		opacity: 0.7;
+		box-shadow: none;
 	}
 	.btn.danger {
 		background: #cf222e;
@@ -510,7 +594,7 @@
 		color: #cf222e;
 		border-color: #f0c0c4;
 	}
-	.btn.danger-ghost:hover {
+	.btn.danger-ghost:hover:not(:disabled) {
 		background: #fdeff0;
 	}
 	.ok {
@@ -572,20 +656,28 @@
 	:global(:root[data-theme='dark']) .editor {
 		border-top-color: var(--line);
 	}
-	:global(:root[data-theme='dark']) .btn {
+	/* Base .btn, .btn.primary and :disabled need no dark override — they're already
+	   token-driven. The danger variants do, and they carve out :disabled so the
+	   higher-specificity dark rule can't repaint a disabled button. */
+	:global(:root[data-theme='dark']) .btn.danger:not(:disabled) {
+		background: #b8323c;
+		border-color: #b8323c;
+	}
+	:global(:root[data-theme='dark']) .btn.danger-ghost:not(:disabled) {
+		color: #ff8f8a;
+		border-color: #6b2f33;
 		background: var(--surface);
-		border-color: var(--line-strong);
-		color: var(--fg);
 	}
-	:global(:root[data-theme='dark']) .btn:hover {
-		background: var(--surface-sunken);
+	:global(:root[data-theme='dark']) .btn.danger-ghost:hover:not(:disabled) {
+		background: #3a1f22;
 	}
-	:global(:root[data-theme='dark']) .btn.primary {
-		background: #e8ebf0;
-		border-color: #e8ebf0;
-		color: #14171c;
+	:global(:root[data-theme='dark']) .confirm {
+		color: #ff8f8a;
 	}
-	:global(:root[data-theme='dark']) .btn.primary:hover {
-		background: #f4f6fa;
+	:global(:root[data-theme='dark']) .err {
+		color: #ff8f8a;
+	}
+	:global(:root[data-theme='dark']) .ok {
+		color: #4ac26b;
 	}
 </style>
