@@ -8,6 +8,13 @@
 
 	let { data }: { data: PageData } = $props();
 
+	// The server decides whether the guide starts open (nothing due, still something
+	// to learn, not dismissed); the header button overrides that for this visit.
+	// Derived rather than seeded state, so the server's answer stays live across
+	// navigations until the contractor actually clicks.
+	let openOverride = $state<boolean | null>(null);
+	const guideOpen = $derived(openOverride ?? data.guideOpen);
+
 	// Which due card's "send communication" contact menu is open.
 	let contactOpenId: string | null = $state(null);
 	// Which due card's construction-icon picker is open.
@@ -49,21 +56,31 @@
 		style="display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap;"
 	>
 		<h1 class="page-title" style="margin: 0;">Dashboard</h1>
-		<span style="font-size: 0.85rem; color: #57606a;">Follow-ups due ({data.dueOrders.length})</span
-		>
+		<span class="header-right">
+			<span style="font-size: 0.85rem; color: #57606a;"
+				>Follow-ups due ({data.dueOrders.length})</span
+			>
+			<!-- Opens the checklist on demand. Subtle by design: most days there is
+			     nothing to learn and this should read as a footnote, not a feature. -->
+			<button
+				type="button"
+				class="icon-btn guide-btn"
+				aria-expanded={guideOpen}
+				aria-label={guideOpen ? 'Hide getting started' : 'Show getting started'}
+				title="Getting started"
+				onclick={() => (openOverride = !guideOpen)}>?</button
+			>
+		</span>
 	</header>
 
-	<!-- Getting started. Stands in for the empty state while it's showing: a brand-new
-	     contractor and a contractor who has genuinely cleared their queue both land on
-	     "no follow-ups due", and only the first one needs teaching. -->
-	{#if data.guide}
-		<Guide guide={data.guide} />
+	{#if guideOpen}
+		<Guide guide={data.guide} onclose={() => (openOverride = false)} />
 	{/if}
 
 	<!-- Follow-ups due -->
 	<section style="display: grid; gap: 0.5rem;">
 		{#if data.dueOrders.length === 0}
-			{#if !data.guide}
+			{#if !guideOpen}
 				<div
 					style="border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 16px; padding: 1.25rem; text-align: center; color: #57606a;"
 				>
@@ -235,6 +252,22 @@
 </div>
 
 <style>
+	.header-right {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	/* Small round "?" beside the follow-up count. Sizing only — the pressable feel
+	   comes from the global .icon-btn. */
+	.guide-btn {
+		width: 1.6rem;
+		height: 1.6rem;
+		border-radius: 999px;
+		font-size: 0.8rem;
+		font-weight: 800;
+		color: var(--fg-muted);
+	}
+
 	/* The settable order-icon "avatar" is a round icon button: the raised/pressable
 	   feel comes from the global .icon-btn; this only makes it round + sized. */
 	.icon-bubble {

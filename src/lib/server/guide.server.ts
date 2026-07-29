@@ -30,13 +30,12 @@ export function isGuideState(value: string): value is GuideState {
 
 export type GuideStep = {
 	id: 'customer' | 'order' | 'invite' | 'followUp' | 'subcontractor';
+	/** One line. If it needs a paragraph, it isn't a checklist item. */
 	title: string;
-	body: string;
 	done: boolean;
 	/** Where the step is actually performed; absent for the acknowledge-only step. */
 	href?: string;
-	cta?: string;
-	/** Blocked steps explain why instead of linking nowhere. */
+	/** Blocked steps say why in a few words instead of linking nowhere. */
 	blockedBy?: string;
 };
 
@@ -94,47 +93,39 @@ export async function loadGuide(contractorId: string): Promise<Guide> {
 	const core: GuideStep[] = [
 		{
 			id: 'customer',
-			title: 'Add your first customer',
-			body: 'Everything hangs off a customer — their contact details, their jobs, and what they can see.',
+			title: 'Add a customer',
 			done: hasCustomer,
-			href: '/contractor/customers',
-			cta: 'Add a customer'
+			href: '/contractor/customers'
 		},
 		{
 			id: 'order',
 			title: 'Create an order for them',
-			body: 'An order is one job you are doing for that customer, with a status and a timeline.',
 			done: hasOrder,
 			href: '/contractor/orders',
-			cta: 'Create an order',
 			// The order form picks a customer from a dropdown, so this genuinely cannot
 			// be done first — say so rather than sending them to an empty select.
-			blockedBy: hasCustomer ? undefined : 'Add a customer first'
+			blockedBy: hasCustomer ? undefined : 'needs a customer'
 		}
 	];
 
 	const extended: GuideStep[] = [
 		{
 			id: 'invite',
-			title: 'Invite your customer to their portal',
-			body: 'They get a private link to watch the job progress — no account for them to create, no calls asking where things stand.',
+			title: 'Invite them to their portal',
 			done: hasInvite,
-			href: '/contractor/customers',
-			cta: 'Send an invite'
+			href: '/contractor/customers'
 		},
 		{
 			id: 'followUp',
-			title: 'Know how follow-ups work',
-			body: 'Every new order reminds you after three days — that is why your dashboard looks quiet right now. Change the date on the order, or snooze it from the dashboard when it comes due.',
+			// The one line worth spending: it explains why the dashboard looks empty.
+			title: 'New orders remind you in 3 days',
 			done: settings.guideFollowUpAckAt != null
 		},
 		{
 			id: 'subcontractor',
 			title: 'Assign a subcontractor',
-			body: 'Trade partners you assign see the work. Trusted subcontractors get the full order; guest contractors see the job with the customer’s details hidden.',
 			done: hasAssignment,
-			href: '/contractor/subcontractors',
-			cta: 'Add a subcontractor'
+			href: '/contractor/subcontractors'
 		}
 	];
 

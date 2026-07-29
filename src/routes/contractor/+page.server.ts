@@ -13,9 +13,6 @@ function requireContractor(locals: App.Locals) {
 export const load: PageServerLoad = async ({ locals, url }) => {
 	const user = requireContractor(locals);
 	const [orders, guide] = await Promise.all([listContractorOrders(user.id), loadGuide(user.id)]);
-	// ?guide=1 reopens a dismissed guide for this view without rewriting the choice —
-	// the support page links here that way.
-	const showGuide = guide.state !== 'dismissed' || url.searchParams.get('guide') === '1';
 	// Orders whose next follow-up is due, soonest first — the dashboard's default tab.
 	const dueOrders = orders
 		.filter((o) => o.followUpDue)
@@ -36,7 +33,15 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			icon: o.icon,
 			nextFollowUpAt: o.nextFollowUpAt
 		}));
-	return { dueOrders, userName: user.name, guide: showGuide ? guide : null };
+	// The guide always travels with the page so the header button can open it on
+	// demand, but it only opens *itself* when the dashboard would otherwise be bare:
+	// nothing due, still something to learn, and not previously dismissed.
+	const openByDefault =
+		guide.state !== 'dismissed' &&
+		!guide.allDone &&
+		(dueOrders.length === 0 || url.searchParams.get('guide') === '1');
+
+	return { dueOrders, userName: user.name, guide, guideOpen: openByDefault };
 };
 
 export const actions: Actions = {

@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { FEEDBACK_TYPES, feedbackTypeLabel, type FeedbackType } from '$lib/crm';
-	import Guide from '$lib/Guide.svelte';
+	import { FEEDBACK_TYPES, type FeedbackType } from '$lib/crm';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -64,39 +63,28 @@
 
 <div class="wrap">
 	<header>
-		<h1 class="page-title">Support &amp; feedback</h1>
-		<p class="sub">
-			Found a bug or have an idea? Send it straight to our team — it becomes a tracked issue we can
-			follow up on.
-		</p>
+		<h1 class="page-title">Support</h1>
+		<p class="sub">Report a bug or ask for a feature. It goes straight to our team.</p>
 	</header>
-
-	<!-- The guide's permanent home. Shown here in full regardless of whether it's
-	     been dismissed on the dashboard — someone on this page is looking for help. -->
-	<Guide guide={data.guide} variant="support" />
 
 	{#if !data.configured}
 		<div class="notice">
-			<strong>Feedback isn’t set up yet.</strong>
+			<strong>Support isn’t set up yet.</strong>
 			<p>
-				The support form needs a GitHub repository and token configured (<code>GITHUB_REPO</code> /
-				<code>GITHUB_TOKEN</code>). Ask your administrator to add them, then this form will start
-				filing issues.
+				This form needs <code>GITHUB_REPO</code> and <code>GITHUB_TOKEN</code> configured. Ask your administrator
+				to add them.
 			</p>
 		</div>
 	{:else if sent && form?.success}
 		<div class="notice success">
-			<strong
-				>Thanks — your {form.type === 'bug' ? 'bug report' : 'feature request'} is in! 🎉</strong
-			>
+			<strong>Thanks — that’s in. 🎉</strong>
 			<p>
-				We filed it as
+				Filed as
 				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- external GitHub issue URL -->
-				<a href={form.issueUrl} target="_blank" rel="noopener">issue #{form.issueNumber}</a>. You
-				can follow along there.
+				<a href={form.issueUrl} target="_blank" rel="noopener">issue #{form.issueNumber}</a> — follow
+				along there.
 			</p>
-			<button class="btn" type="button" onclick={() => location.reload()}>Send more feedback</button
-			>
+			<button class="btn" type="button" onclick={() => location.reload()}>Send another</button>
 		</div>
 	{:else}
 		<form
@@ -108,13 +96,13 @@
 			class="card"
 		>
 			<fieldset class="type">
-				<legend>What kind of feedback is this?</legend>
+				<legend>What’s this about?</legend>
 				<div class="segmented">
 					{#each FEEDBACK_TYPES as t (t)}
 						<label class:selected={type === t}>
 							<input type="radio" name="type" value={t} bind:group={type} />
 							<span class="emoji">{t === 'bug' ? '🐞' : '💡'}</span>
-							{feedbackTypeLabel(t)}
+							{t === 'bug' ? 'Bug' : 'Feature'}
 						</label>
 					{/each}
 				</div>
@@ -122,26 +110,13 @@
 
 			<label class="field">
 				Summary
-				<input
-					name="title"
-					maxlength="140"
-					placeholder={type === 'bug'
-						? 'e.g. Order status won’t save on mobile'
-						: 'e.g. Let me export orders to CSV'}
-					required
-				/>
+				<input name="title" maxlength="140" placeholder="Short summary" required />
 				{#if fieldErr('title')}<span class="err">{fieldErr('title')}</span>{/if}
 			</label>
 
 			<label class="field">
 				Details
-				<textarea
-					name="detail"
-					rows="6"
-					placeholder={type === 'bug'
-						? 'What happened, what you expected, and steps to reproduce it.'
-						: 'What would you like to do, and what problem would it solve?'}
-					required></textarea>
+				<textarea name="detail" rows="6" required></textarea>
 				{#if fieldErr('detail')}<span class="err">{fieldErr('detail')}</span>{/if}
 			</label>
 
@@ -162,10 +137,8 @@
 			{/if}
 
 			<div class="actions">
-				<button class="btn primary" type="submit">
-					{type === 'bug' ? 'Report bug' : 'Request feature'}
-				</button>
-				<span class="hint">Sent to our team as a tracked issue.</span>
+				<button class="btn primary" type="submit">Send</button>
+				<span class="hint">Goes to our team as a tracked issue.</span>
 			</div>
 		</form>
 	{/if}
