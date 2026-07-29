@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { ORDER_ICONS } from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
+	import Guide from '$lib/Guide.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -52,14 +53,23 @@
 		>
 	</header>
 
+	<!-- Getting started. Stands in for the empty state while it's showing: a brand-new
+	     contractor and a contractor who has genuinely cleared their queue both land on
+	     "no follow-ups due", and only the first one needs teaching. -->
+	{#if data.guide}
+		<Guide guide={data.guide} />
+	{/if}
+
 	<!-- Follow-ups due -->
 	<section style="display: grid; gap: 0.5rem;">
 		{#if data.dueOrders.length === 0}
-			<div
-				style="border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 16px; padding: 1.25rem; text-align: center; color: #57606a;"
-			>
-				You’re all caught up — no follow-ups due.
-			</div>
+			{#if !data.guide}
+				<div
+					style="border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 16px; padding: 1.25rem; text-align: center; color: #57606a;"
+				>
+					You’re all caught up — no follow-ups due.
+				</div>
+			{/if}
 		{:else}
 			{#each data.dueOrders as o (o.id)}
 				<div

@@ -318,6 +318,13 @@ export const contractorSettings = pgTable('contractor_settings', {
 		.references(() => user.id, { onDelete: 'cascade' }),
 	businessName: text('business_name').notNull().default(''),
 	signature: text('signature').notNull().default(''),
+	// Getting-started Guide. Only the contractor's own choice is stored — whether a
+	// step is done is always derived from their real Customers / Orders / Invites /
+	// Assignments. See docs/adr/0004-derive-guide-progress-from-domain-data.md.
+	guideState: text('guide_state').notNull().default('active'),
+	// The one step that can't be derived: every Order is born with a 3-day follow-up,
+	// so "has a follow-up" would tick itself. This step teaches and is acknowledged.
+	guideFollowUpAckAt: timestamp('guide_follow_up_ack_at'),
 	createdAt: timestamp('created_at').defaultNow().notNull(),
 	updatedAt: timestamp('updated_at')
 		.defaultNow()

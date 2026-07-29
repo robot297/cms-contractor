@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { formatLocation, isOrderIcon, isSnoozePreset } from '$lib/crm';
 import { listContractorOrders, setOrderIcon, snoozeFollowUp } from '$lib/server/crm.server';
+import { ackGuideFollowUp, loadGuide, setGuideState } from '$lib/server/guide.server';
 import type { Actions, PageServerLoad } from './$types';
 
 function requireContractor(locals: App.Locals) {
@@ -9,9 +10,12 @@ function requireContractor(locals: App.Locals) {
 	return locals.user;
 }
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
 	const user = requireContractor(locals);
-	const orders = await listContractorOrders(user.id);
+	const [orders, guide] = await Promise.all([listContractorOrders(user.id), loadGuide(user.id)]);
+	// ?guide=1 reopens a dismissed guide for this view without rewriting the choice —
+	// the support page links here that way.
+	const showGuide = guide.state !== 'dismissed' || url.searchParams.get('guide') === '1';
 	// Orders whose next follow-up is due, soonest first — the dashboard's default tab.
 	const dueOrders = orders
 		.filter((o) => o.followUpDue)
@@ -32,10 +36,31 @@ export const load: PageServerLoad = async ({ locals }) => {
 			icon: o.icon,
 			nextFollowUpAt: o.nextFollowUpAt
 		}));
-	return { dueOrders, userName: user.name };
+	return { dueOrders, userName: user.name, guide: showGuide ? guide : null };
 };
 
 export const actions: Actions = {
+	/** Guide: keep going into the optional steps. */
+	guideContinue: async ({ locals }) => {
+		const user = requireContractor(locals);
+		await setGuideState(user.id, 'extended');
+		return { success: true };
+	},
+
+	/** Guide: put it away. Reopenable from the support page. */
+	guideDismiss: async ({ locals }) => {
+		const user = requireContractor(locals);
+		await setGuideState(user.id, 'dismissed');
+		return { success: true };
+	},
+
+	/** Guide: the follow-up step teaches rather than asks — mark it read. */
+	guideAckFollowUp: async ({ locals }) => {
+		const user = requireContractor(locals);
+		await ackGuideFollowUp(user.id);
+		return { success: true };
+	},
+
 	setOrderIcon: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();

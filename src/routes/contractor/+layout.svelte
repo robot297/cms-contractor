@@ -2,26 +2,18 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
+	import { theme } from '$lib/theme.svelte';
 	import type { LayoutData } from './$types';
 	import type { Snippet } from 'svelte';
 
 	let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
-	// Light / dark theme. The initial value is applied pre-paint in app.html; here we
-	// just read it back and let the toggle flip <html data-theme> + persist the choice.
-	let theme = $state<'light' | 'dark'>('light');
+	// Light / dark theme lives in a shared store, since the signed-out pages carry
+	// their own toggle too. The nav keeps its own chrome for the button — it sits on
+	// the dark bar, not on the page surface — but the state and persistence are shared.
 	onMount(() => {
-		theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+		theme.sync();
 	});
-	function toggleTheme() {
-		theme = theme === 'dark' ? 'light' : 'dark';
-		document.documentElement.dataset.theme = theme;
-		try {
-			localStorage.setItem('theme', theme);
-		} catch {
-			/* storage may be unavailable (private mode) — the toggle still works for the session */
-		}
-	}
 
 	const path = $derived(page.url.pathname);
 	const onDashboard = $derived(path === '/contractor');
@@ -78,19 +70,19 @@
 	});
 </script>
 
-<div style="min-height: 100dvh; display: flex; flex-direction: column;">
-	<div style="background: #111;">
+<div class="shell" style="min-height: 100dvh; display: flex; flex-direction: column;">
+	<div class="bar">
 		<nav class="nav">
 			<a href={resolve('/')} class="brand">🛠 Contractor&nbsp;CRM</a>
 
 			<button
 				type="button"
 				class="theme-toggle"
-				title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-				aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-				onclick={toggleTheme}
+				title={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+				aria-label={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+				onclick={() => theme.toggle()}
 			>
-				{#if theme === 'dark'}
+				{#if theme.current === 'dark'}
 					<svg
 						width="20"
 						height="20"
@@ -181,6 +173,45 @@
 					>
 				</div>
 				<div class="nav-right">
+					<!-- Mobile/tablet home for the theme toggle: the bar's icon button is
+					     hidden at this width. Icon-only, with the label carried by aria so it
+					     costs a square instead of a row. Same shared store as the bar's. -->
+					<button
+						type="button"
+						class="theme-row"
+						title={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+						aria-label={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+						onclick={() => theme.toggle()}
+					>
+						{#if theme.current === 'dark'}
+							<svg
+								width="18"
+								height="18"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<circle cx="12" cy="12" r="4.5" />
+								<path
+									d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+								/>
+							</svg>
+						{:else}
+							<svg
+								width="18"
+								height="18"
+								viewBox="0 0 24 24"
+								fill="currentColor"
+								aria-hidden="true"
+							>
+								<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+							</svg>
+						{/if}
+					</button>
 					<span class="username">{data.userName}</span>
 					<form method="POST" action="/logout">
 						<button type="submit" class="signout">Sign out</button>
@@ -197,20 +228,64 @@
 
 	<footer>
 		<div class="hazard"></div>
-		<div style="background: #111;">
+		<div class="bar">
 			<div
 				style="max-width: 860px; margin: 0 auto; padding: 1.25rem 1rem; display: flex; align-items: center; justify-content: center; gap: 1rem; flex-wrap: wrap;"
 			>
-				<span
-					style="font-size: 0.75rem; color: #fff; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;"
-					>© {year} · Built for those who do</span
-				>
+				<!-- Class, not an inline colour: the footer text has to follow the bar. -->
+				<span class="foot-text">© {year} · Built for those who do</span>
 			</div>
 		</div>
 	</footer>
 </div>
 
 <style>
+	/* The nav bar and footer bar. Every piece of chrome on them — the rail, the hover
+	   washes, the glassy utility buttons, the mobile menu — was authored as white ink
+	   on a black bar. These tokens carry that whole treatment so the bars can follow
+	   the theme: ink-on-light in light, light-on-dark in dark. The yellow active pill
+	   and the red sign-out are the exceptions; both already read on either bar. */
+	.shell {
+		--bar-bg: var(--surface);
+		--bar-line: var(--line);
+		--bar-fg: var(--fg);
+		--bar-fg-dim: rgba(31, 35, 40, 0.66);
+		--bar-edge: rgba(17, 17, 17, 0.16);
+		--bar-wash: rgba(17, 17, 17, 0.05);
+		--bar-wash-strong: rgba(17, 17, 17, 0.1);
+		--bar-rail-bg: linear-gradient(180deg, rgba(17, 17, 17, 0.06), rgba(17, 17, 17, 0.02));
+		/* The inset top highlight only reads on a dark bar. */
+		--bar-inset-hi: transparent;
+		/* Pop-art wordmark, inverted per theme: ink on yellow in light, yellow on ink
+		   in dark. Yellow type on a white bar would be unreadable. */
+		--brand-fg: #14171c;
+		--brand-shadow: 2px 2px 0 var(--yellow);
+		--brand-fg-hover: #000000;
+	}
+	.bar {
+		background: var(--bar-bg);
+		border-block: 1px solid var(--bar-line);
+	}
+	.foot-text {
+		font-size: 0.75rem;
+		color: var(--bar-fg-dim);
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	:global(:root[data-theme='dark']) .shell {
+		--bar-fg: #ffffff;
+		--bar-fg-dim: rgba(255, 255, 255, 0.72);
+		--bar-edge: rgba(255, 255, 255, 0.14);
+		--bar-wash: rgba(255, 255, 255, 0.06);
+		--bar-wash-strong: rgba(255, 255, 255, 0.14);
+		--bar-rail-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+		--bar-inset-hi: rgba(255, 255, 255, 0.07);
+		--brand-fg: var(--yellow);
+		--brand-shadow: 2px 2px 0 #000;
+		--brand-fg-hover: #ffffff;
+	}
+
 	.nav {
 		position: relative;
 		/* Full-width bar: brand hugs the left, user/sign-out the right, so the
@@ -228,13 +303,13 @@
 		font-weight: 900;
 		text-transform: uppercase;
 		letter-spacing: 0.02em;
-		color: #ffcc00;
-		text-shadow: 2px 2px 0 #000;
+		color: var(--brand-fg);
+		text-shadow: var(--brand-shadow);
 		text-decoration: none;
 		flex-shrink: 0;
 	}
 	.brand:hover {
-		color: #fff;
+		color: var(--brand-fg-hover);
 	}
 	/* Desktop: links sit next to the brand, user/sign-out pushed to the right. */
 	.nav-collapse {
@@ -255,9 +330,9 @@
 		flex-wrap: nowrap;
 		padding: 0.25rem;
 		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+		border: 1px solid var(--bar-edge);
+		background: var(--bar-rail-bg);
+		box-shadow: inset 0 1px 0 var(--bar-inset-hi);
 	}
 	.nav-right {
 		display: flex;
@@ -327,14 +402,14 @@
 		text-transform: uppercase;
 		letter-spacing: 0.02em;
 		white-space: nowrap;
-		color: rgba(255, 255, 255, 0.72);
+		color: var(--bar-fg-dim);
 		transition:
 			color 0.2s ease,
 			background 0.2s ease;
 	}
 	.navlink:hover {
-		color: #fff;
-		background: rgba(255, 255, 255, 0.08);
+		color: var(--bar-fg);
+		background: var(--bar-wash-strong);
 	}
 	/* Dark type once the yellow pill is underneath. Pinned, not var(--ink): yellow
 	   stays light in both themes, so its label must always be dark. */
@@ -364,29 +439,61 @@
 
 	.username {
 		font-size: 0.8rem;
-		color: #fff;
+		color: var(--bar-fg);
 		font-weight: 700;
 	}
 	.signout {
-		padding: 0.4rem 0.9rem;
+		padding: 0.32rem 0.8rem;
 		border-radius: 999px;
-		border: 2px solid #e5534b;
+		border: 1.5px solid #e5534b;
 		background: #cf222e;
 		color: #fff;
 		cursor: pointer;
 		font-weight: 800;
 		text-transform: uppercase;
-		font-size: 0.8rem;
+		font-size: 0.72rem;
+		letter-spacing: 0.02em;
 	}
 	.signout:hover {
 		background: #b3202a;
 		border-color: #b3202a;
 	}
 
+	/* The theme toggle inside the collapsed menu. Icon-only square, not a full-width
+	   row — the label lives in aria-label/title. Hidden until the bar collapses (see
+	   the max-width: 1024px block). */
+	.theme-row {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		flex: none;
+		width: 2.4rem;
+		height: 2.4rem;
+		padding: 0;
+		border: none;
+		border-radius: 8px;
+		background: none;
+		color: var(--bar-fg-dim);
+		cursor: pointer;
+		transition: color 0.16s ease;
+	}
+	.theme-row:hover {
+		color: var(--bar-fg);
+	}
+	.theme-row:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+	}
+	.theme-row svg {
+		display: block;
+		flex: none;
+	}
+
 	/* Nav utility buttons (theme toggle + hamburger) share a soft, tactile chrome:
 	   a faint glassy fill, hairline border, and a lift-on-hover with a warm glow. */
-	.hamburger,
-	.theme-toggle {
+	/* The hamburger keeps its tactile chrome — it's the control that opens a whole
+	   menu, so it should look pressable. */
+	.hamburger {
 		display: none;
 		align-items: center;
 		justify-content: center;
@@ -394,41 +501,59 @@
 		height: 2.6rem;
 		padding: 0;
 		flex-shrink: 0;
-		border: 1.5px solid rgba(255, 255, 255, 0.22);
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
-		color: #fff;
+		border: 1.5px solid var(--bar-edge);
+		background: var(--bar-rail-bg);
+		color: var(--bar-fg);
 		border-radius: 12px;
 		cursor: pointer;
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		box-shadow: inset 0 1px 0 var(--bar-inset-hi);
 		transition:
 			background 0.16s ease,
 			border-color 0.16s ease,
 			transform 0.12s ease,
 			box-shadow 0.16s ease;
 	}
-	.theme-toggle {
-		display: inline-flex;
-	}
-	.hamburger:hover,
-	.theme-toggle:hover {
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.09));
+	.hamburger:hover {
+		background: var(--bar-wash-strong);
 		border-color: rgba(255, 204, 0, 0.75);
 		transform: translateY(-1px);
-		box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+		box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
 	}
-	.hamburger:active,
-	.theme-toggle:active {
+	.hamburger:active {
 		transform: translateY(0) scale(0.95);
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		box-shadow: inset 0 1px 0 var(--bar-inset-hi);
+	}
+
+	/* The theme toggle is just its icon — no fill, no border, no shadow. It keeps a
+	   full-size hit area so it stays easy to tap, and only the icon colour responds.
+	   (It and the hamburger are never on screen together: the bar's toggle is hidden
+	   at the width where the hamburger appears.) */
+	.theme-toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.4rem;
+		height: 2.4rem;
+		padding: 0;
+		flex-shrink: 0;
+		border: none;
+		background: none;
+		box-shadow: none;
+		border-radius: 8px;
+		color: var(--bar-fg-dim);
+		cursor: pointer;
+		transition: color 0.16s ease;
+	}
+	.theme-toggle:hover {
+		color: var(--bar-fg);
+	}
+	.theme-toggle:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
 	}
 	.hamburger svg,
 	.theme-toggle svg {
 		display: block;
-		transition: transform 0.25s ease;
-	}
-	/* A little life: the theme icon eases as you hover. */
-	.theme-toggle:hover svg {
-		transform: rotate(-18deg) scale(1.05);
 	}
 
 	/* Hide the signed-in name below wide desktop — it only crowds the bar and the
@@ -445,8 +570,12 @@
 		.hamburger {
 			display: inline-flex;
 		}
-		/* Push the toggle to the right so it groups next to the hamburger. */
+		/* The bar's toggle moves into the menu at this width (see .theme-row), so the
+		   hamburger takes over pushing itself to the right edge. */
 		.theme-toggle {
+			display: none;
+		}
+		.hamburger {
 			margin-left: auto;
 		}
 		/* Overlay panel: absolutely positioned so it floats over the page
@@ -461,7 +590,7 @@
 			align-items: stretch;
 			gap: 0.4rem;
 			padding: 0.75rem 1rem 1rem;
-			background: #111;
+			background: var(--bar-bg);
 			box-shadow: 0 14px 28px rgba(0, 0, 0, 0.4);
 			opacity: 0;
 			visibility: hidden;
@@ -500,8 +629,8 @@
 			font-size: 0.95rem;
 			font-weight: 700;
 			border-radius: 10px;
-			background: rgba(255, 255, 255, 0.06);
-			color: #fff;
+			background: var(--bar-wash);
+			color: var(--bar-fg);
 			padding: 0.7rem 0.9rem;
 		}
 		.navlink.is-active,
@@ -510,23 +639,29 @@
 			color: #14171c;
 			box-shadow: none;
 		}
+		/* One compact line rather than a stack of full-width blocks: name on the left,
+		   theme icon and sign-out on the right. */
 		.nav-right {
-			flex-direction: column;
-			align-items: stretch;
+			flex-direction: row;
+			align-items: center;
+			justify-content: space-between;
 			gap: 0.5rem;
 			margin-top: 0.35rem;
 			padding-top: 0.7rem;
-			border-top: 1px solid #2a2a2a;
+			border-top: 1px solid var(--bar-edge);
 		}
 		.username {
 			padding: 0 0.2rem;
+			margin-right: auto;
+		}
+		.theme-row {
+			display: inline-flex;
 		}
 		.signout {
-			width: 100%;
 			text-transform: none;
-			font-size: 0.95rem;
-			border-radius: 10px;
-			padding: 0.7rem 0.9rem;
+			font-size: 0.85rem;
+			border-radius: 999px;
+			padding: 0.4rem 0.9rem;
 		}
 	}
 </style>

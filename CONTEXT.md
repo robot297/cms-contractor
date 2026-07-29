@@ -49,6 +49,10 @@ A Contractor's private, searchable list of their own Customers, independent of w
 A unit of tracked work a Contractor performs for a Customer, with a lifecycle state and a timeline. Links to one Customer.
 _Avoid_: Project (used in older business proposal), job, ticket.
 
+**Guide**:
+The getting-started checklist a Contractor sees on their dashboard, walking them along the path the product requires anyway: add a Customer, create an Order for them, then optionally invite that Customer to their portal, learn how follow-ups work, and assign a Subcontractor. A Guide is _active_ until the Contractor says otherwise; completing the first two steps offers a fork — _extended_ (show the remaining steps) or _dismissed_. Only that choice is remembered; whether a step is done is always read back from the Contractor's real Customers, Orders, Invites and Assignments, so the Guide can never disagree with the account it describes. The single exception is the follow-up step, which teaches rather than asks and is completed by acknowledgement.
+_Avoid_: Onboarding (ambiguous with signup and with the Invite flow), tour, wizard, walkthrough.
+
 ## Relationships
 
 - A **Contractor** owns many **Customers** (contractor-scoped).
@@ -61,6 +65,8 @@ _Avoid_: Project (used in older business proposal), job, ticket.
 - A **Subcontractor** links to at most one **User** account (set when it accepts a **Subcontractor Invite**), and a **User** holds one global role — so a login is never both a Customer and a Subcontractor.
 - A **Subcontractor** is assigned to many **Orders**, and an **Order** may have many assigned **Subcontractors** (**Assignment**).
 - A Subcontractor's **Tier** (Trusted Subcontractor vs Guest Contractor) determines what they see and whether they can write on their assigned **Orders**.
+- Every **Contractor** has exactly one **Guide**, and only Contractors have one — **Customers** and **Subcontractors** arrive by **Invite** into their own portals and never see it.
+- A **Guide**'s steps are derived from the Contractor's own **Customers**, **Orders**, **Invites** and **Assignments**; only the Contractor's continue-or-dismiss choice is stored.
 
 ## Example dialogue
 

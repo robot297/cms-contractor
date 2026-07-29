@@ -214,9 +214,13 @@ h1.page-title {
 	color: var(--muted);
 }
 
+/* Text selection. The label is pinned dark rather than var(--ink): --ink flips to
+   near-white in dark mode, which painted white-on-yellow — unreadable, and worst
+   inside form fields where selection is used constantly. Yellow is light in both
+   themes, so its text is always dark. */
 ::selection {
 	background: var(--yellow);
-	color: var(--ink);
+	color: #14171c;
 }
 
 /* ------------------------------------------------------------ Buttons */

@@ -125,7 +125,12 @@ async function seedDemoData(contractorId: string): Promise<void> {
 	await db.insert(contractorSettings).values({
 		contractorId,
 		businessName: 'Summit Structures',
-		signature: 'Thanks so much,\n{{contractor}}\n(555) 200-0100'
+		signature: 'Thanks so much,\n{{contractor}}\n(555) 200-0100',
+		// The demo arrives with customers, orders and invites already seeded, so every
+		// guide step would show pre-ticked — a "get started" card with nothing to do.
+		// Suppress it here rather than special-casing demo mode in the UI; the support
+		// page still has it for anyone curious.
+		guideState: 'dismissed'
 	});
 
 	const idByKey = new Map<string, string>();

@@ -10,9 +10,10 @@
 	// Social-share (Open Graph / Twitter) card defaults for the whole site. Pages
 	// keep their own <title>; these give a nice preview when a link is shared.
 	const SITE_NAME = 'Contractor CRM';
-	const OG_TITLE = 'Contractor CRM — run every job from lead to last invoice';
+	const OG_TITLE = 'Contractor CRM — manage client relationships with ease';
 	const OG_DESCRIPTION =
-		'A CRM built for contractors: customers, orders, subcontractors, and follow-ups tracked from first inquiry to final invoice.';
+		'Simple, powerful contractor enablement. Focus more on your projects and less on the tedium.';
+	const OG_IMAGE_ALT = 'Contractor CRM — manage client relationships with ease';
 
 	const origin = $derived(data.canonicalOrigin);
 	const ogImage = $derived(`${origin}/og.png`);
@@ -29,19 +30,20 @@
 	<meta property="og:description" content={OG_DESCRIPTION} />
 	<meta property="og:url" content={ogUrl} />
 	<meta property="og:image" content={ogImage} />
+	<!-- Apple's link presentation drops the card if the image isn't advertised over
+	     https, so the secure URL is declared explicitly rather than inferred. -->
+	<meta property="og:image:secure_url" content={ogImage} />
 	<meta property="og:image:type" content="image/png" />
 	<meta property="og:image:width" content="1200" />
 	<meta property="og:image:height" content="630" />
-	<meta
-		property="og:image:alt"
-		content="Contractor CRM — run every job from lead to last invoice"
-	/>
+	<meta property="og:image:alt" content={OG_IMAGE_ALT} />
 
 	<!-- Twitter / X large-image card -->
 	<meta name="twitter:card" content="summary_large_image" />
 	<meta name="twitter:title" content={OG_TITLE} />
 	<meta name="twitter:description" content={OG_DESCRIPTION} />
 	<meta name="twitter:image" content={ogImage} />
+	<meta name="twitter:image:alt" content={OG_IMAGE_ALT} />
 </svelte:head>
 
 {@render children()}

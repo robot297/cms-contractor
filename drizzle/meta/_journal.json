@@ -78,6 +78,13 @@
       "when": 1784993341266,
       "tag": "0010_stale_starfox",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785290067806,
+      "tag": "0011_kind_the_hood",
+      "breakpoints": true
     }
   ]
 }

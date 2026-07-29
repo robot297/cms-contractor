@@ -8,5 +8,15 @@ import type { LayoutServerLoad } from './$types';
  * to the request origin — mirroring how auth resolves its base URL.
  */
 export const load: LayoutServerLoad = ({ url }) => {
-	return { canonicalOrigin: env.ORIGIN ?? url.origin };
+	const origin = env.ORIGIN ?? url.origin;
+
+	// Behind a TLS-terminating proxy without ORIGIN set, url.origin comes back as
+	// http://… — and Apple's link presentation (iMessage, Messages on macOS) will
+	// silently drop a card whose image is insecure. Localhost stays as-is so local
+	// dev doesn't advertise an https URL it can't serve.
+	const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(origin);
+
+	return {
+		canonicalOrigin: isLocal ? origin : origin.replace(/^http:\/\//, 'https://')
+	};
 };

@@ -1,12 +1,67 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
+	import ThemeToggle from '$lib/ThemeToggle.svelte';
 	import type { PageData } from './$types';
+	import 'lenis/dist/lenis.css';
+
+	// Self-hosted (no CDN request at runtime). Archivo Black carries the display
+	// type, Inter everything else; see .landing for where each is applied.
+	import '@fontsource/archivo-black/400.css';
+	import '@fontsource/inter/400.css';
+	import '@fontsource/inter/500.css';
+	import '@fontsource/inter/600.css';
+	import '@fontsource/inter/700.css';
 
 	let { data }: { data: PageData } = $props();
 	let demoLoading = $state(false);
 
 	const year = new Date().getFullYear();
+
+	// Smooth scroll + on-scroll reveals. Both are opt-in enhancements: neither runs
+	// under prefers-reduced-motion, and `revealReady` stays false until the observer
+	// is actually wired up so a no-JS visitor never gets a page of invisible cards.
+	let revealReady = $state(false);
+
+	onMount(() => {
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+		let lenis: { raf: (t: number) => void; destroy: () => void } | undefined;
+		let frame = 0;
+		let cancelled = false;
+
+		// Dynamic import so Lenis lands in its own chunk instead of the initial payload.
+		import('lenis').then(({ default: Lenis }) => {
+			if (cancelled) return;
+			lenis = new Lenis({ duration: 1.05, wheelMultiplier: 0.9 });
+			const loop = (time: number) => {
+				lenis?.raf(time);
+				frame = requestAnimationFrame(loop);
+			};
+			frame = requestAnimationFrame(loop);
+		});
+
+		const observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					if (!entry.isIntersecting) continue;
+					entry.target.classList.add('in');
+					observer.unobserve(entry.target); // reveal once, not on every pass
+				}
+			},
+			{ rootMargin: '0px 0px -12% 0px', threshold: 0.15 }
+		);
+		for (const el of document.querySelectorAll('.reveal')) observer.observe(el);
+		revealReady = true;
+
+		return () => {
+			cancelled = true;
+			if (frame) cancelAnimationFrame(frame);
+			lenis?.destroy();
+			observer.disconnect();
+		};
+	});
 
 	const features = [
 		{
@@ -28,23 +83,25 @@
 </script>
 
 <svelte:head>
-	<title>Contractor CRM — run every job from lead to last invoice</title>
+	<title>Contractor CRM — manage client relationships with ease</title>
 	<meta
 		name="description"
-		content="A CRM built for contractors: customers, orders, subcontractors, and follow-ups tracked from first inquiry to final invoice."
+		content="Simple, powerful contractor enablement. Focus more on your projects and less on the tedium."
 	/>
 </svelte:head>
 
-<div class="landing">
+<ThemeToggle />
+
+<div class="landing" class:reveal-ready={revealReady}>
 	<!-- Hero -->
 	<section class="hero">
 		<div class="hero-inner">
 			<h1 class="headline">
-				Run every job from<br /><span class="accent">lead to last invoice.</span>
+				Manage client relationships<br /><span class="accent">with ease.</span>
 			</h1>
 			<p class="subhead">
-				Customers, orders, subcontractors, and follow-ups — tracked in one calm workspace built for
-				the job site, not the boardroom.
+				Simple, powerful contractor enablement — customers, orders, subcontractors and follow-ups in
+				one place, so you spend your day on projects instead of tedium.
 			</p>
 
 			<div class="cta-row">
@@ -65,6 +122,7 @@
 						</button>
 					</form>
 				{/if}
+				<a class="btn ghost" href={resolve('/pricing')}>Pricing</a>
 				<a class="btn ghost" href={resolve('/login')}>Sign in</a>
 			</div>
 		</div>
@@ -73,11 +131,12 @@
 	<!-- Features -->
 	<section class="features">
 		<div class="features-inner">
-			<h2 class="section-title">Everything a working contractor actually needs</h2>
-			<p class="section-sub">Focused tools, none of the enterprise bloat.</p>
+			<h2 class="section-title reveal">Everything a working contractor actually needs</h2>
+			<p class="section-sub reveal">Focused tools, none of the enterprise bloat.</p>
 			<div class="grid">
-				{#each features as f (f.title)}
-					<article class="card">
+				{#each features as f, i (f.title)}
+					<article class="card reveal" style="--reveal-delay: {i * 90}ms">
+						<span class="card-num">{String(i + 1).padStart(2, '0')}</span>
 						<div class="card-icon">{f.icon}</div>
 						<h3 class="card-title">{f.title}</h3>
 						<p class="card-body">{f.body}</p>
@@ -89,7 +148,7 @@
 
 	<!-- Closing CTA -->
 	<section class="closing">
-		<div class="closing-inner">
+		<div class="closing-inner reveal">
 			<h2 class="closing-title">Ready to build?</h2>
 			<p class="closing-sub">Take the full app for a spin with sample customers and orders.</p>
 			{#if data.demoEnabled}
@@ -111,6 +170,10 @@
 			{:else}
 				<a class="btn primary lg" href={resolve('/login')}>Get started →</a>
 			{/if}
+
+			<div class="closing-secondary">
+				<a class="btn ghost" href={resolve('/pricing')}>View pricing</a>
+			</div>
 		</div>
 	</section>
 
@@ -131,9 +194,38 @@
 		box-sizing: border-box;
 	}
 	.landing {
-		font-family: 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif;
-		color: #1f2328;
-		background: #fff;
+		/* Type. Archivo Black is a single-weight display face (400 IS its black), so
+		   --display-weight stays at 400 rather than the 800 the old stack used. */
+		--font-display: 'Archivo Black', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+		--font-body: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+		--display-weight: 400;
+		--display-tracking: -0.02em;
+
+		/* Local surface tokens so the dark values sit in one block at the bottom
+		   instead of a [data-theme='dark'] twin for every rule below. The hero and
+		   footer are dark by design in both themes, so they stay literal. */
+		--panel: var(--surface);
+		--panel-line: var(--line);
+		--icon-wash: #f3eeff;
+
+		/* Hero. It used to be dark in both themes; now it follows the theme, which
+		   means the accent needs two treatments — see .accent below. */
+		--hero-bg:
+			radial-gradient(1200px 600px at 70% -10%, rgba(255, 204, 0, 0.4), transparent 60%),
+			radial-gradient(900px 500px at 0% 110%, rgba(139, 92, 246, 0.16), transparent 55%),
+			linear-gradient(180deg, #ffffff 0%, #f5f6f8 100%);
+		--hero-fg: var(--fg);
+		--hero-sub: rgba(31, 35, 40, 0.7);
+		--accent-fg: #14171c;
+		--accent-bg: var(--yellow);
+		--ghost-bg: rgba(17, 17, 17, 0.04);
+		--ghost-bg-hover: rgba(17, 17, 17, 0.09);
+		--ghost-fg: var(--fg);
+		--ghost-line: rgba(17, 17, 17, 0.25);
+
+		font-family: var(--font-body);
+		color: var(--fg);
+		background: var(--surface);
 		min-height: 100dvh;
 		overflow-x: hidden;
 	}
@@ -146,42 +238,26 @@
 		align-items: center;
 		justify-content: center;
 		padding: 6rem clamp(1rem, 5vw, 3rem) 4rem;
-		background:
-			radial-gradient(1200px 600px at 70% -10%, rgba(255, 204, 0, 0.16), transparent 60%),
-			radial-gradient(900px 500px at 0% 110%, rgba(139, 92, 246, 0.16), transparent 55%),
-			linear-gradient(180deg, #16181d 0%, #101216 100%);
+		background: var(--hero-bg);
 		overflow: hidden;
-	}
-	/* Thin job-site accent line at the very top. */
-	.hero::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		height: 4px;
-		background: repeating-linear-gradient(
-			-45deg,
-			#ffcc00 0,
-			#ffcc00 14px,
-			#111 14px,
-			#111 28px
-		);
 	}
 	.hero-inner {
 		position: relative;
 		max-width: 780px;
 		text-align: center;
-		color: #fff;
+		color: var(--hero-fg);
 	}
 	.headline {
 		margin: 0;
+		font-family: var(--font-display);
 		font-size: clamp(2.2rem, 6vw, 3.6rem);
-		line-height: 1.05;
-		font-weight: 800;
-		letter-spacing: -0.03em;
+		/* Leading has to clear the accent line's highlight box — at 1.05 the yellow
+		   marker on line two overlapped the descenders of line one. */
+		line-height: 1.22;
+		font-weight: var(--display-weight);
+		letter-spacing: var(--display-tracking);
 		text-transform: none;
-		color: #fff;
+		color: var(--hero-fg);
 		/* Opt out of the global chunky-yellow h1 treatment. */
 		display: block;
 		background: none;
@@ -190,15 +266,26 @@
 		box-shadow: none;
 		padding: 0;
 	}
+	/* Yellow type is unreadable on the light hero, so light mode marks the accent
+	   line with a yellow highlight and dark type instead — the same yellow-behind-
+	   dark-text lockup the app uses everywhere. Dark mode keeps it as yellow type. */
+	/* The highlight is drawn as a padded inline box, so its height is set by the
+	   font's line box — keep the vertical padding small and let .headline's leading
+	   provide the breathing room, otherwise it grows into the line above. */
 	.headline .accent {
-		color: #ffcc00;
+		color: var(--accent-fg);
+		background: var(--accent-bg);
+		padding: 0.02em 0.16em;
+		border-radius: 10px;
+		box-decoration-break: clone;
+		-webkit-box-decoration-break: clone;
 	}
 	.subhead {
 		margin: 1.2rem auto 0;
 		max-width: 34rem;
 		font-size: clamp(1rem, 2.3vw, 1.18rem);
 		line-height: 1.55;
-		color: rgba(255, 255, 255, 0.72);
+		color: var(--hero-sub);
 		font-weight: 400;
 	}
 	.cta-row {
@@ -248,12 +335,12 @@
 		cursor: default;
 	}
 	.btn.ghost {
-		background: rgba(255, 255, 255, 0.06);
-		color: #fff;
-		border-color: rgba(255, 255, 255, 0.22);
+		background: var(--ghost-bg);
+		color: var(--ghost-fg);
+		border-color: var(--ghost-line);
 	}
 	.btn.ghost:hover {
-		background: rgba(255, 255, 255, 0.14);
+		background: var(--ghost-bg-hover);
 	}
 	.btn.lg {
 		padding: 0.95rem 1.9rem;
@@ -263,8 +350,8 @@
 	/* ---------- Features ---------- */
 	.features {
 		padding: clamp(3.5rem, 8vw, 6rem) clamp(1rem, 5vw, 3rem);
-		background: #fafafa;
-		border-bottom: 1px solid #eee;
+		background: var(--surface-sunken);
+		border-bottom: 1px solid var(--line);
 	}
 	.features-inner {
 		max-width: 1080px;
@@ -273,16 +360,18 @@
 	.section-title {
 		margin: 0;
 		text-align: center;
+		font-family: var(--font-display);
 		font-size: clamp(1.5rem, 3.5vw, 2.1rem);
-		font-weight: 800;
-		letter-spacing: -0.02em;
+		line-height: 1.2;
+		font-weight: var(--display-weight);
+		letter-spacing: var(--display-tracking);
 		text-transform: none;
-		color: #1f2328;
+		color: var(--fg);
 	}
 	.section-sub {
 		margin: 0.6rem 0 2.5rem;
 		text-align: center;
-		color: #6b7280;
+		color: var(--fg-muted);
 		font-size: 1.05rem;
 	}
 	.grid {
@@ -290,20 +379,51 @@
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 		gap: 1.1rem;
 	}
+	/* Sticker card, same family as the buttons: hard outline, hard offset shadow,
+	   and a press-in lift on hover. The yellow rule across the top only paints on
+	   hover, so a row of cards stays calm until you point at one. */
 	.card {
-		background: #fff;
-		border: 1px solid #ececf0;
+		position: relative;
+		overflow: hidden;
+		background: var(--panel);
+		border: 2.5px solid var(--pop-line);
 		border-radius: 16px;
-		padding: 1.5rem;
+		padding: 1.6rem 1.5rem 1.5rem;
+		box-shadow: var(--pop-shadow-sm);
 		transition:
-			transform 0.15s ease,
-			box-shadow 0.15s ease,
-			border-color 0.15s ease;
+			transform 0.12s ease,
+			box-shadow 0.12s ease;
+	}
+	.card::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 5px;
+		background: var(--yellow);
+		transform: scaleX(0);
+		transform-origin: left;
+		transition: transform 0.25s ease;
 	}
 	.card:hover {
-		transform: translateY(-3px);
-		box-shadow: 0 14px 30px rgba(17, 17, 17, 0.08);
-		border-color: #e0d6fb;
+		transform: translate(-2px, -2px);
+		box-shadow: var(--pop-shadow-lg);
+	}
+	.card:hover::before {
+		transform: scaleX(1);
+	}
+	/* Editorial index, sitting behind the content in the corner. */
+	.card-num {
+		position: absolute;
+		top: 0.5rem;
+		right: 0.9rem;
+		font-family: var(--font-display);
+		font-size: 2.6rem;
+		line-height: 1;
+		color: var(--fg);
+		opacity: 0.07;
+		pointer-events: none;
 	}
 	.card-icon {
 		width: 3rem;
@@ -311,22 +431,25 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 1.5rem;
+		font-size: 1.4rem;
 		border-radius: 12px;
-		background: #f3eeff;
+		border: 2px solid var(--pop-line);
+		background: var(--icon-wash);
+		box-shadow: var(--pop-shadow-sm);
 		margin-bottom: 1rem;
 	}
 	.card-title {
 		margin: 0 0 0.4rem;
-		font-size: 1.1rem;
-		font-weight: 700;
+		font-family: var(--font-display);
+		font-size: 1.15rem;
+		font-weight: var(--display-weight);
 		letter-spacing: -0.01em;
 		text-transform: none;
-		color: #1f2328;
+		color: var(--fg);
 	}
 	.card-body {
 		margin: 0;
-		color: #5b6370;
+		color: var(--fg-muted);
 		font-size: 0.95rem;
 		line-height: 1.55;
 	}
@@ -335,23 +458,29 @@
 	.closing {
 		padding: clamp(3.5rem, 8vw, 6rem) clamp(1rem, 5vw, 3rem);
 		text-align: center;
-		background: #fff;
+		background: var(--surface);
 	}
 	.closing-title {
 		margin: 0;
+		font-family: var(--font-display);
 		font-size: clamp(1.6rem, 4vw, 2.3rem);
-		font-weight: 800;
-		letter-spacing: -0.02em;
+		line-height: 1.2;
+		font-weight: var(--display-weight);
+		letter-spacing: var(--display-tracking);
 		text-transform: none;
-		color: #1f2328;
+		color: var(--fg);
 	}
 	.closing-sub {
 		margin: 0.6rem 0 1.6rem;
-		color: #6b7280;
+		color: var(--fg-muted);
 		font-size: 1.05rem;
 	}
 	.closing form {
 		display: inline-block;
+	}
+	/* Pricing sits under the demo CTA as the quieter second option. */
+	.closing-secondary {
+		margin-top: 0.85rem;
 	}
 
 	/* ---------- Footer ---------- */
@@ -368,6 +497,58 @@
 	}
 	.foot .dot {
 		opacity: 0.5;
+	}
+
+	/* ---- Scroll reveal -------------------------------------------------------
+	   The hidden state is gated on .reveal-ready, which JS only sets once the
+	   observer is attached — so without JS (or with reduced motion, where onMount
+	   bails before setting it) everything renders visible as normal. */
+	.reveal-ready .reveal {
+		opacity: 0;
+		transform: translateY(18px);
+		transition:
+			opacity 0.5s ease var(--reveal-delay, 0ms),
+			transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay, 0ms);
+	}
+	.reveal-ready .reveal:global(.in) {
+		opacity: 1;
+		transform: none;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.reveal-ready .reveal {
+			opacity: 1;
+			transform: none;
+			transition: none;
+		}
+		.card,
+		.card::before,
+		.btn {
+			transition: none;
+		}
+	}
+
+	/* ---- Dark theme ----------------------------------------------------------
+	   Feature cards sit a step ABOVE the section they're on, matching the light
+	   white-on-grey stack; the icon wash drops to the app's dark-purple accent. */
+	:global(:root[data-theme='dark']) .landing {
+		--panel: #2c333d;
+		--panel-line: #3d4650;
+		--icon-wash: #2e2a44;
+
+		/* The hero keeps the dark treatment it has always had, and the accent goes
+		   back to plain yellow type — it has the contrast for it here. */
+		--hero-bg:
+			radial-gradient(1200px 600px at 70% -10%, rgba(255, 204, 0, 0.16), transparent 60%),
+			radial-gradient(900px 500px at 0% 110%, rgba(139, 92, 246, 0.16), transparent 55%),
+			linear-gradient(180deg, #16181d 0%, #101216 100%);
+		--hero-fg: #ffffff;
+		--hero-sub: rgba(255, 255, 255, 0.72);
+		--accent-fg: var(--yellow);
+		--accent-bg: transparent;
+		--ghost-bg: rgba(255, 255, 255, 0.06);
+		--ghost-bg-hover: rgba(255, 255, 255, 0.14);
+		--ghost-fg: #ffffff;
+		--ghost-line: rgba(255, 255, 255, 0.22);
 	}
 
 	@media (max-width: 480px) {

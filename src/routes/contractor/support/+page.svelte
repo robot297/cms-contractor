@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { FEEDBACK_TYPES, feedbackTypeLabel, type FeedbackType } from '$lib/crm';
+	import Guide from '$lib/Guide.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -69,6 +70,10 @@
 			follow up on.
 		</p>
 	</header>
+
+	<!-- The guide's permanent home. Shown here in full regardless of whether it's
+	     been dismissed on the dashboard — someone on this page is looking for help. -->
+	<Guide guide={data.guide} variant="support" />
 
 	{#if !data.configured}
 		<div class="notice">

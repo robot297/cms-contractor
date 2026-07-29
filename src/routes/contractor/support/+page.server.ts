@@ -7,6 +7,7 @@ import {
 	SupportError,
 	verifyCaptcha
 } from '$lib/server/support.server';
+import { ackGuideFollowUp, loadGuide, setGuideState } from '$lib/server/guide.server';
 import type { Actions, PageServerLoad } from './$types';
 
 function requireContractor(locals: App.Locals) {
@@ -15,12 +16,28 @@ function requireContractor(locals: App.Locals) {
 	return locals.user;
 }
 
-export const load: PageServerLoad = ({ locals }) => {
-	requireContractor(locals);
-	return { configured: isSupportConfigured(), captchaSiteKey: captchaSiteKey() };
+export const load: PageServerLoad = async ({ locals }) => {
+	const user = requireContractor(locals);
+	// The guide's permanent home: reachable whether or not it's been dismissed.
+	const guide = await loadGuide(user.id);
+	return { configured: isSupportConfigured(), captchaSiteKey: captchaSiteKey(), guide };
 };
 
 export const actions: Actions = {
+	/** Mirrors the dashboard action so the guide's follow-up step works here too. */
+	guideAckFollowUp: async ({ locals }) => {
+		const user = requireContractor(locals);
+		await ackGuideFollowUp(user.id);
+		return { success: true };
+	},
+
+	/** Undo a dismissal — otherwise "hide this" is a one-way door. */
+	guideRestore: async ({ locals }) => {
+		const user = requireContractor(locals);
+		await setGuideState(user.id, 'active');
+		return { success: true };
+	},
+
 	submit: async ({ request, locals, getClientAddress }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
