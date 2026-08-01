@@ -2,7 +2,9 @@ import { fail, redirect } from '@sveltejs/kit';
 import { formatLocation, isOrderIcon, isSnoozePreset } from '$lib/crm';
 import { listContractorOrders, setOrderIcon, snoozeFollowUp } from '$lib/server/crm.server';
 import { ackGuideFollowUp, loadGuide, setGuideState } from '$lib/server/guide.server';
+import { dismissTrialNotice, getContractorSettings } from '$lib/server/templates.server';
 import type { Actions, PageServerLoad } from './$types';
+import { withBillingErrors } from '$lib/server/billing.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -12,7 +14,11 @@ function requireContractor(locals: App.Locals) {
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	const user = requireContractor(locals);
-	const [orders, guide] = await Promise.all([listContractorOrders(user.id), loadGuide(user.id)]);
+	const [orders, guide, settings] = await Promise.all([
+		listContractorOrders(user.id),
+		loadGuide(user.id),
+		getContractorSettings(user.id)
+	]);
 	// Orders whose next follow-up is due, soonest first — the dashboard's default tab.
 	const dueOrders = orders
 		.filter((o) => o.followUpDue)
@@ -41,10 +47,18 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		!guide.allDone &&
 		(dueOrders.length === 0 || url.searchParams.get('guide') === '1');
 
-	return { dueOrders, userName: user.name, guide, guideOpen: openByDefault };
+	return {
+		dueOrders,
+		userName: user.name,
+		guide,
+		guideOpen: openByDefault,
+		trialNoticeDismissed: settings.trialNoticeDismissedAt != null
+	};
 };
 
-export const actions: Actions = {
+// Wrapped so a billing refusal from any guarded write returns a 402 the form
+// can render, rather than a 500. See withBillingErrors.
+export const actions: Actions = withBillingErrors({
 	/** Guide: keep going into the optional steps. */
 	guideContinue: async ({ locals }) => {
 		const user = requireContractor(locals);
@@ -56,6 +70,13 @@ export const actions: Actions = {
 	guideDismiss: async ({ locals }) => {
 		const user = requireContractor(locals);
 		await setGuideState(user.id, 'dismissed');
+		return { success: true };
+	},
+
+	/** Put the trial welcome away for good. */
+	dismissTrialNotice: async ({ locals }) => {
+		const user = requireContractor(locals);
+		await dismissTrialNotice(user.id);
 		return { success: true };
 	},
 
@@ -89,4 +110,4 @@ export const actions: Actions = {
 		await snoozeFollowUp(orderId, user.id, preset);
 		return { success: true };
 	}
-};
+});

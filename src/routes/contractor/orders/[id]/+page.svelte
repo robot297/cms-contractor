@@ -5,9 +5,25 @@
 	import { resolve } from '$app/paths';
 	import { formatBytes, MAX_ATTACHMENT_BYTES, QUICK_UPDATE_STATES } from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
+	import TagPicker from '$lib/TagPicker.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	// Tags edit in place on the header rather than behind a separate screen.
+	let editingTags = $state(false);
+
+	// Two panels only. Subcontractors got its own card and attachments moved behind
+	// an icon button, which left the tab strip carrying just the two views you
+	// genuinely switch between.
+	let tab = $state<'timeline' | 'customer'>('timeline');
+	const TABS = $derived([
+		{ id: 'timeline' as const, label: 'Timeline', count: data.timeline.length },
+		{ id: 'customer' as const, label: 'Customer', count: null }
+	]);
+
+	// Attachments editor card, opened from the prompt beside tags and subcontractors.
+	let filesOpen = $state(false);
 
 	const order = $derived(data.order);
 	const customer = $derived(data.customer);
@@ -52,16 +68,12 @@
 	let snoozeOpen = $state(false);
 	// Customer contact (email/call) popover, mirroring the dashboard cards.
 	let contactOpen = $state(false);
-	// The subcontractor picker hides behind a + button.
+	// The subcontractor editor card stays behind a prompt until asked for. It stays
+	// open while you toggle people on and off — closing after each pick would make
+	// assigning two subs a four-tap job.
 	let assignOpen = $state(false);
 	// Attachment rules (types + size) live in an info modal, off the main flow.
 	let infoDialog: HTMLDialogElement | undefined = $state();
-	const assignThenClose =
-		() =>
-		async ({ update }: { update: () => Promise<void> }) => {
-			assignOpen = false;
-			await update();
-		};
 	// The timeline's note input is hidden until the + button reveals it.
 	let noteOpen = $state(false);
 	// Close the snooze popover once a follow-up change is submitted.
@@ -134,71 +146,171 @@
 			>← {backTo.label}</a
 		>
 
-		<!-- Header: customer name leads, project is the subtitle -->
 		<header class="order-head">
-			<div style="display: grid; gap: 0.3rem; min-width: 0;">
-				<h1 class="order-title">{order.customerName}</h1>
-				<span style="color: #57606a; font-weight: 600;"
-					>{order.projectName ??
-						'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)}
-						· {typeSuffix(order.projectName, order.projectType)}{/if}</span
-				>
+			<!-- Title row: project leads, customer beneath, status across from both. -->
+			<div class="head-top">
+				<div class="head-main">
+					<h1 class="order-title">
+						{order.projectName ??
+							'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)}<span
+								class="order-type"
+							>
+								· {typeSuffix(order.projectName, order.projectType)}</span
+							>{/if}
+					</h1>
+					<span class="order-sub">{order.customerName}</span>
+				</div>
+				<!-- Status and its editor on one row, mirroring the follow-up line below. -->
+				<div class="statusline">
+					<span
+						style="font-size: 0.82rem; font-weight: 700; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.25rem 0.8rem;"
+						>{order.state}</span
+					>
+					<div style="position: relative;">
+						<button
+							type="button"
+							class="icon-btn {statusOpen ? 'on' : ''}"
+							aria-expanded={statusOpen}
+							title="Change status"
+							aria-label="Change status"
+							onclick={toggleStatus}
+							style="width: 1.9rem; height: 1.9rem; font-size: 1.05rem;">⚙️</button
+						>
+						{#if statusOpen}
+							<!-- click-away backdrop -->
+							<button
+								type="button"
+								aria-label="Close status editor"
+								onclick={() => (statusOpen = false)}
+								style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+							></button>
+							<form
+								method="POST"
+								action="?/updateStatus"
+								use:enhance={statusThenClose}
+								style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 240px; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.6rem; display: grid; gap: 0.5rem;"
+							>
+								<select
+									name="state"
+									aria-label="Order status"
+									bind:value={statusDraft}
+									style="{field} width: 100%;"
+								>
+									{#each QUICK_UPDATE_STATES as s (s)}
+										<option value={s}>{s}</option>
+									{/each}
+								</select>
+								<!-- Optional annotation recorded as an internal note alongside the
+								     status change, so the "why" lands in the timeline too. -->
+								<input
+									name="note"
+									bind:value={statusNote}
+									placeholder="Internal note (optional)"
+									style="{field} width: 100%; box-sizing: border-box; font-size: 0.85rem;"
+								/>
+								<button
+									type="submit"
+									class="save-status"
+									disabled={!statusDirty}
+									title={statusDirty ? 'Save status' : 'Pick a different status first'}
+									style="{primaryBtn} width: 100%;">Save status</button
+								>
+							</form>
+						{/if}
+					</div>
+				</div>
 			</div>
-			<div style="display: grid; gap: 0.4rem; justify-items: end; flex-shrink: 0;">
-				<span
-					style="font-size: 0.82rem; font-weight: 700; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.25rem 0.8rem;"
-					>{order.state}</span
-				>
+
+			<!-- Tags, subcontractors and files. Each opens a card below rather than
+			     expanding inline, so the editing surface has room on a phone. -->
+			<div class="attrs">
+				<button type="button" class="attr" onclick={() => (editingTags = !editingTags)}>
+					{#if order.tags.length > 0}
+						{#each order.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
+					{:else}
+						<span class="attr-add">+ Add tags</span>
+					{/if}
+				</button>
+
+				<button type="button" class="attr" onclick={() => (assignOpen = !assignOpen)}>
+					{#if data.assignedSubs.length > 0}
+						{#each data.assignedSubs as sub (sub.id)}
+							<span class="subchip on" class:guest={sub.tier !== 'trusted'}>{sub.name}</span>
+						{/each}
+					{:else}
+						<span class="attr-add">+ Add subcontractors</span>
+					{/if}
+				</button>
+
+				<button type="button" class="attr" onclick={() => (filesOpen = !filesOpen)}>
+					<span class="attr-add"
+						>📎 {data.attachments.length > 0
+							? `${data.attachments.length} file${data.attachments.length === 1 ? '' : 's'}`
+							: 'Add files'}</span
+					>
+				</button>
+			</div>
+
+			<!-- Follow-up, reduced from a full-width card to a line in the header:
+			     it's a date you glance at, not a surface you work in. The ⏰ still
+			     opens the same snooze/set/clear controls. -->
+			<div class="followup">
+				<span class="followup-label">Follow-up</span>
+				<strong class:due={order.followUpDue}>{fmtDate(order.nextFollowUpAt)}</strong>
 				<div style="position: relative;">
 					<button
 						type="button"
-						class="icon-btn {statusOpen ? 'on' : ''}"
-						aria-expanded={statusOpen}
-						title="Change status"
-						aria-label="Change status"
-						onclick={toggleStatus}
-						style="width: 1.9rem; height: 1.9rem; font-size: 1.05rem;">⚙️</button
+						class="icon-btn"
+						style="width: 1.9rem; height: 1.9rem; font-size: 1.05rem;"
+						title="Snooze or set follow-up"
+						aria-label="Snooze or set follow-up"
+						aria-expanded={snoozeOpen}
+						onclick={() => (snoozeOpen = !snoozeOpen)}>⏰</button
 					>
-					{#if statusOpen}
-						<!-- click-away backdrop -->
+					{#if snoozeOpen}
 						<button
 							type="button"
-							aria-label="Close status editor"
-							onclick={() => (statusOpen = false)}
+							aria-label="Close follow-up options"
+							onclick={() => (snoozeOpen = false)}
 							style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
 						></button>
-						<form
-							method="POST"
-							action="?/updateStatus"
-							use:enhance={statusThenClose}
-							style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 240px; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.6rem; display: grid; gap: 0.5rem;"
-						>
-							<select
-								name="state"
-								aria-label="Order status"
-								bind:value={statusDraft}
-								style="{field} width: 100%;"
+						<div class="followup-pop">
+							<div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+								<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+									<input type="hidden" name="preset" value="1d" />
+									<button type="submit" style={pill}>+1 day</button>
+								</form>
+								<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+									<input type="hidden" name="preset" value="3d" />
+									<button type="submit" style={pill}>+3 days</button>
+								</form>
+								<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
+									<input type="hidden" name="preset" value="1w" />
+									<button type="submit" style={pill}>+1 week</button>
+								</form>
+							</div>
+							<form
+								method="POST"
+								action="?/setFollowUp"
+								use:enhance={snoozeThenClose}
+								style="display: flex; gap: 0.4rem; align-items: center;"
 							>
-								{#each QUICK_UPDATE_STATES as s (s)}
-									<option value={s}>{s}</option>
-								{/each}
-							</select>
-							<!-- Optional annotation recorded as an internal note alongside the
-							     status change, so the "why" lands in the timeline too. -->
-							<input
-								name="note"
-								bind:value={statusNote}
-								placeholder="Why? (optional internal note)"
-								style="{field} width: 100%; box-sizing: border-box; font-size: 0.85rem;"
-							/>
-							<button
-								type="submit"
-								class="save-status"
-								disabled={!statusDirty}
-								title={statusDirty ? 'Save status' : 'Pick a different status first'}
-								style="{primaryBtn} width: 100%;">Save status</button
-							>
-						</form>
+								<input
+									type="date"
+									name="date"
+									value={toDateInput(order.nextFollowUpAt)}
+									style="flex: 1; min-width: 0; {field}"
+								/>
+								<button type="submit" style={pill}>Set</button>
+							</form>
+							{#if order.nextFollowUpAt}
+								<form method="POST" action="?/clearFollowUp" use:enhance={snoozeThenClose}>
+									<button type="submit" style="{pill} width: 100%; color: #cf222e;"
+										>Clear follow-up</button
+									>
+								</form>
+							{/if}
+						</div>
 					{/if}
 				</div>
 			</div>
@@ -212,84 +324,226 @@
 			</p>
 		{/if}
 
-		<div class="detail-grid">
-			<!-- Main column: the working surface — follow-up, activity -->
-			<div class="col">
-				<!-- Follow-up: one snooze (⏰) button opens presets + a date picker -->
-				<section class="card">
-					<div
-						style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;"
+		<!-- Tabs. The detail page used to stack six full-width cards, which meant
+		     scrolling past the customer and the files to reach the timeline. One panel
+		     at a time keeps the working surface at the top of the screen. -->
+		{#if editingTags}
+			<section class="card editor">
+				<div class="editor-head">
+					<h2 style={sectionTitle}>Tags</h2>
+					<button
+						type="button"
+						class="editor-x"
+						aria-label="Close"
+						onclick={() => (editingTags = false)}>✕</button
 					>
-						<div style="font-size: 0.95rem;">
-							<span style="color: #8c959f;">Follow-up:</span>
-							<strong style="color: {order.followUpDue ? '#cf222e' : '#1f2328'};"
-								>{fmtDate(order.nextFollowUpAt)}</strong
-							>
-						</div>
-						<div style="position: relative; flex-shrink: 0;">
-							<button
-								type="button"
-								class="icon-btn"
-								style="width: 2.5rem; height: 2.5rem; font-size: 1.6rem;"
-								title="Snooze or set follow-up"
-								aria-label="Snooze or set follow-up"
-								aria-expanded={snoozeOpen}
-								onclick={() => (snoozeOpen = !snoozeOpen)}>⏰</button
-							>
-							{#if snoozeOpen}
-								<!-- click-away backdrop -->
-								<button
-									type="button"
-									aria-label="Close follow-up options"
-									onclick={() => (snoozeOpen = false)}
-									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
-								></button>
-								<div
-									style="position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 230px; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.6rem; display: grid; gap: 0.5rem;"
-								>
-									<div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-										<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
-											<input type="hidden" name="preset" value="1d" />
-											<button type="submit" style={pill}>+1 day</button>
-										</form>
-										<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
-											<input type="hidden" name="preset" value="3d" />
-											<button type="submit" style={pill}>+3 days</button>
-										</form>
-										<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
-											<input type="hidden" name="preset" value="1w" />
-											<button type="submit" style={pill}>+1 week</button>
-										</form>
-									</div>
-									<form
-										method="POST"
-										action="?/setFollowUp"
-										use:enhance={snoozeThenClose}
-										style="display: flex; gap: 0.4rem; align-items: center;"
-									>
-										<input
-											type="date"
-											name="date"
-											value={toDateInput(order.nextFollowUpAt)}
-											style="flex: 1; min-width: 0; {field}"
-										/>
-										<button type="submit" style={pill}>Set</button>
-									</form>
-									{#if order.nextFollowUpAt}
-										<form method="POST" action="?/clearFollowUp" use:enhance={snoozeThenClose}>
-											<button type="submit" style="{pill} width: 100%; color: #cf222e;"
-												>Clear follow-up</button
-											>
-										</form>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					</div>
-				</section>
+				</div>
+				<form
+					method="POST"
+					action="?/setTags"
+					use:enhance={() =>
+						async ({ update }) => {
+							editingTags = false;
+							await update();
+						}}
+					class="editor-form"
+				>
+					<TagPicker value={order.tags} />
+					<button type="submit" class="editor-save">Save tags</button>
+				</form>
+			</section>
+		{/if}
 
-				<!-- Timeline: the + button reveals the note input -->
-				<section class="card">
+		{#if assignOpen}
+			<section class="card editor">
+				<div class="editor-head">
+					<h2 style={sectionTitle}>Subcontractors</h2>
+					<button
+						type="button"
+						class="editor-x"
+						aria-label="Close"
+						onclick={() => (assignOpen = false)}>✕</button
+					>
+				</div>
+
+				{#if data.assignedSubs.length === 0 && data.availableSubs.length === 0}
+					<p class="editor-note">
+						You haven't added any subcontractors yet — set them up on the <a
+							href={resolve('/contractor/subcontractors')}>Subcontractors</a
+						> page, then put them on jobs from here.
+					</p>
+				{:else}
+					<p class="editor-note">Tap a name to put them on this job, or take them off.</p>
+					<div class="editor-chips">
+						{#each data.assignedSubs as sub (sub.id)}
+							<form method="POST" action="?/unassignSub" use:enhance>
+								<input type="hidden" name="subcontractorId" value={sub.id} />
+								<button
+									type="submit"
+									class="subchip on"
+									class:guest={sub.tier !== 'trusted'}
+									aria-pressed="true"
+									title={`${sub.trade ?? 'Trade not set'} · ${sub.tier === 'trusted' ? 'Trusted' : 'Guest'}`}
+								>
+									{sub.name}
+								</button>
+							</form>
+						{/each}
+						{#each data.availableSubs as sub (sub.id)}
+							<form method="POST" action="?/assignSub" use:enhance>
+								<input type="hidden" name="subcontractorId" value={sub.id} />
+								<button
+									type="submit"
+									class="subchip"
+									aria-pressed="false"
+									title={`${sub.trade ?? 'Trade not set'} · ${sub.tier === 'trusted' ? 'Trusted' : 'Guest'}`}
+								>
+									{sub.name}
+								</button>
+							</form>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		{/if}
+
+		{#if filesOpen}
+			<section class="card editor">
+				<div class="editor-head">
+					<h2 style={sectionTitle}>Attachments</h2>
+					<button
+						type="button"
+						class="editor-x"
+						aria-label="Close"
+						onclick={() => (filesOpen = false)}>✕</button
+					>
+				</div>
+				<div
+					style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;"
+				>
+					<form
+						method="POST"
+						action="?/uploadAttachment"
+						enctype="multipart/form-data"
+						use:enhance
+						style="display: flex; gap: 0.4rem; align-items: center;"
+					>
+						<!-- Styled trigger for a hidden file input; picking a file uploads it. -->
+						<label
+							style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.8rem; border-radius: 999px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; font-weight: 600; font-size: 0.85rem; white-space: nowrap;"
+						>
+							📎 Add file
+							<input
+								type="file"
+								name="file"
+								accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+								required
+								onchange={(e) => e.currentTarget.form?.requestSubmit()}
+								style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;"
+							/>
+						</label>
+						<button
+							type="button"
+							class="icon-btn"
+							style="width: 2rem; height: 2rem; font-size: 1.2rem;"
+							title="Attachment rules"
+							aria-label="Attachment rules"
+							onclick={() => infoDialog?.showModal()}>ℹ️</button
+						>
+					</form>
+				</div>
+
+				<dialog
+					bind:this={infoDialog}
+					style="border: none; border-radius: 16px; padding: 0; max-width: 380px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
+				>
+					<div style="padding: 1.1rem 1.2rem; display: grid; gap: 0.6rem;">
+						<h3 style="margin: 0; font-size: 1rem;">Attachment rules</h3>
+						<ul
+							style="margin: 0; padding-left: 1.1rem; font-size: 0.9rem; color: #57606a; display: grid; gap: 0.3rem;"
+						>
+							<li>Accepted files: PNG, JPEG, WebP, GIF, or PDF.</li>
+							<li>Up to {formatBytes(MAX_ATTACHMENT_BYTES)} per file.</li>
+						</ul>
+						<form method="dialog" style="justify-self: end;">
+							<button type="submit" style={pill}>Got it</button>
+						</form>
+					</div>
+				</dialog>
+
+				{#if data.attachments.length === 0}
+					<p style="margin: 0; color: #57606a; font-size: 0.9rem;">No attachments yet.</p>
+				{:else}
+					<div style="display: grid; gap: 0.5rem;">
+						{#each data.attachments as att (att.id)}
+							{@const href = resolve(`/contractor/orders/${order.id}/attachment/${att.id}`)}
+							<div
+								style="display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem 0.65rem; border: 1px solid #eaeef2; border-radius: 10px;"
+							>
+								{#if att.mimeType.startsWith('image/')}
+									<a {href} target="_blank" rel="noopener" style="flex-shrink: 0;">
+										<img
+											src={href}
+											alt={att.filename}
+											style="width: 44px; height: 44px; object-fit: cover; border-radius: 8px; border: 1px solid #eaeef2; display: block;"
+										/>
+									</a>
+								{:else}
+									<div
+										style="width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #f6f8fa; border: 1px solid #eaeef2; font-size: 1.1rem;"
+									>
+										📄
+									</div>
+								{/if}
+								<div style="flex: 1; min-width: 0;">
+									<a
+										{href}
+										target="_blank"
+										rel="noopener"
+										style="color: #0969da; text-decoration: none; word-break: break-word;"
+										>{att.filename}</a
+									>
+									<div style="font-size: 0.75rem; color: #8c959f;">
+										{formatBytes(att.size)} · {new Date(att.createdAt).toLocaleDateString()}
+									</div>
+								</div>
+								<form method="POST" action="?/deleteAttachment" use:enhance>
+									<input type="hidden" name="attachmentId" value={att.id} />
+									<button
+										type="submit"
+										title="Delete attachment"
+										aria-label="Delete attachment"
+										style="border: none; background: none; cursor: pointer; color: #8c959f; font-size: 1rem; padding: 0.2rem 0.35rem;"
+										>🗑</button
+									>
+								</form>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		{/if}
+
+		<div class="card panel">
+			<div class="tabs" role="tablist" aria-label="Order sections">
+				{#each TABS as t (t.id)}
+					<button
+						type="button"
+						role="tab"
+						id={`tab-${t.id}`}
+						aria-selected={tab === t.id}
+						aria-controls={`panel-${t.id}`}
+						class="tab"
+						class:on={tab === t.id}
+						onclick={() => (tab = t.id)}
+					>
+						{t.label}{#if t.count !== null}<span class="tab-count">{t.count}</span>{/if}
+					</button>
+				{/each}
+			</div>
+
+			<div class="panel-body" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+				{#if tab === 'timeline'}
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
 					>
@@ -339,13 +593,7 @@
 							{/each}
 						</ol>
 					{/if}
-				</section>
-			</div>
-
-			<!-- Side column: who / what / files / danger -->
-			<div class="col">
-				<!-- Customer -->
-				<section class="card">
+				{:else if tab === 'customer'}
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
 					>
@@ -419,258 +667,35 @@
 									<span style="color: #57606a;">Address:</span>
 									{customer.address}
 								</div>{/if}
-							{#if customer.tags.length > 0}
-								<div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.2rem;">
-									{#each customer.tags as tag (tag)}
-										<span
-											style="font-size: 0.75rem; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 999px; padding: 0.1rem 0.55rem;"
-											>{tag}</span
-										>
-									{/each}
-								</div>
-							{/if}
 						</div>
 					{:else}
 						<p style="margin: 0; color: #57606a;">No customer linked to this order.</p>
 					{/if}
-				</section>
-
-				<!-- Assigned subcontractors -->
-				<section class="card">
-					<div
-						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
-					>
-						<h2 style={sectionTitle}>Assigned subcontractors</h2>
-						{#if data.availableSubs.length > 0}
-							<button
-								type="button"
-								class="icon-btn {assignOpen ? 'on' : ''}"
-								style="width: 2.2rem; height: 2.2rem; font-size: {assignOpen
-									? '1.15rem'
-									: '1.55rem'};"
-								title={assignOpen ? 'Hide' : 'Assign a subcontractor'}
-								aria-label={assignOpen ? 'Hide subcontractor picker' : 'Assign a subcontractor'}
-								aria-expanded={assignOpen}
-								onclick={() => (assignOpen = !assignOpen)}>{assignOpen ? '✕' : '＋'}</button
-							>
-						{/if}
-					</div>
-
-					{#if assignOpen && data.availableSubs.length > 0}
-						<div style="display: grid; gap: 0.4rem;">
-							<span style="font-size: 0.78rem; color: #8c959f;"
-								>Tap a subcontractor to assign them</span
-							>
-							{#each data.availableSubs as sub (sub.id)}
-								<form method="POST" action="?/assignSub" use:enhance={assignThenClose}>
-									<input type="hidden" name="subcontractorId" value={sub.id} />
-									<button type="submit" class="sub-pick">
-										<span class="sub-pick-avatar" aria-hidden="true"
-											>{sub.name.slice(0, 1).toUpperCase()}</span
-										>
-										<span style="min-width: 0; flex: 1;">
-											<strong style="display: block; font-size: 0.92rem;">{sub.name}</strong>
-											<span style="color: #57606a; font-size: 0.8rem;"
-												>{sub.trade ?? 'Trade not set'} · {sub.tier === 'trusted'
-													? 'Trusted'
-													: 'Guest'}</span
-											>
-										</span>
-										<span class="sub-pick-add" aria-hidden="true">＋</span>
-									</button>
-								</form>
-							{/each}
-						</div>
-					{/if}
-
-					{#if data.assignedSubs.length === 0}
-						<p style="margin: 0; color: #57606a; font-size: 0.9rem;">
-							No subcontractors assigned yet.
-						</p>
-					{:else}
-						<div style="display: grid; gap: 0.5rem;">
-							{#each data.assignedSubs as sub (sub.id)}
-								<div
-									style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; border: 1px solid #d0d7de; border-radius: 10px; padding: 0.5rem 0.7rem;"
-								>
-									<div style="min-width: 0;">
-										<strong>{sub.name}</strong>
-										<div style="color: #57606a; font-size: 0.82rem;">
-											{sub.trade ?? 'Trade not set'} · {sub.tier === 'trusted'
-												? 'Trusted'
-												: 'Guest'}
-										</div>
-									</div>
-									<form method="POST" action="?/unassignSub" use:enhance>
-										<input type="hidden" name="subcontractorId" value={sub.id} />
-										<button
-											type="submit"
-											style="border: 1px solid #cf222e; color: #cf222e; background: #fff; border-radius: 8px; padding: 0.3rem 0.7rem; font-weight: 600; cursor: pointer; font-size: 0.82rem;"
-											>Remove</button
-										>
-									</form>
-								</div>
-							{/each}
-						</div>
-					{/if}
-
-					{#if data.availableSubs.length === 0 && data.assignedSubs.length > 0}
-						<p style="margin: 0; color: #57606a; font-size: 0.82rem;">
-							All your subcontractors are assigned to this job.
-						</p>
-					{:else if data.availableSubs.length === 0}
-						<p style="margin: 0; color: #57606a; font-size: 0.82rem;">
-							Add subcontractors in the <a href={resolve('/contractor/subcontractors')}
-								>Subcontractors</a
-							> page to assign them here.
-						</p>
-					{/if}
-				</section>
-
-				<!-- Attachments -->
-				<section class="card">
-					<div
-						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;"
-					>
-						<h2 style={sectionTitle}>Attachments</h2>
-						<form
-							method="POST"
-							action="?/uploadAttachment"
-							enctype="multipart/form-data"
-							use:enhance
-							style="display: flex; gap: 0.4rem; align-items: center;"
-						>
-							<!-- Styled trigger for a hidden file input; picking a file uploads it. -->
-							<label
-								style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.8rem; border-radius: 999px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; font-weight: 600; font-size: 0.85rem; white-space: nowrap;"
-							>
-								📎 Add file
-								<input
-									type="file"
-									name="file"
-									accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
-									required
-									onchange={(e) => e.currentTarget.form?.requestSubmit()}
-									style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;"
-								/>
-							</label>
-							<button
-								type="button"
-								class="icon-btn"
-								style="width: 2rem; height: 2rem; font-size: 1.2rem;"
-								title="Attachment rules"
-								aria-label="Attachment rules"
-								onclick={() => infoDialog?.showModal()}>ℹ️</button
-							>
-						</form>
-					</div>
-
-					<dialog
-						bind:this={infoDialog}
-						style="border: none; border-radius: 16px; padding: 0; max-width: 380px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
-					>
-						<div style="padding: 1.1rem 1.2rem; display: grid; gap: 0.6rem;">
-							<h3 style="margin: 0; font-size: 1rem;">Attachment rules</h3>
-							<ul
-								style="margin: 0; padding-left: 1.1rem; font-size: 0.9rem; color: #57606a; display: grid; gap: 0.3rem;"
-							>
-								<li>Accepted files: PNG, JPEG, WebP, GIF, or PDF.</li>
-								<li>Up to {formatBytes(MAX_ATTACHMENT_BYTES)} per file.</li>
-							</ul>
-							<form method="dialog" style="justify-self: end;">
-								<button type="submit" style={pill}>Got it</button>
-							</form>
-						</div>
-					</dialog>
-
-					{#if data.attachments.length === 0}
-						<p style="margin: 0; color: #57606a; font-size: 0.9rem;">No attachments yet.</p>
-					{:else}
-						<div style="display: grid; gap: 0.5rem;">
-							{#each data.attachments as att (att.id)}
-								{@const href = resolve(`/contractor/orders/${order.id}/attachment/${att.id}`)}
-								<div
-									style="display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem 0.65rem; border: 1px solid #eaeef2; border-radius: 10px;"
-								>
-									{#if att.mimeType.startsWith('image/')}
-										<a {href} target="_blank" rel="noopener" style="flex-shrink: 0;">
-											<img
-												src={href}
-												alt={att.filename}
-												style="width: 44px; height: 44px; object-fit: cover; border-radius: 8px; border: 1px solid #eaeef2; display: block;"
-											/>
-										</a>
-									{:else}
-										<div
-											style="width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #f6f8fa; border: 1px solid #eaeef2; font-size: 1.1rem;"
-										>
-											📄
-										</div>
-									{/if}
-									<div style="flex: 1; min-width: 0;">
-										<a
-											{href}
-											target="_blank"
-											rel="noopener"
-											style="color: #0969da; text-decoration: none; word-break: break-word;"
-											>{att.filename}</a
-										>
-										<div style="font-size: 0.75rem; color: #8c959f;">
-											{formatBytes(att.size)} · {new Date(att.createdAt).toLocaleDateString()}
-										</div>
-									</div>
-									<form method="POST" action="?/deleteAttachment" use:enhance>
-										<input type="hidden" name="attachmentId" value={att.id} />
-										<button
-											type="submit"
-											title="Delete attachment"
-											aria-label="Delete attachment"
-											style="border: none; background: none; cursor: pointer; color: #8c959f; font-size: 1rem; padding: 0.2rem 0.35rem;"
-											>🗑</button
-										>
-									</form>
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</section>
-
-				<!-- Danger zone -->
-				<section class="card">
-					<h2 style={sectionTitle}>Danger zone</h2>
-					{#if confirmingDelete}
-						<div
-							style="display: grid; gap: 0.5rem; background: #fff8f8; border: 1px solid #ffd7d5; border-radius: 10px; padding: 0.6rem 0.75rem;"
-						>
-							<span style="font-size: 0.88rem; color: #57606a;"
-								>Delete this order and its entire timeline? This can’t be undone.</span
-							>
-							<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-								<form method="POST" action="?/deleteOrder" use:enhance>
-									<button
-										type="submit"
-										style="padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #cf222e; background: #cf222e; color: #fff; cursor: pointer;"
-										>Yes, delete</button
-									>
-								</form>
-								<button
-									type="button"
-									onclick={() => (confirmingDelete = false)}
-									style="padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-									>Cancel</button
-								>
-							</div>
-						</div>
-					{:else}
-						<button
-							type="button"
-							onclick={() => (confirmingDelete = true)}
-							style="justify-self: start; padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #cf222e; background: #fff; color: #cf222e; cursor: pointer;"
-							>Delete order</button
-						>
-					{/if}
-				</section>
+				{/if}
 			</div>
+		</div>
+
+		<!-- Deleting an order is rare and irreversible, so it sits quietly at the foot
+		     of the page as a plain link — no card, no heading. It only grows teeth once
+		     you ask for it. -->
+		<div class="footer-danger">
+			{#if confirmingDelete}
+				<div class="danger-confirm" role="alert">
+					<span>Delete this order and its entire timeline? This can’t be undone.</span>
+					<span class="danger-actions">
+						<form method="POST" action="?/deleteOrder" use:enhance>
+							<button type="submit" class="danger-yes">Yes, delete</button>
+						</form>
+						<button type="button" class="danger-no" onclick={() => (confirmingDelete = false)}
+							>Cancel</button
+						>
+					</span>
+				</div>
+			{:else}
+				<button type="button" class="danger-link" onclick={() => (confirmingDelete = true)}
+					>Delete this order</button
+				>
+			{/if}
 		</div>
 	</div>
 </div>
@@ -690,12 +715,26 @@
 		display: grid;
 		gap: 1rem;
 	}
+	/* Header. The title row is always two columns — project + customer on the left,
+	   status across from them on the right — because the status is *about* the title
+	   and reads as a caption to it. The prompts and follow-up sit full width below,
+	   where they have room to wrap on a phone. */
 	.order-head {
-		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
-		align-items: start;
+		display: grid;
+		gap: 0.6rem;
 	}
+	.head-top {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+	.head-main {
+		display: grid;
+		gap: 0.15rem;
+		min-width: 0;
+	}
+
 	/* Toggle icon button in its open state — filled accent so the "hide" (✕)
 	   state is clearly on. */
 	.icon-btn.on {
@@ -803,10 +842,23 @@
 	}
 	/* The order title should read as a title but stay subtle — no chunky yellow
 	   hero box, and a normal-weight font instead of the heavy display face. */
+	.order-sub {
+		font-size: 0.92rem;
+		font-weight: 600;
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	/* The project type rides the title without competing with it. */
+	.order-type {
+		font-size: 0.95rem;
+		font-weight: 600;
+		color: var(--fg-muted);
+	}
 	.order-title {
 		margin: 0;
 		font-family: 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif;
 		font-size: 1.5rem;
+		overflow-wrap: anywhere;
 		font-weight: 700;
 		line-height: 1.2;
 		letter-spacing: -0.01em;
@@ -819,75 +871,358 @@
 		padding: 0;
 		display: block;
 	}
-	/* Tap-to-assign subcontractor rows: full-width, big touch targets, with a
-	   purple accent that ties into the icon buttons. */
-	.sub-pick {
-		width: 100%;
+
+	/* ---------------------------------------------------------------- Tabs
+	   The strip lives inside the panel card and underlines the active tab — the
+	   same treatment as the subcontractor detail pane — so it reads as one object
+	   rather than buttons floating above a box. Scrolls sideways on narrow screens
+	   instead of wrapping to two rows and shoving the content down. */
+	.panel {
+		min-width: 0;
+		gap: 0;
+		padding: 0;
+		overflow: hidden;
+	}
+	.tabs {
 		display: flex;
-		align-items: center;
-		gap: 0.65rem;
-		text-align: left;
-		padding: 0.55rem 0.65rem;
-		border: 1px solid #e2e6ea;
-		border-radius: 12px;
-		background: #fff;
-		cursor: pointer;
-		transition:
-			border-color 0.1s ease,
-			background 0.1s ease;
+		gap: 0.15rem;
+		overflow-x: auto;
+		scrollbar-width: none;
+		padding: 0 0.5rem;
+		border-bottom: 1px solid var(--line);
+		background: var(--surface-sunken);
 	}
-	.sub-pick:hover,
-	.sub-pick:focus-visible {
-		border-color: #c9b8f0;
-		background: #faf7ff;
-		outline: none;
+	.tabs::-webkit-scrollbar {
+		display: none;
 	}
-	.sub-pick:active {
-		background: #efe6ff;
-	}
-	.sub-pick-avatar {
-		flex-shrink: 0;
-		width: 2rem;
-		height: 2rem;
+	.tab {
+		flex: 0 0 auto;
 		display: inline-flex;
 		align-items: center;
-		justify-content: center;
-		border-radius: 999px;
-		background: #efe6ff;
-		color: #5b3fa8;
+		gap: 0.4rem;
+		padding: 0.8rem 0.85rem;
+		border: none;
+		background: none;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.82rem;
 		font-weight: 800;
-		font-size: 0.85rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		white-space: nowrap;
+		cursor: pointer;
+		border-bottom: 3px solid transparent;
+		margin-bottom: -1px;
 	}
-	.sub-pick-add {
-		flex-shrink: 0;
-		width: 1.7rem;
-		height: 1.7rem;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 8px;
-		background: #efe6ff;
-		color: #5b3fa8;
-		font-size: 1.1rem;
+	.tab:hover {
+		color: var(--fg);
+	}
+	.tab.on {
+		color: var(--fg);
+		border-bottom-color: var(--yellow-deep);
+	}
+	.tab:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: -3px;
+	}
+	.tab-count {
+		padding: 0.05rem 0.4rem;
+		border-radius: 999px;
+		background: var(--line);
+		color: var(--fg-muted);
+		font-size: 0.7rem;
+		font-weight: 800;
+		font-variant-numeric: tabular-nums;
+	}
+	/* Pinned dark: yellow stays light in both themes. */
+	.tab.on .tab-count {
+		background: var(--yellow);
+		color: #14171c;
+	}
+	.subchip {
+		padding: 0.25rem 0.65rem;
+		border-radius: 999px;
+		border: 1.5px solid var(--line-strong);
+		background: var(--surface);
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.76rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.subchip:hover {
+		border-color: var(--fg-muted);
+		color: var(--fg);
+	}
+	/* On the job. Label pinned dark: yellow stays light in both themes. */
+	.subchip.on {
+		background: var(--yellow);
+		border-color: #14171c;
+		color: #14171c;
+	}
+	/* A Guest sees the job with the customer's details redacted, so they read as a
+	   dashed fill rather than a solid one — visible without needing a legend. */
+	.subchip.on.guest {
+		background: repeating-linear-gradient(
+			-45deg,
+			var(--yellow) 0,
+			var(--yellow) 5px,
+			transparent 5px,
+			transparent 10px
+		);
+		border-style: dashed;
+	}
+	.subchip:focus-visible {
+		outline: 2px solid var(--yellow-deep);
+		outline-offset: 2px;
 	}
 
-	/* Two-column working layout on desktop; single column when it gets tight. */
-	.detail-grid {
-		display: grid;
-		gap: 1rem;
-		align-items: start;
-		grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+	/* ------------------------------------------------- Order attributes
+	   Tags, subcontractors and files. Each carries a visible border at rest — a
+	   hover-only outline is invisible on a phone, which left three bare phrases
+	   floating with nothing to say they were tappable. */
+	.attrs {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.4rem;
+		width: 100%;
+		margin-top: 0.2rem;
 	}
-	.col {
+	.attr {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.3rem;
+		max-width: 100%;
+		min-width: 0;
+		/* 2.25rem keeps the tap target close to the 44px guideline once the border
+		   and line-height are counted. */
+		min-height: 2.25rem;
+		padding: 0.35rem 0.7rem;
+		border: 1.5px solid var(--line);
+		border-radius: 999px;
+		background: var(--surface);
+		font: inherit;
+		line-height: 1.3;
+		text-align: left;
+		cursor: pointer;
+	}
+	.attr:hover {
+		border-color: var(--fg-muted);
+	}
+	.attr:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 1px;
+	}
+	.attr-add {
+		font-size: 0.8rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+		white-space: nowrap;
+	}
+	.attr:hover .attr-add {
+		color: var(--fg);
+	}
+
+	/* ----------------------------------------------------- Editor cards
+	   Opening either prompt gives a real card rather than an inline expansion, so
+	   the chips have room to wrap properly on a phone. */
+	.editor {
+		gap: 0.7rem;
+	}
+	.editor-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+	.editor-x {
+		border: none;
+		background: none;
+		font-size: 1.05rem;
+		line-height: 1;
+		color: var(--fg-muted);
+		cursor: pointer;
+		padding: 0.1rem 0.25rem;
+	}
+	.editor-x:hover {
+		color: var(--fg);
+	}
+	.editor-note {
+		margin: 0;
+		font-size: 0.82rem;
+		line-height: 1.5;
+		color: var(--fg-muted);
+	}
+	.editor-form {
 		display: grid;
-		gap: 1rem;
-		align-content: start;
+		gap: 0.8rem;
+		justify-items: start;
+	}
+	.editor-save {
+		padding: 0.5rem 1rem;
+		border-radius: 999px;
+		border: 2px solid var(--pop-line);
+		background: var(--yellow);
+		/* Pinned dark: yellow stays light in both themes. */
+		color: #14171c;
+		font-family: inherit;
+		font-size: 0.8rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		cursor: pointer;
+		box-shadow: var(--pop-shadow-sm);
+	}
+	.editor-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+	/* ------------------------------------------------------------ Phones */
+	@media (max-width: 560px) {
+		.page {
+			padding: 1rem 0.75rem 2rem;
+		}
+		/* Long project names shouldn't push the header sideways. */
+		.order-title {
+			font-size: 1.25rem;
+			overflow-wrap: anywhere;
+		}
+		.panel-body,
+		.editor {
+			padding: 0.9rem;
+		}
+		.tabs {
+			padding: 0 0.25rem;
+		}
+		.tab {
+			padding: 0.7rem 0.6rem;
+			font-size: 0.78rem;
+		}
+		/* The status sits beside a wrapping title, so keep it top-aligned and let
+		   the badge shrink rather than shove the title. */
+		.statusline {
+			flex-shrink: 0;
+		}
+	}
+
+	@media (max-width: 480px) {
+		/* Full-width targets on a phone rather than a ragged wrap. */
+		.editor-save {
+			width: 100%;
+		}
+	}
+
+	/* -------------------------------------------------------- Delete order
+	   A quiet link at the foot of the page rather than a titled card. */
+	.footer-danger {
+		display: flex;
+		justify-content: center;
+		padding-top: 0.25rem;
+	}
+	.danger-link {
+		border: none;
+		background: none;
+		padding: 0.3rem 0.5rem;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.78rem;
+		font-weight: 700;
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+	.danger-link:hover {
+		color: var(--danger);
+	}
+	.danger-confirm {
+		display: grid;
+		gap: 0.5rem;
+		justify-items: center;
+		text-align: center;
+		padding: 0.7rem 0.9rem;
+		border: 1.5px solid var(--danger);
+		border-radius: 12px;
+		background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+		font-size: 0.85rem;
+		color: var(--fg);
+	}
+	.danger-actions {
+		display: flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+		justify-content: center;
+	}
+	.danger-confirm button {
+		padding: 0.35rem 0.85rem;
+		border-radius: 999px;
+		font-family: inherit;
+		font-size: 0.78rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.danger-yes {
+		border: 1px solid var(--danger);
+		background: var(--danger);
+		color: #fff;
+	}
+	.danger-no {
+		border: none;
+		background: none;
+		color: var(--fg-muted);
+	}
+	.danger-no:hover {
+		color: var(--fg);
+	}
+
+	.panel-body {
+		display: grid;
+		gap: 0.85rem;
+		padding: 1.1rem 1.2rem;
 		min-width: 0;
 	}
-	@media (max-width: 800px) {
-		.detail-grid {
-			grid-template-columns: 1fr;
-		}
+
+	/* Status badge and its ⚙️ on one line, matching the follow-up row beneath it. */
+	.statusline {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	/* ----------------------------------------------------------- Follow-up
+	   A line in the header rather than a card of its own. */
+	.followup {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.85rem;
+		color: var(--fg-muted);
+	}
+	.followup-label {
+		font-weight: 700;
+	}
+	.followup strong {
+		color: var(--fg);
+		font-weight: 700;
+	}
+	.followup strong.due {
+		color: var(--danger);
+	}
+	.followup-pop {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 6px);
+		z-index: 20;
+		min-width: 230px;
+		background: var(--surface);
+		border: 1px solid var(--line-strong);
+		border-radius: 12px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+		padding: 0.6rem;
+		display: grid;
+		gap: 0.5rem;
 	}
 
 	/* Dark theme */
@@ -921,25 +1256,5 @@
 	}
 	:global(:root[data-theme='dark']) .order-title {
 		color: var(--fg);
-	}
-	:global(:root[data-theme='dark']) .sub-pick {
-		background: var(--surface);
-		border-color: var(--line);
-	}
-	:global(:root[data-theme='dark']) .sub-pick:hover,
-	:global(:root[data-theme='dark']) .sub-pick:focus-visible {
-		background: #2a2640;
-		border-color: #4a3f6b;
-	}
-	:global(:root[data-theme='dark']) .sub-pick:active {
-		background: #332b52;
-	}
-	:global(:root[data-theme='dark']) .sub-pick-avatar {
-		background: #2e2a44;
-		color: #cabff5;
-	}
-	:global(:root[data-theme='dark']) .sub-pick-add {
-		background: #2e2a44;
-		color: #cabff5;
 	}
 </style>

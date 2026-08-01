@@ -4,7 +4,7 @@ The app has no billing of any kind: no Stripe dependency, no subscription table,
 
 Three existing patterns constrain the design more than Stripe does:
 
-- **`contractor/+layout.server.ts` guards the whole contractor section** and lazily provisions per-contractor state (`ensureStarterTemplates`) on every load. That is the natural place to provision a Subscription too — and, per [ADR-0005](../../../docs/adr/0005-lapsing-never-reaches-customers.md), it is emphatically *not* the place to block Lapsed contractors, because they must still be able to read.
+- **`contractor/+layout.server.ts` guards the whole contractor section** and lazily provisions per-contractor state (`ensureStarterTemplates`) on every load. That is the natural place to provision a Subscription too — and, per [ADR-0005](../../../docs/adr/0005-lapsing-never-reaches-customers.md), it is emphatically _not_ the place to block Lapsed contractors, because they must still be able to read.
 - **[ADR-0004](../../../docs/adr/0004-derive-guide-progress-from-domain-data.md)**: derive from domain data, store only what is irreducible. Cap usage is a `COUNT(*)`; storing counters would let them disagree with reality.
 - **`auth.schema.ts` is generated** by `pnpm auth:schema`. Hand-added columns there are lost on regeneration, so subscription state lives in its own table in `schema.ts`, keyed on `contractorId`, exactly as `contractor_settings` does.
 
@@ -31,9 +31,9 @@ Three existing patterns constrain the design more than Stripe does:
 
 A `subscription` table keyed on `contractorId` holds `status`, `trialEndsAt`, `currentPeriodEnd`, `stripeCustomerId`, `stripeSubscriptionId`. Every gate reads this one indexed row. Stripe webhooks are the only writer of paid state.
 
-*Alternative rejected — query Stripe per request (cached):* zero drift, but it puts Stripe's latency and uptime in front of every contractor page load and burns rate limit on our own dashboard traffic. A Stripe incident would become an outage of a CRM that has nothing to do with payments at that moment.
+_Alternative rejected — query Stripe per request (cached):_ zero drift, but it puts Stripe's latency and uptime in front of every contractor page load and burns rate limit on our own dashboard traffic. A Stripe incident would become an outage of a CRM that has nothing to do with payments at that moment.
 
-*Alternative rejected — no webhooks, nightly reconcile:* ships faster, but involuntary churn (a card failing on day 40) stays invisible for up to 24h, and Stripe's own retry timeline is exactly the signal we need.
+_Alternative rejected — no webhooks, nightly reconcile:_ ships faster, but involuntary churn (a card failing on day 40) stays invisible for up to 24h, and Stripe's own retry timeline is exactly the signal we need.
 
 ### No `plan` column
 
@@ -41,7 +41,7 @@ Per [ADR-0006](../../../docs/adr/0006-one-plan-priced-per-contractor.md) there i
 
 ### Lapse is derived at read time, not written by a scheduler
 
-`status = 'trialing'` with `trialEndsAt` in the past *is* Lapsed. A pure function decides:
+`status = 'trialing'` with `trialEndsAt` in the past _is_ Lapsed. A pure function decides:
 
 ```
 subscriptionAccess(sub, now) -> { canWrite, reason }
@@ -55,7 +55,7 @@ subscriptionAccess(sub, now) -> { canWrite, reason }
 
 No cron, no job runner (there is none in the stack), and no window in which the database says "trialing" but the truth is otherwise. `past_due` deliberately keeps writing: Stripe retries for weeks, and locking a paying contractor out over a temporarily declined card would do the reputational damage [ADR-0005](../../../docs/adr/0005-lapsing-never-reaches-customers.md) exists to prevent. Stripe moves them to `canceled` when it gives up, and that lapses them.
 
-*Alternative rejected — a scheduled job flipping rows to `lapsed`:* needs infrastructure the project doesn't have, and creates a period where the stored status is stale.
+_Alternative rejected — a scheduled job flipping rows to `lapsed`:_ needs infrastructure the project doesn't have, and creates a period where the stored status is stale.
 
 ### Provisioning is lazy, in the contractor layout, and self-comping for pre-existing accounts
 
@@ -63,7 +63,7 @@ No cron, no job runner (there is none in the stack), and no window in which the 
 
 This covers the GitHub OAuth signup path — which never runs the `signUp` action and so cannot be hooked there — plus anything the backfill migration missed, with one code path. It reuses a provisioning pattern already proven in this file.
 
-*Alternative rejected — insert on signup only:* misses OAuth, and any gap between the migration and a deploy leaves a contractor with no row and therefore no defined behaviour.
+_Alternative rejected — insert on signup only:_ misses OAuth, and any gap between the migration and a deploy leaves a contractor with no row and therefore no defined behaviour.
 
 ### Enforcement is per-write, never a section guard
 
@@ -71,7 +71,7 @@ This covers the GitHub OAuth signup path — which never runs the `signUp` actio
 
 A single guard in `contractor/+layout.server.ts` would be one line instead of dozens — and would break the whole design, because a Lapsed contractor must still load every read surface. The cost is that a new contractor write added later can forget the guard. Mitigated below.
 
-Limits gate **creation only**, matching the one rule that runs through the whole change: *block creation, never touch what exists.* A Contractor who somehow exceeds a limit keeps every record fully editable.
+Limits gate **creation only**, matching the one rule that runs through the whole change: _block creation, never touch what exists._ A Contractor who somehow exceeds a limit keeps every record fully editable.
 
 ### Portal paths are audited to have no subscription check at all
 

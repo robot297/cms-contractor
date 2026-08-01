@@ -591,6 +591,232 @@ export function buildFeedbackIssue(
 	return { title: `${prefix} ${feedback.title}`, body };
 }
 
+// -------------------------------------------------------------- Subscriptions
+
+/**
+ * A contractor's billing standing. Every contractor has exactly one subscription,
+ * created at signup and never absent.
+ *
+ * - `trialing`  — inside the 14-day trial; trial limits apply.
+ * - `active`    — paid and current; no limits.
+ * - `past_due`  — payment failed but Stripe is still retrying. Deliberately still
+ *                 writes: locking out a paying contractor over a temporarily
+ *                 declined card is exactly the reputational damage ADR-0005 exists
+ *                 to prevent. Stripe moves them to canceled when it gives up.
+ * - `lapsed`    — trial ended or subscription ended. Read-only; nothing deleted.
+ * - `comped`    — permanently free, no Stripe record, never expires. Held by
+ *                 contractors who predate billing and by the demo contractor.
+ */
+export const SUBSCRIPTION_STATUSES = [
+	'trialing',
+	'active',
+	'past_due',
+	'lapsed',
+	'comped'
+] as const;
+
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
+
+export function isSubscriptionStatus(value: string): value is SubscriptionStatus {
+	return (SUBSCRIPTION_STATUSES as readonly string[]).includes(value);
+}
+
+export const subscriptionStatusSchema = z.enum(SUBSCRIPTION_STATUSES);
+
+/** Length of the free trial a new contractor account starts with. */
+export const TRIAL_DAYS = 14;
+
+/**
+ * The line between a comped and a trialing subscription: any contractor whose
+ * login predates this instant was using the product before billing existed and is
+ * comped permanently. Both the backfill migration and `ensureSubscription` read
+ * this same constant, so the two can never disagree about who is grandfathered.
+ *
+ * Must be in the PAST for billing to do anything: a future date means every new
+ * signup looks like it predates billing and is comped, switching the paywall off
+ * entirely. That is the documented rollback — push this forward to comp everyone —
+ * but it is not a safe default, so keep it pinned to when the backfill ran.
+ */
+export const BILLING_LAUNCHED_AT = new Date('2026-07-30T00:00:00.000Z');
+
+/**
+ * The record types a trial caps, and the caps themselves. Counted over *active*
+ * records only — archiving a customer or deleting an order frees capacity — so
+ * these are limits on how much work a contractor is juggling now, not on how much
+ * they have ever done. A paid or comped subscription applies no limits at all.
+ */
+export const LIMITED_RECORDS = ['customer', 'order', 'subcontractor'] as const;
+export type LimitedRecord = (typeof LIMITED_RECORDS)[number];
+
+export const TRIAL_LIMITS: Record<LimitedRecord, number> = {
+	customer: 25,
+	order: 25,
+	subcontractor: 3
+};
+
+/** Human label for a capped record type, singular and plural. */
+export function limitedRecordLabel(kind: LimitedRecord, plural = false): string {
+	const base = kind === 'subcontractor' ? 'subcontractor' : kind;
+	const word = base.charAt(0).toUpperCase() + base.slice(1);
+	return plural ? `${word}s` : word;
+}
+
+export type SubscriptionLike = {
+	status: SubscriptionStatus;
+	trialEndsAt: Date | null;
+};
+
+/** Why a contractor write was refused. `null` when the write is allowed. */
+export type BlockedReason = 'trial-ended' | 'subscription-ended';
+
+export type SubscriptionAccess = {
+	/** Whether contractor-initiated writes are permitted at all. */
+	canWrite: boolean;
+	/** Set when `canWrite` is false. */
+	reason: BlockedReason | null;
+	/** True while inside a live trial — the only state where limits apply. */
+	limitsApply: boolean;
+	/** Whole days left in the trial, rounded up; null outside a live trial. */
+	trialDaysRemaining: number | null;
+};
+
+/**
+ * Decide what a subscription permits, right now. Pure, so the whole gate is
+ * unit-testable without a database.
+ *
+ * Lapsing is *derived* rather than written by a scheduler: a `trialing` row whose
+ * `trialEndsAt` has passed simply is lapsed. There is no job runner in this stack,
+ * and deriving means the database can never report `trialing` while the truth is
+ * otherwise.
+ */
+export function subscriptionAccess(
+	sub: SubscriptionLike,
+	now: Date = new Date()
+): SubscriptionAccess {
+	const allow = (limitsApply = false, trialDaysRemaining: number | null = null) => ({
+		canWrite: true,
+		reason: null,
+		limitsApply,
+		trialDaysRemaining
+	});
+	const block = (reason: BlockedReason): SubscriptionAccess => ({
+		canWrite: false,
+		reason,
+		limitsApply: false,
+		trialDaysRemaining: null
+	});
+
+	switch (sub.status) {
+		case 'comped':
+		case 'active':
+			return allow();
+		// Stripe is still retrying — keep them working (ADR-0005).
+		case 'past_due':
+			return allow();
+		case 'trialing': {
+			// A trial with no end date can't expire; treat it as live rather than
+			// silently locking someone out on a null.
+			if (sub.trialEndsAt == null) return allow(true, null);
+			const remainingMs = sub.trialEndsAt.getTime() - now.getTime();
+			if (remainingMs <= 0) return block('trial-ended');
+			return allow(true, Math.ceil(remainingMs / DAY_MS));
+		}
+		case 'lapsed':
+		default:
+			return block('subscription-ended');
+	}
+}
+
+export type LimitUsage = Record<LimitedRecord, number>;
+
+export type LimitStatusEntry = {
+	kind: LimitedRecord;
+	used: number;
+	limit: number;
+	atLimit: boolean;
+	remaining: number;
+};
+
+/**
+ * Compare live usage against the caps. Limits gate *creation* only — a contractor
+ * at or over a limit keeps every record they already hold fully editable.
+ */
+export function limitStatus(
+	usage: LimitUsage,
+	limits: Record<LimitedRecord, number> = TRIAL_LIMITS
+): Record<LimitedRecord, LimitStatusEntry> {
+	const entries = LIMITED_RECORDS.map((kind) => {
+		const used = usage[kind] ?? 0;
+		const limit = limits[kind];
+		return [
+			kind,
+			{ kind, used, limit, atLimit: used >= limit, remaining: Math.max(0, limit - used) }
+		] as const;
+	});
+	return Object.fromEntries(entries) as Record<LimitedRecord, LimitStatusEntry>;
+}
+
+/** The trial end for a contractor signing up at `from`. */
+export function trialEndFrom(from: Date = new Date()): Date {
+	return new Date(from.getTime() + TRIAL_DAYS * DAY_MS);
+}
+
+/**
+ * Whether a login predating billing should be comped. Shared by the backfill
+ * migration's intent and by `ensureSubscription` so they cannot classify the same
+ * contractor differently.
+ */
+export function shouldBeComped(userCreatedAt: Date): boolean {
+	return userCreatedAt.getTime() < BILLING_LAUNCHED_AT.getTime();
+}
+
+/**
+ * Translate a payment provider's subscription status into ours.
+ *
+ * Pure and provider-agnostic (takes a plain string) so the mapping — the subtlest
+ * rule in billing — is unit-tested without pulling in the Stripe SDK.
+ *
+ * `past_due` / `unpaid` map to a status that still WRITES. Stripe retries a failed
+ * card for weeks, and locking out a paying contractor over a temporary decline is
+ * the reputational damage ADR-0005 exists to prevent. Stripe moves them to
+ * `canceled` when it finally gives up, and that is what lapses them.
+ */
+export function mapProviderStatus(status: string): SubscriptionStatus {
+	switch (status) {
+		case 'active':
+		case 'trialing':
+			return 'active';
+		case 'canceled':
+		case 'incomplete_expired':
+			return 'lapsed';
+		// `incomplete` (checkout not finished paying) and `paused` are treated as
+		// past_due: recoverable, so keep them writing rather than locking out.
+		case 'past_due':
+		case 'unpaid':
+		case 'incomplete':
+		case 'paused':
+		default:
+			return 'past_due';
+	}
+}
+
+/** Message shown when a contractor write is refused for billing reasons. */
+export function blockedMessage(reason: BlockedReason): string {
+	return reason === 'trial-ended'
+		? 'Your free trial has ended. Choose a plan to start making changes again — everything you’ve added is safe and still here.'
+		: 'Your subscription has ended. Restart it to start making changes again — everything you’ve added is safe and still here.';
+}
+
+/** Message shown when a creation is refused for hitting a trial limit. */
+export function limitReachedMessage(entry: LimitStatusEntry): string {
+	const plural = limitedRecordLabel(entry.kind, true).toLowerCase();
+	const freeing =
+		entry.kind === 'order'
+			? 'Delete an order you no longer need'
+			: `Archive ${entry.kind === 'customer' ? 'a customer' : 'a subcontractor'} you’re no longer working with`;
+	return `Your trial covers ${entry.limit} ${plural} and you have ${entry.used}. ${freeing}, or subscribe for unlimited.`;
+}
+
 // ------------------------------------------------------------ Email templates
 
 /**

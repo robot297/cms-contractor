@@ -16,6 +16,7 @@ import {
 	contractorSettings
 } from './db/schema';
 import { auth } from './auth';
+import { compSubscription } from './billing.server';
 import { STARTER_EMAIL_TEMPLATES } from '$lib/crm';
 // Single source of truth for the sample data — shared with scripts/seed.mjs.
 import {
@@ -86,6 +87,11 @@ async function ensureDemoContractor(): Promise<string> {
 	if (!id) throw new Error('Demo contractor could not be provisioned');
 	// Self-signup already defaults to contractor; enforce it in case that changes.
 	await db.update(user).set({ role: 'contractor' }).where(eq(user.id, id));
+	// Comp the demo permanently. Provisioned fresh it would otherwise start a
+	// 14-day trial and the public demo would silently lapse two weeks later. Note
+	// that `seedDemoData` deliberately does not touch the subscription row, so a
+	// re-seed cannot reset billing state either.
+	await compSubscription(id);
 	return id;
 }
 
@@ -180,6 +186,7 @@ async function seedDemoData(contractorId: string): Promise<void> {
 			projectType: o.type,
 			icon: o.icon ?? null,
 			state: o.state,
+			tags: o.tags ?? [],
 			nextFollowUpAt: o.followUpDays === null ? null : inDays(o.followUpDays)
 		});
 		// A customer-visible status entry...

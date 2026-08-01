@@ -4,9 +4,16 @@
 	import { ORDER_ICONS } from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
 	import Guide from '$lib/Guide.svelte';
+	import TrialNotice from '$lib/TrialNotice.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	// Trial state comes from the contractor layout. Only shown while a trial is
+	// actually live — a paid or comped subscription has nothing to say here.
+	const onTrial = $derived(
+		data.billing.status === 'trialing' && data.billing.canWrite && !data.trialNoticeDismissed
+	);
 
 	// The server decides whether the guide starts open (nothing due, still something
 	// to learn, not dismissed); the header button overrides that for this visit.
@@ -72,6 +79,10 @@
 			>
 		</span>
 	</header>
+
+	{#if onTrial}
+		<TrialNotice limits={data.billing.limits} />
+	{/if}
 
 	{#if guideOpen}
 		<Guide guide={data.guide} onclose={() => (openOverride = false)} />

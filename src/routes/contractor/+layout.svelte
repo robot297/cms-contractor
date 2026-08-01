@@ -22,6 +22,31 @@
 	const onSubcontractors = $derived(path.startsWith('/contractor/subcontractors'));
 	const onTemplates = $derived(path.startsWith('/contractor/settings/templates'));
 	const onSupport = $derived(path.startsWith('/contractor/support'));
+	const onBilling = $derived(path.startsWith('/contractor/billing'));
+
+	// Billing chrome. The banner is the only signal a lapsed contractor gets in the
+	// app itself — every page still loads and reads normally, by design, so without
+	// this the refusal would only appear when they tried to save something.
+	const billing = $derived(data.billing);
+	const showLapsed = $derived(!billing.canWrite);
+	// A refused write, surfaced once for the whole section. Individual pages gate
+	// their error text on their own action names (`form?.action === 'create'` and
+	// friends), so a billing refusal would otherwise render nowhere at all. Reading
+	// it from page.form here means every action on every contractor page is covered,
+	// including any added later.
+	const blocked = $derived(
+		page.form && typeof page.form === 'object' && 'blocked' in page.form
+			? (page.form as { blocked?: boolean; message?: string })
+			: null
+	);
+
+	// A persistent trial marker in the nav. This replaces the old last-week strip
+	// banner: the dashboard now carries the welcome and the detail, so a third copy
+	// of "you're on a trial" across the top of every page was just noise. The badge
+	// stays for the whole trial and tightens up in the last few days.
+	const onTrial = $derived(billing.canWrite && billing.status === 'trialing');
+	const trialDays = $derived(billing.trialDaysRemaining);
+	const trialUrgent = $derived(onTrial && trialDays !== null && trialDays <= 3);
 
 	const year = new Date().getFullYear();
 
@@ -171,8 +196,24 @@
 					<a href={resolve('/contractor/support')} class="navlink" class:is-active={onSupport}
 						>Support</a
 					>
+					<a href={resolve('/contractor/billing')} class="navlink" class:is-active={onBilling}
+						>Billing</a
+					>
 				</div>
 				<div class="nav-right">
+					{#if onTrial}
+						<a
+							class="trial-badge"
+							class:urgent={trialUrgent}
+							href={resolve('/contractor/billing')}
+							title={trialDays !== null
+								? `Free trial — ${trialDays} ${trialDays === 1 ? 'day' : 'days'} left`
+								: 'Free trial'}
+						>
+							<span class="dot" aria-hidden="true"></span>
+							Trial{#if trialDays !== null}<span class="trial-days">· {trialDays}d</span>{/if}
+						</a>
+					{/if}
 					<!-- Mobile/tablet home for the theme toggle: the bar's icon button is
 					     hidden at this width. Icon-only, with the label carried by aria so it
 					     costs a square instead of a row. Same shared store as the bar's. -->
@@ -221,6 +262,27 @@
 		</nav>
 	</div>
 	<div class="hazard"></div>
+
+	{#if showLapsed}
+		<div class="billing-banner lapsed" role="status">
+			<span>
+				<strong
+					>{billing.reason === 'trial-ended'
+						? 'Your free trial has ended.'
+						: 'Your subscription has ended.'}</strong
+				>
+				Everything is still here and still readable — you just can't make changes until you subscribe.
+			</span>
+			<a class="banner-cta" href={resolve('/contractor/billing')}>Choose a plan</a>
+		</div>
+	{/if}
+
+	{#if blocked?.blocked}
+		<div class="billing-banner blocked" role="alert">
+			<span>{blocked.message}</span>
+			<a class="banner-cta" href={resolve('/contractor/billing')}>Choose a plan</a>
+		</div>
+	{/if}
 
 	<main style="flex: 1;">
 		{@render children()}
@@ -319,8 +381,8 @@
 		justify-content: space-between;
 		gap: 1rem;
 	}
-	/* The rail: one continuous track holding all six links, so the nav reads as a
-	   single control instead of six separate outlined buttons. */
+	/* The rail: one continuous track holding every link, so the nav reads as a
+	   single control instead of a row of separate outlined buttons. */
 	.nav-links {
 		position: relative;
 		display: flex;
@@ -435,6 +497,56 @@
 			animation: none;
 			opacity: 0;
 		}
+	}
+
+	/* Trial marker. Sits with the user chrome so it rides the bar in both themes and
+	   drops into the collapsed menu at narrow widths without extra work. Yellow reads
+	   on either bar, and the label is dark-pinned because yellow stays light in dark. */
+	.trial-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		flex-shrink: 0;
+		padding: 0.3rem 0.7rem;
+		border-radius: 999px;
+		border: 1.5px solid #14171c;
+		background: var(--yellow);
+		color: #14171c;
+		text-decoration: none;
+		font-size: 0.7rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
+	}
+	.trial-badge:hover {
+		background: var(--yellow-deep);
+	}
+	.trial-badge:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+	}
+	.trial-days {
+		font-variant-numeric: tabular-nums;
+		opacity: 0.75;
+	}
+	.dot {
+		width: 0.4rem;
+		height: 0.4rem;
+		border-radius: 50%;
+		background: #14171c;
+	}
+	/* Last few days: amber with light type, so it stops reading as a welcome. */
+	.trial-badge.urgent {
+		background: #bf8700;
+		border-color: #8a6200;
+		color: #fff;
+	}
+	.trial-badge.urgent:hover {
+		background: #a67400;
+	}
+	.trial-badge.urgent .dot {
+		background: #fff;
 	}
 
 	.username {
@@ -565,7 +677,7 @@
 	}
 
 	/* Tablet + mobile: collapse behind the hamburger as an animated overlay. The
-	   inline bar can't fit six links, so tablets get the menu too. */
+	   inline bar can't fit the full link set, so tablets get the menu too. */
 	@media (max-width: 1024px) {
 		.hamburger {
 			display: inline-flex;
@@ -654,6 +766,10 @@
 			padding: 0 0.2rem;
 			margin-right: auto;
 		}
+		/* The badge leads the row in the menu, ahead of the name. */
+		.trial-badge {
+			order: -1;
+		}
 		.theme-row {
 			display: inline-flex;
 		}
@@ -663,5 +779,57 @@
 			border-radius: 999px;
 			padding: 0.4rem 0.9rem;
 		}
+	}
+
+	/* Billing banner. Sits directly under the nav so it is the first thing on every
+	   contractor page — a lapsed contractor's pages otherwise look completely normal,
+	   because reading is deliberately unaffected. */
+	.billing-banner {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.75rem 1rem;
+		flex-wrap: wrap;
+		padding: 0.7rem 1rem;
+		font-size: 0.88rem;
+		line-height: 1.45;
+		border-bottom: 1px solid var(--line);
+	}
+	/* A write that was just refused — same treatment as the lapsed banner, but it
+	   appears in response to an action rather than on every page. */
+	.billing-banner.blocked {
+		background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+		color: var(--fg);
+		border-bottom-color: var(--danger);
+		font-weight: 600;
+	}
+	.billing-banner.lapsed {
+		background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+		color: var(--fg);
+		border-bottom-color: var(--danger);
+	}
+	.banner-cta {
+		flex-shrink: 0;
+		padding: 0.35rem 0.85rem;
+		border-radius: 999px;
+		background: #14171c;
+		color: #fff;
+		text-decoration: none;
+		font-weight: 800;
+		font-size: 0.78rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	.banner-cta:hover {
+		background: #000;
+	}
+	/* Scoped to .banner-cta specifically — a bare `[data-theme='dark'] a` here would
+	   outrank more specific link rules elsewhere in this file. */
+	:global(:root[data-theme='dark']) .banner-cta {
+		background: var(--fg);
+		color: #14171c;
+	}
+	:global(:root[data-theme='dark']) .banner-cta:hover {
+		background: #fff;
 	}
 </style>

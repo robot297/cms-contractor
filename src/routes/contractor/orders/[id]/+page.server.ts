@@ -4,7 +4,8 @@ import {
 	formatBytes,
 	isAllowedAttachmentType,
 	isContractorOrderState,
-	isSnoozePreset
+	isSnoozePreset,
+	parseTags
 } from '$lib/crm';
 import {
 	addAttachment,
@@ -14,6 +15,7 @@ import {
 	deleteOrder,
 	getOrderDetail,
 	setFollowUp,
+	setOrderTags,
 	snoozeFollowUp,
 	updateOrderState
 } from '$lib/server/crm.server';
@@ -24,6 +26,7 @@ import {
 	unassignSubcontractor
 } from '$lib/server/subcontractor.server';
 import type { Actions, PageServerLoad } from './$types';
+import { withBillingErrors } from '$lib/server/billing.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -48,7 +51,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	};
 };
 
-export const actions: Actions = {
+// Wrapped so a billing refusal from any guarded write returns a 402 the form
+// can render, rather than a 500. See withBillingErrors.
+export const actions: Actions = withBillingErrors({
 	updateStatus: async ({ request, locals, params }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
@@ -56,6 +61,13 @@ export const actions: Actions = {
 		const note = form.get('note')?.toString() || undefined;
 		if (!isContractorOrderState(state)) return fail(400, { message: 'Invalid state' });
 		await updateOrderState(params.id, user.id, state, note);
+		return { success: true };
+	},
+
+	setTags: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		await setOrderTags(params.id, user.id, parseTags(form.get('tags')?.toString() ?? ''));
 		return { success: true };
 	},
 
@@ -154,4 +166,4 @@ export const actions: Actions = {
 		await deleteOrder(params.id, user.id);
 		redirect(303, '/contractor/orders');
 	}
-};
+});

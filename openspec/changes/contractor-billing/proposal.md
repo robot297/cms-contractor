@@ -19,10 +19,12 @@ Non-goals: multi-seat companies (one bill, several Contractor logins) — pricin
 ## Capabilities
 
 ### New Capabilities
+
 - `contractor-subscription`: The Subscription lifecycle — creation at sign-up, the 14-day Trial, Trial Limits measured over active records, the transition to Lapsed, Comped subscriptions, and the read-only enforcement rules including the explicit guarantee that Customer and Subcontractor portals are unaffected.
 - `subscription-payments`: Taking money — the public pricing surface, Stripe hosted Checkout for subscribing, the Stripe Billing Portal for self-service management, and webhook-driven synchronisation of the local subscription row.
 
 ### Modified Capabilities
+
 - `customer-relations`: Contractor-side write requirements (create/manage orders, publish status updates, attach invoices, quick state changes, send invites, message customers) become conditional on a live Subscription and, during the Trial, on remaining within Trial Limits. Customer-side requirements are explicitly **unchanged** and are restated as such so a future reader does not "fix" the asymmetry.
 
 ## Impact

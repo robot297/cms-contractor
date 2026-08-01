@@ -3,7 +3,7 @@
 When a Contractor's **Trial** ends or their payment fails, the Contractor drops to read-only — but their
 **Customers** and assigned **Subcontractors** notice nothing. Sam still opens his portal, still reads his
 timeline, still sends a request; a Trusted Subcontractor still posts notes and job photos to an assigned
-Order. The billing gate is scoped to writes performed *by the Contractor*, never to the portals hanging
+Order. The billing gate is scoped to writes performed _by the Contractor_, never to the portals hanging
 off their account.
 
 ## Context / trade-off
@@ -25,7 +25,7 @@ visible and unhostaged, so the upgrade prompt reads as an invitation rather than
 - Customer-portal writes (requests) and Subcontractor write-backs (timeline notes, photos) continue to
   land on a Lapsed Contractor's Orders. Their timelines keep moving while they cannot answer — which is
   the pressure we're comfortable applying, because it's felt by Dana and not by Sam.
-- Sending an **Invite** *is* a Contractor write and stops. A Lapsed Contractor grows no new portals; the
+- Sending an **Invite** _is_ a Contractor write and stops. A Lapsed Contractor grows no new portals; the
   existing ones are untouched.
 - The gate therefore lives at the point of each contractor-side mutation, not in a single guard on
   `/contractor`. Enforcement is per-write and must be applied to new contractor actions as they are added.

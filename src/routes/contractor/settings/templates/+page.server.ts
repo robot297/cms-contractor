@@ -8,7 +8,9 @@ import {
 	saveContractorSettings,
 	updateEmailTemplate
 } from '$lib/server/templates.server';
+import { deleteContractorTag } from '$lib/server/tags.server';
 import type { Actions, PageServerLoad } from './$types';
+import { withBillingErrors } from '$lib/server/billing.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -40,7 +42,23 @@ function readTemplate(form: FormData): { name: string; subject: string; body: st
 	};
 }
 
-export const actions: Actions = {
+// Wrapped so a billing refusal from any guarded write returns a 402 the form
+// can render, rather than a 500. See withBillingErrors.
+export const actions: Actions = withBillingErrors({
+	/**
+	 * Retire a tag. Global and destructive — it strips the tag from every customer,
+	 * order and subcontractor — so it lives here in settings rather than inside the
+	 * tag field on every record.
+	 */
+	deleteTag: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const tag = form.get('tag')?.toString() ?? '';
+		if (!tag.trim()) return fail(400, { action: 'tag', message: 'A tag is required' });
+		await deleteContractorTag(user.id, tag);
+		return { success: true };
+	},
+
 	createTemplate: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const input = readTemplate(await request.formData());
@@ -95,4 +113,4 @@ export const actions: Actions = {
 		});
 		return { success: true, saved: 'signature' };
 	}
-};
+});

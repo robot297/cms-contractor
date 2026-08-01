@@ -23,6 +23,11 @@ import {
 	type SnoozePreset,
 	type TimelineKind
 } from '$lib/crm';
+// Billing gate. Every contractor-initiated mutation below calls one of these
+// before touching the database. It is deliberately NOT a single guard on the
+// /contractor layout: a lapsed contractor must still be able to read everything
+// they built. See docs/adr/0005-lapsing-never-reaches-customers.md.
+import { assertCanCreate, assertCanWrite } from './billing.server';
 
 /** How long a customer invite / magic link stays valid. */
 const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -114,6 +119,7 @@ export async function createCustomer(
 	contractorId: string,
 	input: CustomerDetailsInput
 ): Promise<CustomerRow> {
+	await assertCanCreate(contractorId, 'customer');
 	const name = input.name.trim();
 	const email = normalizeEmail(input.email);
 	const [existing] = await db
@@ -143,6 +149,7 @@ export async function editCustomer(
 	id: string,
 	input: CustomerDetailsInput
 ): Promise<CustomerRow> {
+	await assertCanWrite(contractorId);
 	const current = await ownedCustomer(contractorId, id);
 	if (!current) throw new Error('Customer not found');
 	const name = input.name.trim();
@@ -186,6 +193,7 @@ export async function editCustomer(
 
 /** Archive a customer — always a soft-archive (state change), never a delete. */
 export async function archiveCustomer(contractorId: string, id: string): Promise<void> {
+	await assertCanWrite(contractorId);
 	const current = await ownedCustomer(contractorId, id);
 	if (!current) throw new Error('Customer not found');
 	await db.update(customer).set({ archivedAt: new Date() }).where(eq(customer.id, id));
@@ -204,6 +212,7 @@ export async function setCustomerAvatar(
 	customerId: string,
 	dataUrl: string | null
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const owned = await ownedCustomer(contractorId, customerId);
 	if (!owned) throw new Error('Customer not found');
 	if (dataUrl !== null && !isValidAvatarDataUrl(dataUrl)) throw new InvalidAvatarError();
@@ -310,12 +319,14 @@ export type CreateOrderInput = {
 	projectName?: string;
 	projectType?: string;
 	state?: ContractorOrderState;
+	tags?: string[];
 };
 
 export async function createOrder(
 	contractorId: string,
 	input: CreateOrderInput
 ): Promise<OrderRow> {
+	await assertCanCreate(contractorId, 'order');
 	const owned = await ownedCustomer(contractorId, input.customerId);
 	if (!owned) throw new Error('Customer not found');
 	const [row] = await db
@@ -326,11 +337,37 @@ export async function createOrder(
 			projectName: input.projectName ?? null,
 			projectType: input.projectType ?? null,
 			state: input.state ?? 'Inquiry',
+			tags: input.tags ?? [],
 			// New orders get a default follow-up 3 days out.
 			nextFollowUpAt: defaultFollowUp()
 		})
 		.returning();
+
+	// Open the timeline with the order's own creation, so it never starts blank and
+	// the first status is anchored to a date. Customer-visible: "we've got your job"
+	// is exactly the kind of thing the portal exists to say.
+	await db.insert(timelineEntry).values({
+		orderId: row.id,
+		kind: 'status',
+		title: 'Order created',
+		detail: row.projectName ? `${row.projectName} added for ${owned.name}.` : '',
+		authorRole: 'contractor',
+		internal: false
+	});
+
 	return row;
+}
+
+/** Replace an order's tags. Pass an empty array to clear them. */
+export async function setOrderTags(
+	orderId: string,
+	contractorId: string,
+	tags: string[]
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const owned = await contractorOrder(orderId, contractorId);
+	if (!owned) throw new Error('Order not found');
+	await db.update(order).set({ tags }).where(eq(order.id, orderId));
 }
 
 /** Set (or clear, with null) an order's next follow-up date. */
@@ -339,6 +376,7 @@ export async function setFollowUp(
 	contractorId: string,
 	date: Date | null
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const existing = await contractorOrder(orderId, contractorId);
 	if (!existing) throw new Error('Order not found');
 	await db.update(order).set({ nextFollowUpAt: date }).where(eq(order.id, orderId));
@@ -350,12 +388,14 @@ export async function setOrderIcon(
 	contractorId: string,
 	icon: string | null
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const existing = await contractorOrder(orderId, contractorId);
 	if (!existing) throw new Error('Order not found');
 	await db.update(order).set({ icon }).where(eq(order.id, orderId));
 }
 
 /** Snooze an order's follow-up forward by a preset, from now. */
+/** Billing-guarded via `setFollowUp`; deliberately not double-checked here. */
 export async function snoozeFollowUp(
 	orderId: string,
 	contractorId: string,
@@ -385,6 +425,7 @@ export async function updateOrderState(
 	newState: ContractorOrderState,
 	note?: string
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const existing = await contractorOrder(orderId, contractorId);
 	if (!existing) throw new Error('Order not found');
 
@@ -524,6 +565,7 @@ export async function addAttachment(
 	contractorId: string,
 	file: { filename: string; mimeType: string; size: number; data: Buffer }
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const owned = await contractorOrder(orderId, contractorId);
 	if (!owned) throw new Error('Order not found');
 	await db.insert(attachment).values({
@@ -548,6 +590,7 @@ export async function getAttachment(id: string, contractorId: string) {
 
 /** Delete an attachment owned by the contractor. */
 export async function deleteAttachment(id: string, contractorId: string): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.delete(attachment)
 		.where(and(eq(attachment.id, id), eq(attachment.contractorId, contractorId)));
@@ -559,6 +602,7 @@ export async function addOrderNote(
 	contractorId: string,
 	detail: string
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const existing = await contractorOrder(orderId, contractorId);
 	if (!existing) throw new Error('Order not found');
 	const trimmed = detail.trim();
@@ -579,6 +623,7 @@ export async function addOrderNote(
  * from the app while the data (timeline, attachments) is preserved.
  */
 export async function deleteOrder(orderId: string, contractorId: string): Promise<void> {
+	await assertCanWrite(contractorId);
 	const owned = await contractorOrder(orderId, contractorId);
 	if (!owned) throw new Error('Order not found');
 	await db.update(order).set({ deletedAt: new Date() }).where(eq(order.id, orderId));
@@ -725,6 +770,7 @@ export function listInvites(contractorId: string): Promise<InviteRow[]> {
 
 /** Send an invite to one of the contractor's own customers (directory-level). */
 export async function createInvite(contractorId: string, customerId: string): Promise<InviteRow> {
+	await assertCanWrite(contractorId);
 	const cust = await ownedCustomer(contractorId, customerId);
 	if (!cust) throw new Error('Customer not found');
 	const [row] = await db
@@ -742,6 +788,7 @@ export async function createInvite(contractorId: string, customerId: string): Pr
 }
 
 export async function resendInvite(inviteId: string, contractorId: string): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.update(customerInvite)
 		.set({
@@ -753,6 +800,7 @@ export async function resendInvite(inviteId: string, contractorId: string): Prom
 }
 
 export async function revokeInvite(inviteId: string, contractorId: string): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.update(customerInvite)
 		.set({ status: 'revoked' })
@@ -761,6 +809,7 @@ export async function revokeInvite(inviteId: string, contractorId: string): Prom
 
 /** Permanently delete an invite. */
 export async function deleteInvite(inviteId: string, contractorId: string): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.delete(customerInvite)
 		.where(and(eq(customerInvite.id, inviteId), eq(customerInvite.contractorId, contractorId)));

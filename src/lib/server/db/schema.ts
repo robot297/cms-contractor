@@ -131,6 +131,10 @@ export const order = pgTable(
 		// chosen by the contractor to convey status / build type at a glance.
 		icon: text('icon'),
 		state: text('state').notNull().default('Inquiry'),
+		// Free-form labels the contractor applies to an order, shown on the order card
+		// so the list carries quick context ("urgent", "warranty", "awaiting permit")
+		// without opening anything. Same shape as customer/subcontractor tags.
+		tags: text('tags').array().notNull().default([]),
 		// Contractor-set date for the next follow-up (defaults to +3 days on create).
 		nextFollowUpAt: timestamp('next_follow_up_at'),
 		// Soft-delete: "Delete order" sets this timestamp; rows with it set are
@@ -325,12 +329,60 @@ export const contractorSettings = pgTable('contractor_settings', {
 	// The one step that can't be derived: every Order is born with a 3-day follow-up,
 	// so "has a follow-up" would tick itself. This step teaches and is acknowledged.
 	guideFollowUpAckAt: timestamp('guide_follow_up_ack_at'),
+	// The contractor put the trial welcome away. Same category as `guideState`: a
+	// choice that cannot be read back from domain data, so it is the kind of thing
+	// ADR-0004 says to store. The trial itself is still derived from `subscription`.
+	trialNoticeDismissedAt: timestamp('trial_notice_dismissed_at'),
 	createdAt: timestamp('created_at').defaultNow().notNull(),
 	updatedAt: timestamp('updated_at')
 		.defaultNow()
 		.$onUpdate(() => new Date())
 		.notNull()
 });
+
+// A contractor's billing standing. Exactly one row per contractor, provisioned on
+// signup (or lazily on their first contractor page load) and never absent.
+//
+// There is deliberately NO `plan` column: there is one thing to buy, priced per
+// contractor, so a plan column would exist only to be branched on — and the first
+// branch reintroduces the plan matrix we chose not to build. `status` plus
+// `trialEndsAt` is the whole model. Monthly vs annual is a Stripe price the app
+// never reads back. See docs/adr/0006-one-plan-priced-per-contractor.md.
+//
+// Lapsing is derived, not stored: a `trialing` row whose `trialEndsAt` has passed
+// IS lapsed (see `subscriptionAccess` in src/lib/crm.ts). No scheduler writes here.
+export const subscription = pgTable(
+	'subscription',
+	{
+		contractorId: text('contractor_id')
+			.primaryKey()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		// trialing | active | past_due | lapsed | comped
+		status: text('status').notNull().default('trialing'),
+		// When the free trial runs out. Null for comped subscriptions, which never expire.
+		trialEndsAt: timestamp('trial_ends_at'),
+		// End of the current paid period, mirrored from Stripe for display.
+		currentPeriodEnd: timestamp('current_period_end'),
+		// Both null until the contractor first reaches checkout — a trial that never
+		// converts leaves no Stripe record and costs nothing.
+		stripeCustomerId: text('stripe_customer_id'),
+		stripeSubscriptionId: text('stripe_subscription_id'),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+		updatedAt: timestamp('updated_at')
+			.defaultNow()
+			.$onUpdate(() => new Date())
+			.notNull()
+	},
+	(table) => [
+		// Webhook reduction keys on the Stripe subscription id, so it must be unique.
+		uniqueIndex('subscription_stripe_subscription_idx').on(table.stripeSubscriptionId),
+		index('subscription_stripe_customer_idx').on(table.stripeCustomerId)
+	]
+);
+
+export const subscriptionRelations = relations(subscription, ({ one }) => ({
+	contractor: one(user, { fields: [subscription.contractorId], references: [user.id] })
+}));
 
 export const emailTemplateRelations = relations(emailTemplate, ({ one }) => ({
 	contractor: one(user, { fields: [emailTemplate.contractorId], references: [user.id] })

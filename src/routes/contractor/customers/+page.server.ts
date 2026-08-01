@@ -16,6 +16,7 @@ import {
 	setCustomerAvatar
 } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
+import { withBillingErrors } from '$lib/server/billing.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -26,14 +27,13 @@ function requireContractor(locals: App.Locals) {
 export const load: PageServerLoad = async ({ locals }) => {
 	const user = requireContractor(locals);
 	// Load the full directory; search is filtered live on the client.
-	const [customers, invites] = await Promise.all([
-		listCustomers(user.id),
-		listInvites(user.id)
-	]);
+	const [customers, invites] = await Promise.all([listCustomers(user.id), listInvites(user.id)]);
 	return { customers, invites, userName: user.name };
 };
 
-export const actions: Actions = {
+// Wrapped so a billing refusal from any guarded write returns a 402 the form
+// can render, rather than a 500. See withBillingErrors.
+export const actions: Actions = withBillingErrors({
 	addCustomer: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
@@ -48,13 +48,20 @@ export const actions: Actions = {
 		});
 		if (!contact.ok)
 			return fail(400, { action: 'add', field: contact.field, message: contact.message });
+		// `next=order` comes from the "Add & create order" button: the contractor is
+		// adding this customer *in order to* book work for them, so hand them straight
+		// to the new-order form with the customer already chosen rather than making
+		// them find it again.
+		const next = form.get('next')?.toString();
+		let created;
 		try {
-			await createCustomer(user.id, contact.value);
+			created = await createCustomer(user.id, contact.value);
 		} catch (error) {
 			if (error instanceof DuplicateCustomerEmailError)
 				return fail(400, { action: 'add', field: 'email', message: error.message });
 			throw error;
 		}
+		if (next === 'order') redirect(303, `/contractor/orders?customer=${created.id}`);
 		return { success: true };
 	},
 
@@ -140,4 +147,4 @@ export const actions: Actions = {
 		}
 		return { success: true };
 	}
-};
+});

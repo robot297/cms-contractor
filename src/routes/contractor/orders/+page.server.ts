@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { validateOrderSetup } from '$lib/crm';
+import { parseTags, validateOrderSetup } from '$lib/crm';
 import {
 	addOrderNote,
 	createInvite,
@@ -11,6 +11,7 @@ import {
 	type OrderNote
 } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
+import { withBillingErrors } from '$lib/server/billing.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -39,7 +40,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	};
 };
 
-export const actions: Actions = {
+// Wrapped so a billing refusal from any guarded write returns a 402 the form
+// can render, rather than a 500. See withBillingErrors.
+export const actions: Actions = withBillingErrors({
 	createOrder: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
@@ -51,7 +54,10 @@ export const actions: Actions = {
 		});
 		if (!setup.ok)
 			return fail(400, { action: 'create', field: setup.field, message: setup.message });
-		await createOrder(user.id, setup.value);
+		await createOrder(user.id, {
+			...setup.value,
+			tags: parseTags(form.get('tags')?.toString() ?? '')
+		});
 		return { success: true };
 	},
 
@@ -81,4 +87,4 @@ export const actions: Actions = {
 		await createInvite(user.id, customerId);
 		return { success: true };
 	}
-};
+});

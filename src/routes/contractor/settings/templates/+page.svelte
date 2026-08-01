@@ -94,6 +94,9 @@
 			signature
 		)
 	);
+
+	// Which tag is awaiting delete confirmation.
+	let confirmingTag = $state<string | null>(null);
 </script>
 
 <svelte:head><title>Email templates · Settings</title></svelte:head>
@@ -109,6 +112,53 @@
 				<li><code>{`{{${p.token}}}`}</code> <span>{p.label}</span></li>
 			{/each}
 		</ul>
+	</section>
+
+	<!-- Tags. The vocabulary is derived from what's actually in use, so retiring one
+	     means stripping it off every record that carries it — which is why it asks. -->
+	<section class="card">
+		<h2>Tags</h2>
+		{#if data.contractorTags.length === 0}
+			<p class="tags-none">
+				No tags yet. Add them on a customer, order or subcontractor and they'll collect here.
+			</p>
+		{:else}
+			<p class="tags-hint">
+				Used across your customers, orders and subcontractors. Deleting one removes it from every
+				record that uses it.
+			</p>
+			<ul class="tag-list">
+				{#each data.contractorTags as tag (tag)}
+					<li>
+						<span class="tag-name">{tag}</span>
+						{#if confirmingTag === tag}
+							<form
+								method="POST"
+								action="?/deleteTag"
+								use:enhance={() =>
+									async ({ update }) => {
+										confirmingTag = null;
+										await update();
+									}}
+							>
+								<input type="hidden" name="tag" value={tag} />
+								<button type="submit" class="tag-yes">Delete everywhere</button>
+							</form>
+							<button type="button" class="tag-no" onclick={() => (confirmingTag = null)}
+								>Cancel</button
+							>
+						{:else}
+							<button
+								type="button"
+								class="tag-del"
+								aria-label={`Delete tag ${tag}`}
+								onclick={() => (confirmingTag = tag)}>Delete</button
+							>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</section>
 
 	<!-- Signature / branding -->
@@ -679,5 +729,63 @@
 	}
 	:global(:root[data-theme='dark']) .ok {
 		color: #4ac26b;
+	}
+	.tags-hint,
+	.tags-none {
+		margin: 0;
+		font-size: 0.85rem;
+		color: var(--fg-muted);
+		line-height: 1.5;
+	}
+	.tag-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.3rem;
+	}
+	.tag-list li {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.4rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		background: var(--surface-sunken);
+	}
+	.tag-name {
+		flex: 1;
+		min-width: 0;
+		font-size: 0.85rem;
+		font-weight: 700;
+		overflow-wrap: anywhere;
+	}
+	.tag-del,
+	.tag-no {
+		border: none;
+		background: none;
+		padding: 0.2rem 0.4rem;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.78rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.tag-del:hover {
+		color: var(--danger);
+	}
+	.tag-no:hover {
+		color: var(--fg);
+	}
+	.tag-yes {
+		border: 1px solid var(--danger);
+		background: var(--danger);
+		color: #fff;
+		border-radius: 999px;
+		padding: 0.25rem 0.7rem;
+		font-family: inherit;
+		font-size: 0.75rem;
+		font-weight: 700;
+		cursor: pointer;
 	}
 </style>

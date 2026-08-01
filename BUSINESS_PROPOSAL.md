@@ -1,4 +1,5 @@
 # Business Proposal: Contractor CRM
+
 ## Work Tracking + Client Portal for Independent Contractors
 
 **Document Date:** July 19, 2026
@@ -21,7 +22,7 @@ Version 1.0 of this proposal scoped an ultra-minimal, login-free status tracker.
 
 ## Problem Statement
 
-Contractors lose business due to poor communication, not poor work quality. Today they juggle scattered email, memory, and spreadsheets, which leads to missed follow-ups, time wasted reconstructing "what do I owe this client?", and clients left anxious and chasing updates. The core need: a **low-friction** way to track work *and* keep clients informed without adding administrative overhead.
+Contractors lose business due to poor communication, not poor work quality. Today they juggle scattered email, memory, and spreadsheets, which leads to missed follow-ups, time wasted reconstructing "what do I owe this client?", and clients left anxious and chasing updates. The core need: a **low-friction** way to track work _and_ keep clients informed without adding administrative overhead.
 
 ---
 
@@ -61,13 +62,13 @@ Customer:
 
 ### Value Proposition
 
-| Stakeholder | Value | Outcome |
-|---|---|---|
+| Stakeholder    | Value                         | Outcome                                    |
+| -------------- | ----------------------------- | ------------------------------------------ |
 | **Contractor** | One home for customers + work | Never lose track of a client or obligation |
-| **Contractor** | One-tap status updates | Save hours/week on client communication |
-| **Contractor** | Professional client portal | Improved reputation and repeat business |
-| **Customer** | Real-time project visibility | Reduced anxiety, increased trust |
-| **Customer** | A place to ask and be heard | Better experience, more referrals |
+| **Contractor** | One-tap status updates        | Save hours/week on client communication    |
+| **Contractor** | Professional client portal    | Improved reputation and repeat business    |
+| **Customer**   | Real-time project visibility  | Reduced anxiety, increased trust           |
+| **Customer**   | A place to ask and be heard   | Better experience, more referrals          |
 
 ### Success Metrics
 
@@ -93,11 +94,14 @@ Customer:
 - **Documents** — contractors upload documents, tag them, share them with a client, and request a response/acknowledgement (see the `customer-documents` change).
 - **Order/update templates** — reusable templates to set up orders and post updates faster.
 
+- **Subscription billing** — a 14-day free trial on signup (every feature, capped at 25 active customers, 25 active orders and 3 subcontractors), then one plan at $29 per contractor per month or $290 per year, unlimited. Payment runs through Stripe's hosted checkout and billing portal.
+
 ### Deliberately Deferred
 
-- Full accounting/invoicing/payments and time tracking.
+- Full accounting/invoicing and time tracking, and any handling of the money that moves between a **contractor and their own customer** — the `Deposit Pending` and `Final Payment Pending` order states remain status labels the contractor sets by hand. (Subscription billing, above, is the only money this product moves.)
 - Heavyweight project management (dependencies, Gantt, resource planning).
-- Multi-tenant enterprise administration.
+- Multi-tenant enterprise administration, including multi-seat companies: pricing is already expressed per contractor, so a firm buying several logins under one bill is a later change rather than a repricing.
+- Pricing tiers. There is one plan by design — see [ADR-0006](docs/adr/0006-one-plan-priced-per-contractor.md).
 
 The guiding constraint remains **ruthless simplicity at the point of use**: every feature must reduce, not add, friction for a busy contractor. Richer data is fine as long as the day-to-day flows stay fast.
 
@@ -105,12 +109,12 @@ The guiding constraint remains **ruthless simplicity at the point of use**: ever
 
 ## Technical Stack
 
-| Component | Technology |
-|---|---|
-| **Framework** | SvelteKit (Svelte 5) |
-| **Auth** | better-auth (email/password + GitHub OAuth) |
-| **Database** | PostgreSQL via Drizzle ORM |
-| **Validation** | Zod (shared client/server schemas) |
+| Component      | Technology                                             |
+| -------------- | ------------------------------------------------------ |
+| **Framework**  | SvelteKit (Svelte 5)                                   |
+| **Auth**       | better-auth (email/password + GitHub OAuth)            |
+| **Database**   | PostgreSQL via Drizzle ORM                             |
+| **Validation** | Zod (shared client/server schemas)                     |
 | **Deployment** | Node adapter (`@sveltejs/adapter-node`), containerized |
 
 **Why:** SvelteKit's form actions keep the server/client boundary simple; Drizzle + Postgres give us a real relational model for customers, orders, and documents; Zod shares one validation contract across client and server.
@@ -119,12 +123,12 @@ The guiding constraint remains **ruthless simplicity at the point of use**: ever
 
 ## Risks & Mitigations
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| Feature growth erodes the simplicity that drives adoption | High | Hold the line on point-of-use simplicity; measure per-flow friction with real contractors |
-| Customers don't accept portal invites | Medium | Frictionless magic-link onboarding; contractor controls the invite |
-| Document storage/security complexity | Medium | Start with local disk + DB metadata; scoped access; migrate to object storage as needed |
-| Contractor forgets to update status | Medium | Dashboard surfaces follow-ups and "needs attention" |
+| Risk                                                      | Impact | Mitigation                                                                                |
+| --------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------- |
+| Feature growth erodes the simplicity that drives adoption | High   | Hold the line on point-of-use simplicity; measure per-flow friction with real contractors |
+| Customers don't accept portal invites                     | Medium | Frictionless magic-link onboarding; contractor controls the invite                        |
+| Document storage/security complexity                      | Medium | Start with local disk + DB metadata; scoped access; migrate to object storage as needed   |
+| Contractor forgets to update status                       | Medium | Dashboard surfaces follow-ups and "needs attention"                                       |
 
 ---
 

@@ -1,13 +1,18 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
-	import { PROJECT_TYPES } from '$lib/crm';
+	import { formatLocation, PROJECT_TYPES } from '$lib/crm';
+	import TagPicker from '$lib/TagPicker.svelte';
 	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	// Trial capacity, from the contractor layout. Null once they're on a paid or
+	// comped subscription, which are uncapped.
+	const atOrderLimit = $derived(data.billing.limits?.order.atLimit ?? false);
 
 	type OrderView = (typeof data.orders)[number];
 	type NoteView = (typeof data.notesByOrder)[string][number];
@@ -71,22 +76,33 @@
 	// New order modal
 	let newOrderDialog: HTMLDialogElement | undefined = $state();
 	let projectType = $state('');
-	let customerQuery = $state('');
-	const modalCustomers = $derived.by(() => {
-		const q = customerQuery.trim().toLowerCase();
-		if (q === '') return data.customers;
-		return data.customers.filter((c) => c.name.toLowerCase().includes(q) || c.email.includes(q));
-	});
+
+	/** "Dana Whitfield — Austin, TX", falling back to the bare name. */
+	function customerLabel(c: { name: string; address: string | null }): string {
+		const where = formatLocation(c.address);
+		return where ? `${c.name} — ${where}` : c.name;
+	}
+
+	// Still used by the inline "add note" input on each order card; the new-order
+	// modal now uses the token-driven `.field` class instead.
+	const field = 'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 
 	function openNewOrder() {
 		projectType = '';
-		customerQuery = '';
 		newOrderDialog?.showModal();
 	}
 
-	function fmtDate(d: Date | string | null): string {
-		return d ? new Date(d).toLocaleDateString() : '—';
-	}
+	// Open the create form on arrival in the two cases where the page has nothing
+	// else to offer:
+	//   - ?customer=… — "Add & create order" just made that customer and sent us here
+	//     to book the work (the select preselects them via `data.presetCustomerId`).
+	//   - no orders at all — which is exactly when the getting-started guide's
+	//     "Create an order" step points here, mirroring the customers directory.
+	// Needs a customer to exist, or the form has nothing to pick from.
+	onMount(() => {
+		if (data.customers.length === 0) return;
+		if (data.presetCustomerId || data.orders.length === 0) newOrderDialog?.showModal();
+	});
 
 	// Show the project type only when the name doesn't already say it, so
 	// "Poolside Pergola" + type "Pergola" reads as one line, not "… · Pergola".
@@ -116,7 +132,6 @@
 		}
 	}
 
-	const field = 'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 	const primaryBtn =
 		'padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
 	const iconBtn = 'width: 2.5rem; height: 2.5rem; font-size: 1.7rem;';
@@ -197,9 +212,12 @@
 
 	<section style="display: grid; gap: 0.75rem;">
 		{#if visibleOrders.length === 0}
-			<p style="color: #57606a;">
+			<!-- Just states the fact, centred. The instruction to use New Order is gone:
+			     the button is right there, and with no orders the create form opens on
+			     arrival anyway. -->
+			<p class="empty-orders">
 				{view === 'active'
-					? 'No active orders — start one with New Order.'
+					? 'No active orders found.'
 					: view === 'completed'
 						? 'No completed orders yet.'
 						: 'No cancelled orders.'}
@@ -209,20 +227,26 @@
 		{#each visibleOrders as order (order.id)}
 			{@const badge = statusBadge(order.state)}
 			<article class="card">
-				<!-- Header: customer name leads, project subtitle; health badges on the right -->
+				<!-- Header: project name leads, customer + city underneath; status on the right -->
 				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start;">
 					<div style="display: grid; gap: 0.15rem; min-width: 0;">
-						<a
-							href={resolve(`/contractor/orders/${order.id}`)}
-							style="font-size: 1.3rem; font-weight: 800; color: inherit; text-decoration: none; line-height: 1.15;"
-						>
-							{order.customerName}
-						</a>
-						<div style="font-size: 0.9rem; color: #57606a;">
+						<a href={resolve(`/contractor/orders/${order.id}`)} class="card-title">
 							{order.projectName ??
-								'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)}
-								· {typeSuffix(order.projectName, order.projectType)}{/if}
+								'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)}<span
+									class="card-type"
+								>
+									· {typeSuffix(order.projectName, order.projectType)}</span
+								>{/if}
+						</a>
+						<div class="card-sub">
+							{order.customerName}{#if formatLocation(order.customerAddress)}
+								· {formatLocation(order.customerAddress)}{/if}
 						</div>
+						{#if order.tags.length > 0}
+							<div class="tag-chips" style="margin-top: 0.15rem;">
+								{#each order.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
+							</div>
+						{/if}
 					</div>
 
 					<div style="display: flex; gap: 0.4rem; align-items: center; flex-shrink: 0;">
@@ -265,15 +289,9 @@
 					</div>
 				{/if}
 
-				<!-- Follow-up (read-only) — overdue is flagged right on the date -->
+				<!-- Follow-up dates are deliberately absent here: due ones surface on the
+				     dashboard, which is where a contractor acts on them. -->
 				<div style="display: grid; gap: 0.5rem;">
-					<div style="font-size: 0.9rem;">
-						<span style="color: #57606a;">Next follow-up:</span>
-						<strong style="color: {order.followUpDue ? '#cf222e' : '#1f2328'};"
-							>{fmtDate(order.nextFollowUpAt)}</strong
-						>
-					</div>
-
 					{#if noteOpenId === order.id}
 						<div class="note-panel" transition:slide={{ duration: 220 }}>
 							<!-- Mobile: the disclosure below is hidden, so the note history lives
@@ -426,16 +444,6 @@
 				</div>
 				{#if c.phone}<div><span style="color: #57606a;">Phone:</span> {c.phone}</div>{/if}
 				{#if c.address}<div><span style="color: #57606a;">Address:</span> {c.address}</div>{/if}
-				{#if c.tags.length > 0}
-					<div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.2rem;">
-						{#each c.tags as tag (tag)}
-							<span
-								style="font-size: 0.75rem; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 999px; padding: 0.1rem 0.55rem;"
-								>{tag}</span
-							>
-						{/each}
-					</div>
-				{/if}
 				{#if c.notes}
 					<div style="margin-top: 0.3rem; color: #57606a; white-space: pre-wrap;">{c.notes}</div>
 				{/if}
@@ -449,11 +457,8 @@
 </dialog>
 
 <!-- New order modal -->
-<dialog
-	bind:this={newOrderDialog}
-	style="border: none; border-radius: 16px; padding: 0; max-width: 480px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
->
-	<div style="display: grid; gap: 0.7rem; padding: 1.25rem;">
+<dialog bind:this={newOrderDialog} class="neworder">
+	<div class="neworder-body">
 		<div style="display: flex; justify-content: space-between; align-items: center;">
 			<h2 style="margin: 0; font-size: 1.1rem;">New order</h2>
 			<button
@@ -463,6 +468,14 @@
 				>✕</button
 			>
 		</div>
+
+		{#if atOrderLimit}
+			<p class="limit-note">
+				Your trial covers {data.billing.limits?.order.limit} orders and you have {data.billing
+					.limits?.order.used}. Delete an order you no longer need to free a space, or
+				<a href={resolve('/contractor/billing')}>subscribe for unlimited</a>.
+			</p>
+		{/if}
 
 		{#if data.customers.length === 0}
 			<p style="margin: 0; color: #57606a;">
@@ -482,32 +495,31 @@
 					}}
 				style="display: grid; gap: 0.7rem;"
 			>
-				<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
+				<label class="fieldset">
 					Project name
-					<input name="projectName" required style={field} />
+					<input name="projectName" required class="field" />
 				</label>
 
-				<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
+				<!-- One selector, no search box. The list is a contractor's own directory,
+				     so it's short enough to scroll — and on a phone the native picker is
+				     a better control than a filter box plus a dropdown. Shows where the
+				     job is rather than an email, which is what tells two customers apart
+				     at a glance. -->
+				<label class="fieldset">
 					Customer
-					<input
-						value={customerQuery}
-						oninput={(e) => (customerQuery = e.currentTarget.value)}
-						placeholder="Search customers"
-						style={field}
-					/>
-					<select name="customerId" required style={field}>
+					<select name="customerId" required class="field picker">
 						<option value="" disabled selected={!data.presetCustomerId}>Choose a customer…</option>
-						{#each modalCustomers as c (c.id)}
+						{#each data.customers as c (c.id)}
 							<option value={c.id} selected={c.id === data.presetCustomerId}
-								>{c.name} · {c.email}</option
+								>{customerLabel(c)}</option
 							>
 						{/each}
 					</select>
 				</label>
 
-				<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
+				<label class="fieldset">
 					Project type
-					<select name="projectType" bind:value={projectType} required style={field}>
+					<select name="projectType" bind:value={projectType} required class="field picker">
 						<option value="" disabled>Choose a type…</option>
 						{#each PROJECT_TYPES as t (t)}
 							<option value={t}>{t}</option>
@@ -520,26 +532,21 @@
 						name="projectTypeOther"
 						placeholder="Describe the structure"
 						required
-						style={field}
+						class="field"
 					/>
 				{/if}
+
+				<TagPicker />
 
 				{#if form?.action === 'create' && form?.message}
 					<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">{form.message}</p>
 				{/if}
 
-				<div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-					<button
-						type="button"
-						onclick={() => newOrderDialog?.close()}
-						style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
+				<div class="neworder-actions">
+					<button type="button" onclick={() => newOrderDialog?.close()} class="no-cancel"
 						>Cancel</button
 					>
-					<button
-						type="submit"
-						style="padding: 0.55rem 1.1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600;"
-						>Create order</button
-					>
+					<button type="submit" class="no-submit">Create order</button>
 				</div>
 			</form>
 		{/if}
@@ -701,5 +708,192 @@
 		background: var(--surface-sunken);
 		border-color: var(--line);
 		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+	}
+
+	/* Shown in the new-order modal when a trial has run out of order slots. */
+	.limit-note {
+		margin: 0;
+		padding: 0.6rem 0.75rem;
+		border-radius: 8px;
+		border: 1.5px solid var(--yellow-deep);
+		background: color-mix(in srgb, var(--yellow) 18%, var(--surface));
+		color: var(--fg);
+		font-size: 0.83rem;
+		line-height: 1.5;
+	}
+	.limit-note a {
+		color: inherit;
+		font-weight: 700;
+	}
+
+	/* Empty list: centred in the view rather than hugging the top-left, so a page
+	   with nothing on it reads as deliberate instead of broken. */
+	.empty-orders {
+		margin: 0;
+		padding: 3rem 1rem;
+		text-align: center;
+		color: var(--fg-muted);
+		font-size: 0.95rem;
+	}
+
+	/* ------------------------------------------------------- New order modal
+	   Sized to the viewport, not to its content. The customer <select> lists
+	   "Name · email@address", and inside a grid label that long option text sets
+	   the column's max-content width — which is what pushed this dialog wider than
+	   a phone screen. `min-width: 0` stops the intrinsic width winning, and
+	   `width: 100%` + border-box keeps padding inside the box. */
+	.neworder {
+		border: none;
+		border-radius: 16px;
+		padding: 0;
+		width: min(92vw, 480px);
+		max-width: min(92vw, 480px);
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+	}
+	.neworder-body {
+		display: grid;
+		gap: 0.7rem;
+		padding: 1.25rem;
+		box-sizing: border-box;
+		/* Short screens — and the on-screen keyboard — leave very little height, so
+		   scroll the form rather than clipping the submit button off the bottom. */
+		max-height: min(85dvh, 40rem);
+		overflow-y: auto;
+	}
+	.neworder-body :global(label) {
+		min-width: 0;
+	}
+	.neworder-body :global(input),
+	.neworder-body :global(select) {
+		width: 100%;
+		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
+	}
+
+	.neworder-actions {
+		display: flex;
+		gap: 0.5rem;
+		justify-content: flex-end;
+		flex-wrap: wrap;
+	}
+	.neworder-actions button {
+		padding: 0.55rem 1.1rem;
+		border-radius: 999px;
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 0.9rem;
+	}
+	/* Cancel is the way out, not a peer of the submit — no fill, no border. */
+	.no-cancel {
+		border: none;
+		background: none;
+		color: var(--fg-muted);
+		padding: 0.55rem 0.4rem;
+		margin-right: auto;
+	}
+	.no-cancel:hover {
+		color: var(--fg);
+	}
+	.no-submit {
+		border: 1px solid #0969da;
+		background: #0969da;
+		color: #fff;
+		font-weight: 600;
+	}
+	.no-submit:hover {
+		background: #0860c4;
+	}
+	.neworder-actions button:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+	}
+	@media (max-width: 420px) {
+		/* (0,2,0) selectors — media queries add no specificity, so a bare `.no-submit`
+		   here would lose to the rules above. */
+		.neworder-actions .no-submit {
+			flex: 1 1 100%;
+		}
+		.neworder-actions .no-cancel {
+			order: 1;
+			flex: 0 0 auto;
+			margin: 0.1rem auto 0;
+		}
+	}
+
+	/* ---------------------------------------------------------- Order card head
+	   Project leads, customer + city underneath. */
+	.card-title {
+		font-size: 1.25rem;
+		font-weight: 800;
+		line-height: 1.2;
+		color: inherit;
+		text-decoration: none;
+		overflow-wrap: anywhere;
+	}
+	.card-title:hover {
+		text-decoration: underline;
+		text-decoration-color: var(--yellow-deep);
+		text-decoration-thickness: 2px;
+		text-underline-offset: 3px;
+	}
+	/* The type rides the title but shouldn't compete with it. */
+	.card-type {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--fg-muted);
+	}
+	.card-sub {
+		font-size: 0.9rem;
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+
+	/* --------------------------------------------------- New order modal fields
+	   Token-driven, so they follow the theme instead of the hardcoded greys the
+	   old inline style used (which stayed light-on-light in dark mode). */
+	.fieldset {
+		display: grid;
+		gap: 0.3rem;
+		min-width: 0;
+		font-size: 0.8rem;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
+		color: var(--fg-muted);
+	}
+	.field {
+		width: 100%;
+		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
+		/* 44px lands on the usual minimum comfortable tap target. */
+		min-height: 2.75rem;
+		padding: 0.55rem 0.7rem;
+		border-radius: 10px;
+		border: 1.5px solid var(--field-border);
+		background: var(--field-bg);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 1rem;
+		text-transform: none;
+		letter-spacing: normal;
+		font-weight: 400;
+	}
+	.field:focus-visible {
+		outline: none;
+		border-color: var(--yellow-deep);
+		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.28);
+	}
+	/* Native select, restyled: keeps the OS picker on mobile (the right control on
+	   a phone) while losing the default chrome. The chevron is a data-URI so it
+	   needs no asset, in a mid-grey that reads on both themes. */
+	.picker {
+		appearance: none;
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5l5-5' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+		background-repeat: no-repeat;
+		background-position: right 0.85rem center;
+		padding-right: 2.2rem;
+		cursor: pointer;
 	}
 </style>

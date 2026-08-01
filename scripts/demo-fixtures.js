@@ -21,7 +21,8 @@
 /**
  * @typedef {{
  *   cust: string, project: string, type: string, state: string,
- *   followUpDays: number | null, notes?: string[], icon?: string | null
+ *   followUpDays: number | null, notes?: string[], icon?: string | null,
+ *   tags?: string[]
  * }} DemoOrder
  */
 
@@ -205,6 +206,7 @@ export const DEMO_ORDERS = [
 	{
 		cust: 'mina',
 		project: 'Backyard Deck Rebuild',
+		tags: ['deposit paid', 'cedar'],
 		type: 'Deck',
 		state: 'In Progress',
 		followUpDays: -1, // overdue → shows as "due"
@@ -214,6 +216,7 @@ export const DEMO_ORDERS = [
 	{
 		cust: 'mina',
 		project: 'Poolside Pergola',
+		tags: ['awaiting permit'],
 		type: 'Pergola',
 		state: 'Quote Sent',
 		followUpDays: 3,

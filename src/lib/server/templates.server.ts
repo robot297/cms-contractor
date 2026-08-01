@@ -2,6 +2,10 @@ import { and, asc, eq } from 'drizzle-orm';
 import { db } from './db';
 import { contractorSettings, emailTemplate } from './db/schema';
 import { DEFAULT_SIGNATURE, STARTER_EMAIL_TEMPLATES } from '$lib/crm';
+// Billing gate. Applied to the contractor's own edits only — `ensureStarterTemplates`
+// and `getContractorSettings` below are provisioning, not contractor writes, and
+// must keep working for a lapsed contractor so their surfaces still render.
+import { assertCanWrite } from './billing.server';
 
 export type EmailTemplateRow = typeof emailTemplate.$inferSelect;
 export type ContractorSettingsRow = typeof contractorSettings.$inferSelect;
@@ -27,6 +31,7 @@ export async function createEmailTemplate(
 	contractorId: string,
 	input: TemplateInput
 ): Promise<EmailTemplateRow> {
+	await assertCanWrite(contractorId);
 	const existing = await listEmailTemplates(contractorId);
 	const nextOrder = existing.reduce((max, t) => Math.max(max, t.sortOrder + 1), 0);
 	const [row] = await db
@@ -42,6 +47,7 @@ export async function updateEmailTemplate(
 	contractorId: string,
 	input: TemplateInput
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.update(emailTemplate)
 		.set(input)
@@ -50,6 +56,7 @@ export async function updateEmailTemplate(
 
 /** Hard-delete a template. Scoped so a contractor can only delete their own. */
 export async function deleteEmailTemplate(id: string, contractorId: string): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.delete(emailTemplate)
 		.where(and(eq(emailTemplate.id, id), eq(emailTemplate.contractorId, contractorId)));
@@ -64,6 +71,7 @@ export async function reorderEmailTemplates(
 	contractorId: string,
 	orderedIds: string[]
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db.transaction(async (tx) => {
 		for (let i = 0; i < orderedIds.length; i++) {
 			await tx
@@ -103,10 +111,25 @@ export async function saveContractorSettings(
 	contractorId: string,
 	input: { businessName: string; signature: string }
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.insert(contractorSettings)
 		.values({ contractorId, ...input })
 		.onConflictDoUpdate({ target: contractorSettings.contractorId, set: input });
+}
+
+/**
+ * Put the trial welcome away. Deliberately not billing-guarded, like the Guide's
+ * dismiss: it is a UI preference, not domain data.
+ */
+export async function dismissTrialNotice(contractorId: string): Promise<void> {
+	await db
+		.insert(contractorSettings)
+		.values({ contractorId, trialNoticeDismissedAt: new Date() })
+		.onConflictDoUpdate({
+			target: contractorSettings.contractorId,
+			set: { trialNoticeDismissedAt: new Date() }
+		});
 }
 
 // ------------------------------------------------------------ Seeding
