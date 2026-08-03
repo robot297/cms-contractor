@@ -47,10 +47,72 @@ Set these in the host (Coolify), **not** in a committed `.env`:
 | `GITHUB_CLIENT_SECRET`  | GitHub OAuth app client secret (optional)                      |                                      |
 | `SEED_ON_START`         | Set `true` for **one** deploy to load sample data, then remove | `true`                               |
 | `SEED_CONTRACTOR_EMAIL` | Which existing contractor the sample data attaches to          | `you@example.com`                    |
+| `STRIPE_SECRET_KEY`     | Stripe secret key. Leave unset to run without billing          | `sk_live_…`                          |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret for `/api/stripe/webhook`                       | `whsec_…`                            |
+| `STRIPE_PRICE_MONTHLY`  | Recurring price id, $29/contractor/month                       | `price_…`                            |
+| `STRIPE_PRICE_ANNUAL`   | Recurring price id, $290/contractor/year                       | `price_…`                            |
+| `BILLING_DEV_TOOLS`     | `true` enables the subscription-state simulator. **Dev only**  | (leave unset)                        |
 
 If `ORIGIN` is unset it falls back to `http://localhost:5173` and Better Auth
 will reject sign-in/sign-up from the deployed domain. The GitHub OAuth
 **Authorization callback URL** is `${ORIGIN}/api/auth/callback/github`.
+
+### Billing (Stripe)
+
+Contractors get a 14-day trial on signup, then one plan at $29 per contractor per
+month (or $290/year). There are no pricing tiers — see
+[ADR-0006](docs/adr/0006-one-plan-priced-per-contractor.md).
+
+**Without Stripe keys** the app runs fine: trials and the read-only lapse still
+work, and the subscribe buttons report that checkout isn't configured. That is the
+normal local-development setup.
+
+To enable payments:
+
+1. In Stripe, create one product with two recurring prices — $29/month and
+   $290/year — and copy the `price_…` ids into `STRIPE_PRICE_MONTHLY` /
+   `STRIPE_PRICE_ANNUAL`. The amounts live in Stripe, so changing what you charge
+   never needs a deploy.
+2. Add a webhook endpoint at `${ORIGIN}/api/stripe/webhook` subscribed to
+   `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted` and
+   `invoice.payment_failed`. Copy its signing secret into `STRIPE_WEBHOOK_SECRET`.
+3. Locally, forward events instead:
+   `stripe listen --forward-to localhost:5173/api/stripe/webhook`.
+
+#### Testing billing
+
+Three layers, because the interesting parts of billing aren't unit-testable:
+
+| What                                                          | Where                                  | Run                 |
+| ------------------------------------------------------------- | -------------------------------------- | ------------------- |
+| Pure rules — who may write, the caps, provider-status mapping | `src/lib/crm.test.ts`                  | `pnpm test`         |
+| Every contractor write is guarded, every portal path isn't    | `src/lib/server/billing.guard.test.ts` | `pnpm test`         |
+| The wiring: lapse, limits, portals, refusals                  | `scripts/test-billing.mjs`             | `pnpm test:billing` |
+
+`pnpm test:billing` drives a **running dev server** over real HTTP — real signups,
+real form actions, real guards — and checks the things unit tests can't see: that a
+lapsed contractor can still read everything, that their customers and
+subcontractors are untouched, and that a refused write leaves the database alone.
+It creates throwaway accounts and deletes them afterwards.
+
+```sh
+pnpm dev            # one terminal
+pnpm test:billing   # another
+```
+
+To click through the states by hand, set `BILLING_DEV_TOOLS=true` and restart.
+The billing page grows a panel that forces your own subscription into any state —
+fresh trial, trial ending, trial expired, active, past due, lapsed, comped — so you
+don't have to wait out 14 days or fail a real card. **Never enable it in
+production:** it lets any signed-in contractor comp themselves. With it off, the
+panel is hidden and the action is refused (both covered by `pnpm test:billing`).
+
+`BILLING_LAUNCHED_AT` in `src/lib/crm.ts` is the line between grandfathered and
+paying: any login created before it is comped permanently. **It must be in the
+past** — a future date comps every new signup and switches the paywall off. (That
+is also the rollback: push it forward to comp everyone, without dropping the table
+or disturbing existing paid subscriptions.)
 
 ### Database migrations
 
@@ -126,3 +188,6 @@ CREATE SCHEMA public;
 2. Ensure the prod DB is empty (reset once if needed, see above).
 3. Deploy. Startup logs should show `✓ Migrations applied` then `✓ Database connected`.
 4. Sign up a contractor at `/login` (self-signup creates a contractor; customers join via invite).
+5. If taking payments: set the four `STRIPE_*` vars, confirm `BILLING_LAUNCHED_AT`
+   is in the past, and send a test event from the Stripe dashboard to verify the
+   webhook endpoint returns 200.

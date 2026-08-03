@@ -20,6 +20,12 @@ import {
 	type SubcontractorTier
 } from '$lib/crm';
 import { InvalidAvatarError } from './crm.server';
+// Billing gate for contractor-initiated writes only. The subcontractor PORTAL
+// functions further down this file (`subcontractorOrderView`, `addSubcontractorNote`,
+// `addSubcontractorAttachment`, the invite-binding pair) are deliberately left
+// unguarded: a lapsed contractor's subs keep working exactly as before. See
+// docs/adr/0005-lapsing-never-reaches-customers.md.
+import { assertCanCreate, assertCanWrite } from './billing.server';
 
 /** How long a subcontractor invite / magic link stays valid. */
 const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -126,6 +132,7 @@ export async function createSubcontractor(
 	contractorId: string,
 	input: SubcontractorDetailsInput
 ): Promise<SubcontractorRow> {
+	await assertCanCreate(contractorId, 'subcontractor');
 	const name = input.name.trim();
 	const email = normalizeEmail(input.email);
 	const [existing] = await db
@@ -160,6 +167,7 @@ export async function editSubcontractor(
 	id: string,
 	input: SubcontractorDetailsInput
 ): Promise<SubcontractorRow> {
+	await assertCanWrite(contractorId);
 	const current = await ownedSubcontractor(contractorId, id);
 	if (!current) throw new Error('Subcontractor not found');
 	const name = input.name.trim();
@@ -205,10 +213,7 @@ export async function editSubcontractor(
 			.update(subcontractorInvite)
 			.set({ status: 'revoked' })
 			.where(
-				and(
-					eq(subcontractorInvite.subcontractorId, id),
-					eq(subcontractorInvite.status, 'pending')
-				)
+				and(eq(subcontractorInvite.subcontractorId, id), eq(subcontractorInvite.status, 'pending'))
 			);
 	}
 	return row;
@@ -216,6 +221,7 @@ export async function editSubcontractor(
 
 /** Archive a subcontractor — always a soft-archive; assignment history is kept. */
 export async function archiveSubcontractor(contractorId: string, id: string): Promise<void> {
+	await assertCanWrite(contractorId);
 	const current = await ownedSubcontractor(contractorId, id);
 	if (!current) throw new Error('Subcontractor not found');
 	await db.update(subcontractor).set({ archivedAt: new Date() }).where(eq(subcontractor.id, id));
@@ -228,6 +234,7 @@ export async function setSubcontractorTier(
 	id: string,
 	tier: SubcontractorTier
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const current = await ownedSubcontractor(contractorId, id);
 	if (!current) throw new Error('Subcontractor not found');
 	await db.update(subcontractor).set({ tier }).where(eq(subcontractor.id, id));
@@ -239,6 +246,7 @@ export async function setSubcontractorAvatar(
 	id: string,
 	dataUrl: string | null
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const current = await ownedSubcontractor(contractorId, id);
 	if (!current) throw new Error('Subcontractor not found');
 	if (dataUrl !== null && !isValidAvatarDataUrl(dataUrl)) throw new InvalidAvatarError();
@@ -270,6 +278,7 @@ export async function createSubcontractorInvite(
 	contractorId: string,
 	subcontractorId: string
 ): Promise<SubInviteRow> {
+	await assertCanWrite(contractorId);
 	const sub = await ownedSubcontractor(contractorId, subcontractorId);
 	if (!sub) throw new Error('Subcontractor not found');
 	const [row] = await db
@@ -290,6 +299,7 @@ export async function resendSubcontractorInvite(
 	inviteId: string,
 	contractorId: string
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.update(subcontractorInvite)
 		.set({
@@ -298,10 +308,7 @@ export async function resendSubcontractorInvite(
 			expiresAt: new Date(Date.now() + INVITE_TTL_MS)
 		})
 		.where(
-			and(
-				eq(subcontractorInvite.id, inviteId),
-				eq(subcontractorInvite.contractorId, contractorId)
-			)
+			and(eq(subcontractorInvite.id, inviteId), eq(subcontractorInvite.contractorId, contractorId))
 		);
 }
 
@@ -309,14 +316,12 @@ export async function revokeSubcontractorInvite(
 	inviteId: string,
 	contractorId: string
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	await db
 		.update(subcontractorInvite)
 		.set({ status: 'revoked' })
 		.where(
-			and(
-				eq(subcontractorInvite.id, inviteId),
-				eq(subcontractorInvite.contractorId, contractorId)
-			)
+			and(eq(subcontractorInvite.id, inviteId), eq(subcontractorInvite.contractorId, contractorId))
 		);
 }
 
@@ -485,6 +490,7 @@ export async function assignSubcontractor(
 	orderId: string,
 	subcontractorId: string
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	const [ord] = await db
 		.select({ id: order.id })
 		.from(order)
@@ -495,10 +501,7 @@ export async function assignSubcontractor(
 	if (!ord) throw new Error('Order not found');
 	const sub = await ownedSubcontractor(contractorId, subcontractorId);
 	if (!sub) throw new Error('Subcontractor not found');
-	await db
-		.insert(orderSubcontractor)
-		.values({ orderId, subcontractorId })
-		.onConflictDoNothing();
+	await db.insert(orderSubcontractor).values({ orderId, subcontractorId }).onConflictDoNothing();
 }
 
 export async function unassignSubcontractor(
@@ -506,6 +509,7 @@ export async function unassignSubcontractor(
 	orderId: string,
 	subcontractorId: string
 ): Promise<void> {
+	await assertCanWrite(contractorId);
 	// Scope the delete to the contractor by confirming ownership of the order first.
 	const [ord] = await db
 		.select({ id: order.id })

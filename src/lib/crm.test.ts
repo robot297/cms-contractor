@@ -17,6 +17,13 @@ import {
 	validateFeedback,
 	isSubcontractorLinked,
 	isSubcontractorTier,
+	subscriptionAccess,
+	mapProviderStatus,
+	limitStatus,
+	shouldBeComped,
+	trialEndFrom,
+	BILLING_LAUNCHED_AT,
+	TRIAL_LIMITS,
 	snoozeDate,
 	tierLabel,
 	validateCustomerContact,
@@ -411,5 +418,166 @@ describe('composeEmail', () => {
 	it('uses the signature alone when the body is empty', () => {
 		const { body } = composeEmail({ subject: 's', body: '' }, {}, 'Cheers');
 		expect(body).toBe('Cheers');
+	});
+});
+
+// -------------------------------------------------------------- Subscriptions
+
+describe('subscriptionAccess', () => {
+	const now = new Date('2026-08-10T12:00:00.000Z');
+
+	it('lets a comped subscription write, uncapped and forever', () => {
+		const a = subscriptionAccess({ status: 'comped', trialEndsAt: null }, now);
+		expect(a.canWrite).toBe(true);
+		expect(a.limitsApply).toBe(false);
+		expect(a.reason).toBeNull();
+	});
+
+	it('lets an active subscription write, uncapped', () => {
+		const a = subscriptionAccess({ status: 'active', trialEndsAt: null }, now);
+		expect(a.canWrite).toBe(true);
+		expect(a.limitsApply).toBe(false);
+	});
+
+	// ADR-0005: Stripe retries for weeks. Locking out a contractor whose card
+	// glitched would do exactly the reputational damage the gate exists to avoid.
+	it('keeps a past_due subscription writing while the provider retries', () => {
+		const a = subscriptionAccess({ status: 'past_due', trialEndsAt: null }, now);
+		expect(a.canWrite).toBe(true);
+		expect(a.reason).toBeNull();
+	});
+
+	it('lets a live trial write, with limits applied', () => {
+		const trialEndsAt = new Date('2026-08-14T12:00:00.000Z');
+		const a = subscriptionAccess({ status: 'trialing', trialEndsAt }, now);
+		expect(a.canWrite).toBe(true);
+		expect(a.limitsApply).toBe(true);
+		expect(a.trialDaysRemaining).toBe(4);
+	});
+
+	it('rounds a part-day of trial up rather than down', () => {
+		const trialEndsAt = new Date('2026-08-10T12:00:01.000Z');
+		const a = subscriptionAccess({ status: 'trialing', trialEndsAt }, now);
+		expect(a.canWrite).toBe(true);
+		expect(a.trialDaysRemaining).toBe(1);
+	});
+
+	it('blocks the instant the trial end is reached', () => {
+		const a = subscriptionAccess({ status: 'trialing', trialEndsAt: now }, now);
+		expect(a.canWrite).toBe(false);
+		expect(a.reason).toBe('trial-ended');
+		expect(a.limitsApply).toBe(false);
+	});
+
+	it('blocks a trial that ended in the past', () => {
+		const trialEndsAt = new Date('2026-08-09T12:00:00.000Z');
+		const a = subscriptionAccess({ status: 'trialing', trialEndsAt }, now);
+		expect(a.canWrite).toBe(false);
+		expect(a.reason).toBe('trial-ended');
+	});
+
+	it('treats a trial with no end date as live rather than locking out on a null', () => {
+		const a = subscriptionAccess({ status: 'trialing', trialEndsAt: null }, now);
+		expect(a.canWrite).toBe(true);
+		expect(a.limitsApply).toBe(true);
+		expect(a.trialDaysRemaining).toBeNull();
+	});
+
+	it('blocks a lapsed subscription', () => {
+		const a = subscriptionAccess({ status: 'lapsed', trialEndsAt: null }, now);
+		expect(a.canWrite).toBe(false);
+		expect(a.reason).toBe('subscription-ended');
+	});
+});
+
+describe('limitStatus', () => {
+	it('reports usage under the cap as having room', () => {
+		const s = limitStatus({ customer: 3, order: 4, subcontractor: 1 });
+		expect(s.customer.atLimit).toBe(false);
+		expect(s.customer.remaining).toBe(TRIAL_LIMITS.customer - 3);
+		expect(s.subcontractor.remaining).toBe(TRIAL_LIMITS.subcontractor - 1);
+	});
+
+	it('is at the limit exactly on the boundary', () => {
+		const s = limitStatus({
+			customer: TRIAL_LIMITS.customer,
+			order: 0,
+			subcontractor: 0
+		});
+		expect(s.customer.atLimit).toBe(true);
+		expect(s.customer.remaining).toBe(0);
+		expect(s.order.atLimit).toBe(false);
+	});
+
+	// A contractor can end up over a cap (e.g. limits tightened). They keep every
+	// record — creation is what stops.
+	it('clamps remaining at zero when over the limit', () => {
+		const s = limitStatus({ customer: TRIAL_LIMITS.customer + 5, order: 0, subcontractor: 0 });
+		expect(s.customer.atLimit).toBe(true);
+		expect(s.customer.remaining).toBe(0);
+	});
+
+	it('honours explicitly supplied limits', () => {
+		const s = limitStatus(
+			{ customer: 2, order: 0, subcontractor: 0 },
+			{
+				customer: 2,
+				order: 10,
+				subcontractor: 10
+			}
+		);
+		expect(s.customer.atLimit).toBe(true);
+	});
+});
+
+describe('shouldBeComped', () => {
+	it('comps a login created before billing launched', () => {
+		expect(shouldBeComped(new Date(BILLING_LAUNCHED_AT.getTime() - 1))).toBe(true);
+	});
+
+	it('does not comp a login created at or after billing launched', () => {
+		expect(shouldBeComped(BILLING_LAUNCHED_AT)).toBe(false);
+		expect(shouldBeComped(new Date(BILLING_LAUNCHED_AT.getTime() + 1))).toBe(false);
+	});
+});
+
+describe('trialEndFrom', () => {
+	it('ends the trial 14 days out', () => {
+		const from = new Date('2026-08-01T00:00:00.000Z');
+		expect(trialEndFrom(from).toISOString()).toBe('2026-08-15T00:00:00.000Z');
+	});
+});
+
+describe('mapProviderStatus', () => {
+	it('treats active and trialing as a live paid subscription', () => {
+		expect(mapProviderStatus('active')).toBe('active');
+		expect(mapProviderStatus('trialing')).toBe('active');
+	});
+
+	// The important one: a failed card must not lock a paying contractor out while
+	// the provider is still retrying (ADR-0005).
+	it('keeps recoverable failures writable', () => {
+		for (const s of ['past_due', 'unpaid', 'incomplete', 'paused']) {
+			expect(mapProviderStatus(s)).toBe('past_due');
+		}
+		expect(subscriptionAccess({ status: 'past_due', trialEndsAt: null }).canWrite).toBe(true);
+	});
+
+	it('lapses only once the provider has given up', () => {
+		expect(mapProviderStatus('canceled')).toBe('lapsed');
+		expect(mapProviderStatus('incomplete_expired')).toBe('lapsed');
+	});
+
+	it('falls back to a recoverable status for anything unrecognised', () => {
+		expect(mapProviderStatus('something_new')).toBe('past_due');
+	});
+});
+
+describe('BILLING_LAUNCHED_AT', () => {
+	// A future date silently comps every new signup — the paywall would appear to
+	// work while charging nobody. This is the one constant that must be in the past.
+	it('is in the past, so new signups actually start a trial', () => {
+		expect(BILLING_LAUNCHED_AT.getTime()).toBeLessThan(Date.now());
+		expect(shouldBeComped(new Date())).toBe(false);
 	});
 });

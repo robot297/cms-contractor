@@ -32,9 +32,17 @@ export type GuideStep = {
 	id: 'customer' | 'order' | 'invite' | 'followUp' | 'subcontractor';
 	/** One line. If it needs a paragraph, it isn't a checklist item. */
 	title: string;
+	/**
+	 * Why this step is worth doing — shown only for the step the contractor is
+	 * actually on, so the guide reads as one instruction at a time rather than a
+	 * wall of five. Still one sentence: this is a nudge, not documentation.
+	 */
+	description: string;
 	done: boolean;
 	/** Where the step is actually performed; absent for the acknowledge-only step. */
 	href?: string;
+	/** Label for the step's action button. */
+	cta?: string;
 	/** Blocked steps say why in a few words instead of linking nowhere. */
 	blockedBy?: string;
 };
@@ -93,18 +101,24 @@ export async function loadGuide(contractorId: string): Promise<Guide> {
 	const core: GuideStep[] = [
 		{
 			id: 'customer',
-			title: 'Add a customer',
+			title: 'Add your first customer',
+			description:
+				'Name, email and where the work is. Everything else you track hangs off a customer.',
 			done: hasCustomer,
-			href: '/contractor/customers'
+			href: '/contractor/customers',
+			cta: 'Add a customer'
 		},
 		{
 			id: 'order',
 			title: 'Create an order for them',
+			description:
+				'An order is one job — what you are building, and how far along it is. Its status is what your customer sees.',
 			done: hasOrder,
 			href: '/contractor/orders',
+			cta: 'Create an order',
 			// The order form picks a customer from a dropdown, so this genuinely cannot
 			// be done first — say so rather than sending them to an empty select.
-			blockedBy: hasCustomer ? undefined : 'needs a customer'
+			blockedBy: hasCustomer ? undefined : 'Add a customer first'
 		}
 	];
 
@@ -112,20 +126,28 @@ export async function loadGuide(contractorId: string): Promise<Guide> {
 		{
 			id: 'invite',
 			title: 'Invite them to their portal',
+			description:
+				'Send a magic link and they can follow progress themselves — which is usually the end of "any update?" phone calls.',
 			done: hasInvite,
-			href: '/contractor/customers'
+			href: '/contractor/customers',
+			cta: 'Send an invite'
 		},
 		{
 			id: 'followUp',
+			title: 'Let follow-ups chase you',
 			// The one line worth spending: it explains why the dashboard looks empty.
-			title: 'New orders remind you in 3 days',
+			description:
+				'Every new order sets a reminder three days out. When one comes due it appears at the top of this dashboard, so nothing goes quiet by accident.',
 			done: settings.guideFollowUpAckAt != null
 		},
 		{
 			id: 'subcontractor',
-			title: 'Assign a subcontractor',
+			title: 'Bring in a subcontractor',
+			description:
+				'Assign a trade partner to an order. Trusted subs see the whole job; guests see the work with your customer’s details hidden.',
 			done: hasAssignment,
-			href: '/contractor/subcontractors'
+			href: '/contractor/subcontractors',
+			cta: 'Add a subcontractor'
 		}
 	];
 
@@ -141,7 +163,11 @@ export async function loadGuide(contractorId: string): Promise<Guide> {
 	};
 }
 
-/** Record the contractor's continue-or-dismiss choice. */
+/**
+ * Deliberately not billing-guarded. The Guide is a UI preference, not domain
+ * data — a lapsed contractor should still be able to dismiss a getting-started
+ * card rather than be stuck looking at one they cannot act on.
+ */
 export async function setGuideState(contractorId: string, state: GuideState): Promise<void> {
 	await db
 		.insert(contractorSettings)

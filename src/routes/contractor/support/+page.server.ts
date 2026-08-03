@@ -20,6 +20,9 @@ export const load: PageServerLoad = ({ locals }) => {
 	return { configured: isSupportConfigured(), captchaSiteKey: captchaSiteKey() };
 };
 
+// Deliberately not billing-guarded: filing a bug or feature request writes to
+// GitHub, not to the contractor's data, and a contractor who has just been blocked
+// by the paywall is exactly the person who may need to reach us.
 export const actions: Actions = {
 	submit: async ({ request, locals, getClientAddress }) => {
 		const user = requireContractor(locals);

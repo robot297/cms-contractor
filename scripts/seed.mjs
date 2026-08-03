@@ -66,6 +66,13 @@ async function main() {
 	}
 	await sql`update "user" set role = 'contractor' where id = ${contractor.id}`;
 
+	// Comp the seeded contractor so local development is never interrupted by a
+	// trial expiring mid-session. Real signups still get the normal 14-day trial.
+	await sql`
+		insert into subscription (contractor_id, status, trial_ends_at)
+		values (${contractor.id}, 'comped', null)
+		on conflict (contractor_id) do update set status = 'comped', trial_ends_at = null`;
+
 	// Idempotency: clear this contractor's previously seeded data.
 	// Orders cascade their timeline/notifications/invites; then remove customers.
 	await sql`delete from "order" where contractor_id = ${contractor.id}`;
@@ -94,8 +101,8 @@ async function main() {
 		const orderId = randomUUID();
 		orderIdByProject[o.project] = orderId;
 		await sql`
-			insert into "order" (id, contractor_id, customer_id, project_name, project_type, icon, state, next_follow_up_at)
-			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.icon ?? null}, ${o.state}, ${followUpAt(o.followUpDays)})
+			insert into "order" (id, contractor_id, customer_id, project_name, project_type, icon, state, tags, next_follow_up_at)
+			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.icon ?? null}, ${o.state}, ${o.tags ?? []}, ${followUpAt(o.followUpDays)})
 		`;
 		await sql`
 			insert into timeline_entry (id, order_id, kind, title, detail, author_role, internal)

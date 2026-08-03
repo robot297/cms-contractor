@@ -454,16 +454,56 @@ dialog::backdrop {
 	border-color: #3a3550;
 	box-shadow: 0 12px 34px rgba(0, 0, 0, 0.6);
 }
+/* Phones get a bottom sheet instead of a popover.
+
+   `.contact-pop.up` MUST be named here too. Media queries add no specificity, so
+   this block is (0,1,0) while `.contact-pop.up` above is (0,2,0) — without it the
+   `.up` variant keeps its `bottom: calc(100% + 8px)`, and once `position: fixed`
+   applies that resolves against the viewport, parking the sheet a full screen
+   above the top edge. The scrim is its own fixed element, so the symptom is a
+   backdrop with nothing on it. */
 @media (max-width: 480px) {
-	.contact-pop {
+	.contact-pop,
+	.contact-pop.up {
 		position: fixed;
-		inset: auto 0.6rem 0.6rem;
+		/* Longhands, not `inset`: the value being corrected here is `bottom`, and
+		   spelling it out keeps the override obvious instead of buried in a
+		   shorthand that a reader has to expand in their head. */
 		top: auto;
+		right: 0.6rem;
+		bottom: 0.6rem;
+		left: 0.6rem;
 		width: auto;
 		max-width: none;
 		max-height: 80vh;
 		overflow-y: auto;
 	}
+}
+
+/* ------------------------------------------------------------------- Tags
+   One chip treatment for order, customer and subcontractor tags. These used to
+   be three different inline styles (grey pill, blue pill, and none on orders),
+   which made the same idea look like three. Token-driven so dark works too. */
+.tag-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.3rem;
+	min-width: 0;
+}
+.tag-chip {
+	display: inline-block;
+	max-width: 100%;
+	padding: 0.1rem 0.55rem;
+	border-radius: 999px;
+	background: var(--surface-sunken);
+	border: 1px solid var(--line-strong);
+	color: var(--fg-muted);
+	font-size: 0.72rem;
+	font-weight: 700;
+	line-height: 1.5;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 /* ------------------------------------------------------------ Hazard stripe */

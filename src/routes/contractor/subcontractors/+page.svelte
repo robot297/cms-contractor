@@ -5,11 +5,15 @@
 	import { invalidateAll } from '$app/navigation';
 	import { formatPhone, tierLabel, TRADES, type SubcontractorTier } from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
+	import TagPicker from '$lib/TagPicker.svelte';
 	import type { PageData } from './$types';
 
 	const label = (tier: string) => tierLabel(tier as SubcontractorTier);
 
 	let { data }: { data: PageData } = $props();
+
+	// Trial capacity, from the contractor layout. Null on paid/comped (uncapped).
+	const atSubLimit = $derived(data.billing.limits?.subcontractor.atLimit ?? false);
 
 	type SubRow = (typeof data.subcontractors)[number];
 
@@ -359,6 +363,8 @@
 						<div class="meta">{s.company ?? s.trade ?? 'No company set'}</div>
 						<div class="tier-row">
 							<span class="chip {tierChip(s.tier)}">{tierShort(s.tier)}</span>
+							<!-- Tags at a glance, without opening the profile. -->
+							{#each s.tags as t (t)}<span class="tag-chip">{t}</span>{/each}
 						</div>
 					</div>
 					<div class="card-actions">
@@ -486,13 +492,9 @@
 										/></label
 									>
 									<label>Address<input name="address" value={s.address ?? ''} /></label>
-									<label class="wide"
-										>Tags<input
-											name="tags"
-											value={s.tags.join(', ')}
-											placeholder="licensed, insured"
-										/></label
-									>
+									<div class="wide">
+										<TagPicker value={s.tags} />
+									</div>
 									<label class="wide"
 										>Notes<textarea name="notes" rows="2">{s.notes ?? ''}</textarea></label
 									>
@@ -580,8 +582,8 @@
 									{#if s.tags.length}
 										<div class="wide">
 											<dt>Tags</dt>
-											<dd>
-												{#each s.tags as t (t)}<span class="tag">{t}</span>{/each}
+											<dd class="tag-chips">
+												{#each s.tags as t (t)}<span class="tag-chip">{t}</span>{/each}
 											</dd>
 										</div>
 									{/if}
@@ -789,6 +791,14 @@
 			<p class="modal-sub">
 				Add a trade partner to your roster — you can assign them to jobs afterward.
 			</p>
+			{#if atSubLimit}
+				<p class="limit-note">
+					Your trial covers {data.billing.limits?.subcontractor.limit} subcontractors and you have {data
+						.billing.limits?.subcontractor.used}. Archive one you're no longer working with to free
+					a space — nothing is deleted — or
+					<a href={resolve('/contractor/billing')}>subscribe for unlimited</a>.
+				</p>
+			{/if}
 			<form
 				method="POST"
 				action="?/addSubcontractor"
@@ -847,10 +857,9 @@
 						<span class="lbl">Insurance expires</span>
 						<input name="insuranceExpiresAt" type="date" />
 					</label>
-					<label>
-						<span class="lbl">Tags</span>
-						<input name="tags" placeholder="licensed, insured" />
-					</label>
+					<div>
+						<TagPicker />
+					</div>
 				</div>
 				<div class="row-actions end">
 					<button class="btn ghost" type="button" onclick={() => (showAdd = false)}>Cancel</button>
@@ -1102,8 +1111,13 @@
 		font-size: 0.9rem;
 		margin-top: 0.15rem;
 	}
+	/* Holds the tier chip plus any tags, so it wraps. */
 	.tier-row {
 		margin-top: 0.35rem;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		align-items: center;
 	}
 	/* Right-side icon actions on the card header: message + expand. */
 	.card-actions {
@@ -1222,16 +1236,6 @@
 	.profile dd {
 		margin: 0;
 		font-weight: 600;
-	}
-	.tag {
-		display: inline-block;
-		background: #f1f5f9;
-		border: 1px solid #cbd5e1;
-		border-radius: 999px;
-		padding: 0.1rem 0.5rem;
-		margin: 0 0.25rem 0.25rem 0;
-		font-size: 0.78rem;
-		font-weight: 700;
 	}
 	/* Tab strip for the detail pane. */
 	.tabs {
@@ -1682,5 +1686,21 @@
 		background: #2e2a44;
 		border-color: #4a3f6b;
 		color: #cabff5;
+	}
+
+	/* Shown in the add modal when a trial has run out of subcontractor slots. */
+	.limit-note {
+		margin: 0;
+		padding: 0.6rem 0.75rem;
+		border-radius: 8px;
+		border: 1.5px solid var(--yellow-deep);
+		background: color-mix(in srgb, var(--yellow) 18%, var(--surface));
+		color: var(--fg);
+		font-size: 0.83rem;
+		line-height: 1.5;
+	}
+	.limit-note a {
+		color: inherit;
+		font-weight: 700;
 	}
 </style>

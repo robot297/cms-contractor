@@ -1,12 +1,18 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { invalidateAll } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { customerContactSchema, formatPhone, normalizePreferredContact } from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
+	import TagPicker from '$lib/TagPicker.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	// Trial capacity, from the contractor layout. Only set while a trial is live —
+	// paid and comped subscriptions are uncapped, so this is null for them.
+	const atCustomerLimit = $derived(data.billing.limits?.customer.atLimit ?? false);
 
 	const isLinked = (c: { userId: string | null }) => c.userId != null;
 
@@ -172,6 +178,22 @@
 
 	// --- Add modal ---------------------------------------------------------
 	let addDialog: HTMLDialogElement | undefined = $state();
+
+	// An empty directory opens the add form on arrival. There is no "no customers
+	// yet" message any more, so an empty page would otherwise be blank — and the
+	// getting-started guide only sends a contractor here while they have none, which
+	// makes this the same moment as arriving from the tutorial. Stops happening for
+	// good the instant they have one customer.
+	onMount(() => {
+		if (data.customers.length > 0) return;
+		addError = '';
+		openedFromEmpty = true;
+		addDialog?.showModal();
+	});
+	// True when the add form opened because the directory was empty — the same moment
+	// the getting-started guide sends someone here. On success we hand them back to
+	// the dashboard so the next tutorial step is in front of them.
+	let openedFromEmpty = $state(false);
 	let addError = $state('');
 
 	// --- Per-card interaction ---------------------------------------------
@@ -392,14 +414,10 @@
 		<!-- Directory: grouped list on the left, A–Z jump rail on the right -->
 		<div style="display: flex; gap: 0.5rem; align-items: flex-start;">
 			<section style="flex: 1; min-width: 0; display: grid; gap: 1.25rem;">
-				{#if filtered.length === 0}
-					<p style="color: #57606a;">
-						{#if term !== ''}
-							No customers match “{debounced}”.
-						{:else}
-							No customers yet. Add your first customer with the button above.
-						{/if}
-					</p>
+				<!-- Only the no-match case gets a message. An empty directory speaks for
+				     itself, and arriving here with none opens the add form anyway. -->
+				{#if filtered.length === 0 && term !== ''}
+					<p style="color: #57606a;">No customers match “{debounced}”.</p>
 				{/if}
 
 				{#each groups as group (group.letter)}
@@ -464,6 +482,12 @@
 											style="font-size: 0.82rem; color: #8c959f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
 											>{c.phone ?? c.email}</span
 										>
+										<!-- Tags at a glance, without expanding the row. -->
+										{#if c.tags.length > 0}
+											<span class="tag-chips" style="margin-top: 0.1rem;">
+												{#each c.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
+											</span>
+										{/if}
 									</button>
 
 									{#if isLinked(c)}
@@ -541,12 +565,7 @@
 														style="flex: 2; min-width: 160px; {fieldStyle}"
 													/>
 												</div>
-												<input
-													name="tags"
-													value={c.tags.join(', ')}
-													placeholder="Tags (comma-separated)"
-													style={fieldStyle}
-												/>
+												<TagPicker value={c.tags} />
 												<label
 													style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;"
 												>
@@ -611,13 +630,8 @@
 											</div>
 
 											{#if c.tags.length > 0}
-												<div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-													{#each c.tags as tag (tag)}
-														<span
-															style="font-size: 0.75rem; background: #ddf4ff; color: #0969da; border-radius: 999px; padding: 0.1rem 0.55rem;"
-															>{tag}</span
-														>
-													{/each}
+												<div class="tag-chips">
+													{#each c.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
 												</div>
 											{/if}
 
@@ -902,8 +916,16 @@
 			}
 			addError = '';
 			return async ({ result, update }) => {
+				// "Add & create order" answers with a redirect to the order form; let the
+				// default handling follow it rather than closing the dialog here.
+				if (result.type === 'redirect') return update();
 				await update();
-				if (result.type === 'success') addDialog?.close();
+				if (result.type !== 'success') return;
+				addDialog?.close();
+				if (openedFromEmpty) {
+					openedFromEmpty = false;
+					await goto(resolve('/contractor'));
+				}
 			};
 		}}
 		style="display: grid; gap: 0.6rem; padding: 1.25rem;"
@@ -948,10 +970,7 @@
 			Address
 			<input name="address" autocomplete="street-address" style={fieldStyle} />
 		</label>
-		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
-			Tags (comma-separated)
-			<input name="tags" placeholder="kitchen, repeat, referral" style={fieldStyle} />
-		</label>
+		<TagPicker />
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
 			Preferred contact method
 			<select name="preferredContact" style={fieldStyle}>
@@ -964,21 +983,26 @@
 			Project details / notes
 			<textarea name="notes" rows="3" style="{fieldStyle} resize: vertical;"></textarea>
 		</label>
+		{#if atCustomerLimit}
+			<p class="limit-note">
+				Your trial covers {data.billing.limits?.customer.limit} customers and you have {data.billing
+					.limits?.customer.used}. Archive a customer you're no longer working with to free a space
+				— nothing is deleted — or
+				<a href={resolve('/contractor/billing')}>subscribe for unlimited</a>.
+			</p>
+		{/if}
 		{#if addError || (form?.action === 'add' && form?.message)}
 			<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">{addError || form?.message}</p>
 		{/if}
-		<div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-			<button
-				type="button"
-				onclick={() => addDialog?.close()}
-				style="padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-				>Cancel</button
+		<!-- Two ways out. Most customers are added because there's work to book, so
+		     "Add & create order" saves finding them again on the orders screen; the
+		     `next` value is what the action keys the redirect off. -->
+		<div class="add-actions">
+			<button type="button" onclick={() => addDialog?.close()} class="add-cancel">Cancel</button>
+			<button type="submit" name="next" value="order" class="add-secondary"
+				>Add &amp; create order</button
 			>
-			<button
-				type="submit"
-				style="padding: 0.55rem 1.1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600;"
-				>Add customer</button
-			>
+			<button type="submit" class="add-primary">Add customer</button>
 		</div>
 	</form>
 </dialog>
@@ -1157,5 +1181,98 @@
 	:global(:root[data-theme='dark']) .invite-action.danger {
 		color: #ff8f8a;
 		border-color: #6b2f33;
+	}
+
+	/* Shown inside the add modal when a trial has run out of customer slots.
+	   Informative, not a block — the server is what refuses. */
+	.limit-note {
+		margin: 0;
+		padding: 0.6rem 0.75rem;
+		border-radius: 8px;
+		border: 1.5px solid var(--yellow-deep);
+		background: color-mix(in srgb, var(--yellow) 18%, var(--surface));
+		color: var(--fg);
+		font-size: 0.83rem;
+		line-height: 1.5;
+	}
+	.limit-note a {
+		color: inherit;
+		font-weight: 700;
+	}
+
+	/* Add-customer footer. Wraps rather than squeezing: three buttons don't fit on
+	   one line on a phone, and this modal is reached from the getting-started guide
+	   where mobile is the likely case. */
+	.add-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		justify-content: flex-end;
+	}
+	.add-actions button {
+		padding: 0.55rem 1rem;
+		border-radius: 999px;
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 0.88rem;
+	}
+	/* Cancel is the way out, not a third choice — plain text, no fill or border, so
+	   it carries none of the visual weight of the two submits beside it. */
+	.add-cancel {
+		border: none;
+		background: none;
+		color: var(--fg-muted);
+		padding: 0.55rem 0.4rem;
+		font-size: 0.85rem;
+		margin-right: auto;
+	}
+	.add-cancel:hover {
+		color: var(--fg);
+	}
+	/* Same weight as the primary, different fill: this is an equally valid finish,
+	   not a lesser one. */
+	.add-secondary {
+		border: 1px solid #0969da;
+		background: transparent;
+		color: #0969da;
+		font-weight: 600;
+	}
+	.add-secondary:hover {
+		background: rgba(9, 105, 218, 0.08);
+	}
+	.add-primary {
+		border: 1px solid #0969da;
+		background: #0969da;
+		color: #fff;
+		font-weight: 600;
+	}
+	.add-primary:hover {
+		background: #0860c4;
+	}
+	.add-actions button:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+	}
+	@media (max-width: 420px) {
+		/* The two submits stack full-width; Cancel drops below them as a compact text
+		   link rather than a third slab. Selectors are (0,2,0) so they can't be
+		   outranked by the base rules — media queries add no specificity. */
+		.add-actions .add-secondary,
+		.add-actions .add-primary {
+			flex: 1 1 100%;
+		}
+		.add-actions .add-cancel {
+			order: 1;
+			flex: 0 0 auto;
+			margin: 0.1rem auto 0;
+		}
+	}
+	/* Dark: the transparent secondary needs a lighter blue to stay legible. */
+	:global(:root[data-theme='dark']) .add-secondary {
+		border-color: #58a6ff;
+		color: #58a6ff;
+	}
+	:global(:root[data-theme='dark']) .add-secondary:hover {
+		background: rgba(88, 166, 255, 0.12);
 	}
 </style>

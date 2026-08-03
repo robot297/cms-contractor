@@ -18,6 +18,7 @@ import {
 } from '$lib/server/subcontractor.server';
 import { InvalidAvatarError } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
+import { withBillingErrors } from '$lib/server/billing.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -51,7 +52,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		listSubcontractorInvites(user.id)
 	]);
 	const pendingBySubId = new Set(
-		invites.filter((i) => i.status === 'pending' && i.subcontractorId).map((i) => i.subcontractorId!)
+		invites
+			.filter((i) => i.status === 'pending' && i.subcontractorId)
+			.map((i) => i.subcontractorId!)
 	);
 	const inviteIdBySubId = new Map(
 		invites
@@ -70,7 +73,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	return { subcontractors: roster, search };
 };
 
-export const actions: Actions = {
+// Wrapped so a billing refusal from any guarded write returns a 402 the form
+// can render, rather than a 500. See withBillingErrors.
+export const actions: Actions = withBillingErrors({
 	addSubcontractor: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
@@ -169,4 +174,4 @@ export const actions: Actions = {
 		}
 		return { success: true };
 	}
-};
+});

@@ -1,37 +1,22 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import ThemeToggle from '$lib/ThemeToggle.svelte';
+	import { TRIAL_DAYS, TRIAL_LIMITS } from '$lib/crm';
 
-	// Placeholder tiers — names, prices and limits are all still to be decided. The
-	// page exists so the landing CTA has somewhere real to land; fill in the numbers
-	// when the packaging is settled.
-	const tiers = [
-		{
-			name: 'Solo',
-			blurb: 'One contractor, running their own jobs.',
-			price: 'TBD',
-			featured: false,
-			points: ['Customers and orders', 'Job scheduling', 'Email follow-ups']
-		},
-		{
-			name: 'Crew',
-			blurb: 'A working crew with subcontractors on the books.',
-			price: 'TBD',
-			featured: true,
-			points: [
-				'Everything in Solo',
-				'Subcontractor access',
-				'Role-based permissions',
-				'Order attachments'
-			]
-		},
-		{
-			name: 'Contractor Pro',
-			blurb: 'Multiple crews and a back office to keep in sync.',
-			price: 'TBD',
-			featured: false,
-			points: ['Everything in Crew', 'Custom email templates', 'Priority support']
-		}
+	// There is exactly one thing to buy, priced per contractor. No tiers, no feature
+	// comparison, no "you'll need the higher plan for that" — see
+	// docs/adr/0006-one-plan-priced-per-contractor.md. The earlier three-tier
+	// placeholder was deleted rather than renamed: pricing levels aren't a concept
+	// in this product, and "Tier" already means a subcontractor's access level.
+	let interval = $state<'monthly' | 'annual'>('monthly');
+
+	const included = [
+		'Unlimited customers, orders and subcontractors',
+		'Customer portals with magic-link invites',
+		'Subcontractor access with trusted and guest levels',
+		'Order timelines, attachments and follow-ups',
+		'Custom email templates and branding',
+		'Every feature — nothing held back for a higher plan'
 	];
 </script>
 
@@ -39,7 +24,7 @@
 	<title>Pricing — Contractor CRM</title>
 	<meta
 		name="description"
-		content="Contractor CRM pricing — plans for solo contractors, working crews, and multi-crew operations."
+		content="Contractor CRM pricing — one plan, $29 per contractor per month, with a 14-day free trial. No card required to start."
 	/>
 </svelte:head>
 
@@ -48,33 +33,77 @@
 <div class="pricing">
 	<header class="head">
 		<a class="back" href={resolve('/')}>← Back</a>
-		<h1 class="title">Pricing</h1>
+		<h1 class="title">One plan. Priced per contractor.</h1>
 		<p class="sub">
-			Straightforward plans for however you work. We're still finalising the numbers — the shape of
-			the tiers is below.
+			Start with a {TRIAL_DAYS}-day free trial — no card required. After that it's one price, per
+			contractor, with everything included.
 		</p>
 	</header>
 
-	<div class="tiers">
-		{#each tiers as tier (tier.name)}
-			<section class="tier" class:featured={tier.featured}>
-				{#if tier.featured}<span class="badge">Most popular</span>{/if}
-				<h2 class="tier-name">{tier.name}</h2>
-				<p class="tier-blurb">{tier.blurb}</p>
-				<p class="price">{tier.price}</p>
-				<ul>
-					{#each tier.points as point (point)}
-						<li>{point}</li>
-					{/each}
-				</ul>
-				<a class="btn" href={resolve('/login')}>Get started</a>
-			</section>
-		{/each}
+	<div class="panel">
+		<div class="toggle" role="group" aria-label="Billing period">
+			<button
+				type="button"
+				class="toggle-opt"
+				class:on={interval === 'monthly'}
+				onclick={() => (interval = 'monthly')}
+			>
+				Monthly
+			</button>
+			<button
+				type="button"
+				class="toggle-opt"
+				class:on={interval === 'annual'}
+				onclick={() => (interval = 'annual')}
+			>
+				Annual <span class="save">2 months free</span>
+			</button>
+		</div>
+
+		<p class="price">
+			{#if interval === 'monthly'}
+				<strong>$29</strong><span class="per">per contractor / month</span>
+			{:else}
+				<strong>$290</strong><span class="per">per contractor / year</span>
+			{/if}
+		</p>
+		<p class="scale">
+			Working on your own? That's one. Got a crew of five contractors? That's five. Nothing else
+			changes.
+		</p>
+
+		<ul class="points">
+			{#each included as point (point)}
+				<li>{point}</li>
+			{/each}
+		</ul>
+
+		<a class="btn" href={resolve('/login')}>Start your free trial</a>
+		<p class="fine">No card required · Cancel any time</p>
 	</div>
 
+	<section class="trial">
+		<h2>What the free trial covers</h2>
+		<p>
+			For {TRIAL_DAYS} days you get every feature, with no card and nothing switched off. The only limit
+			is how much you can have on the go at once:
+		</p>
+		<ul class="caps">
+			<li><strong>{TRIAL_LIMITS.customer}</strong> active customers</li>
+			<li><strong>{TRIAL_LIMITS.order}</strong> active orders</li>
+			<li><strong>{TRIAL_LIMITS.subcontractor}</strong> active subcontractors</li>
+		</ul>
+		<p class="note">
+			Only live work counts — archive a customer you're done with and the space comes straight back,
+			with nothing deleted. And if your trial runs out, you keep full access to read everything
+			you've added; only changes pause until you subscribe. Your customers' portals keep working
+			throughout.
+		</p>
+	</section>
+
 	<p class="foot-note">
-		Questions about which plan fits? <a href={resolve('/login')}>Sign in</a> and reach out from the support
-		page.
+		Questions about whether this fits how you work? <a href={resolve('/login')}>Sign in</a> and reach
+		out from the support page.
 	</p>
 </div>
 
@@ -131,85 +160,109 @@
 		color: var(--fg-muted);
 		line-height: 1.55;
 	}
-	.tiers {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-		gap: 1.1rem;
-		max-width: 1000px;
+
+	/* One panel, centered — there is nothing to compare it against. */
+	.panel {
+		max-width: 30rem;
 		margin: 0 auto;
-		align-items: start;
-	}
-	.tier {
 		display: grid;
-		gap: 0.6rem;
-		padding: 1.6rem 1.4rem;
-		border: 2px solid var(--line);
-		border-radius: 16px;
-		background: var(--surface);
-		box-shadow: var(--card-shadow);
-	}
-	/* The recommended tier gets the pop-art sticker treatment so it reads as the
-	   default choice without needing a different colour scheme. */
-	.tier.featured {
+		gap: 0.7rem;
+		justify-items: center;
+		text-align: center;
+		padding: 2rem 1.6rem;
 		border: 2.5px solid var(--pop-line);
+		border-radius: 18px;
+		background: var(--surface);
 		box-shadow: var(--pop-shadow);
 	}
-	.badge {
-		justify-self: start;
-		padding: 0.2rem 0.55rem;
+	.toggle {
+		display: inline-flex;
+		gap: 0.25rem;
+		padding: 0.25rem;
+		border: 1.5px solid var(--line);
 		border-radius: 999px;
+		background: var(--surface-sunken);
+		flex-wrap: wrap;
+		justify-content: center;
+	}
+	.toggle-opt {
+		padding: 0.45rem 1rem;
+		border: none;
+		border-radius: 999px;
+		background: none;
+		color: var(--fg-muted);
+		font-weight: 700;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.toggle-opt.on {
 		background: var(--yellow);
 		color: #14171c;
-		border: 1.5px solid #14171c;
-		font-size: 0.68rem;
+	}
+	.toggle-opt:focus-visible {
+		outline: 2px solid var(--yellow-deep);
+		outline-offset: 2px;
+	}
+	.save {
+		font-size: 0.66rem;
 		font-weight: 800;
 		text-transform: uppercase;
-		letter-spacing: 0.06em;
+		letter-spacing: 0.04em;
+		opacity: 0.85;
 	}
-	.tier-name {
-		margin: 0;
-		font-size: 1.25rem;
+
+	.price {
+		margin: 0.4rem 0 0;
+		display: grid;
+		gap: 0.1rem;
+	}
+	.price strong {
+		font-size: clamp(2.6rem, 8vw, 3.4rem);
 		font-weight: 800;
-		letter-spacing: -0.01em;
-		text-transform: none;
-		color: var(--fg);
+		letter-spacing: -0.03em;
+		line-height: 1;
 	}
-	.tier-blurb {
-		margin: 0;
+	.per {
 		color: var(--fg-muted);
 		font-size: 0.9rem;
+		font-weight: 600;
+	}
+	.scale {
+		margin: 0;
+		max-width: 24rem;
+		color: var(--fg-muted);
+		font-size: 0.88rem;
 		line-height: 1.5;
 	}
-	.price {
-		margin: 0.2rem 0 0;
-		font-size: 1.8rem;
-		font-weight: 800;
-		letter-spacing: -0.02em;
-	}
-	ul {
-		margin: 0;
+
+	.points {
+		margin: 0.6rem 0 0.4rem;
 		padding: 0;
 		list-style: none;
 		display: grid;
-		gap: 0.4rem;
+		gap: 0.45rem;
 		font-size: 0.9rem;
 		color: var(--fg-muted);
+		text-align: left;
 	}
-	li {
-		padding-left: 1.2rem;
+	.points li {
+		padding-left: 1.4rem;
 		position: relative;
 		line-height: 1.45;
 	}
-	li::before {
+	.points li::before {
 		content: '✓';
 		position: absolute;
 		left: 0;
 		color: var(--yellow-deep);
 		font-weight: 800;
 	}
+
 	.btn {
 		margin-top: 0.5rem;
-		padding: 0.7rem;
+		align-self: stretch;
+		width: 100%;
+		padding: 0.85rem;
 		text-align: center;
 		text-decoration: none;
 		border: 2.5px solid #14171c;
@@ -217,7 +270,7 @@
 		background: #14171c;
 		color: #fff;
 		font-weight: 800;
-		font-size: 0.85rem;
+		font-size: 0.9rem;
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
 		box-shadow: 4px 4px 0 var(--yellow);
@@ -233,6 +286,67 @@
 		transform: translate(2px, 2px);
 		box-shadow: none;
 	}
+	.fine {
+		margin: 0;
+		color: var(--fg-muted);
+		font-size: 0.78rem;
+	}
+
+	.trial {
+		max-width: 34rem;
+		margin: 2.5rem auto 0;
+		padding: 1.5rem 1.4rem;
+		border: 2px solid var(--line);
+		border-radius: 16px;
+		background: var(--surface);
+	}
+	.trial h2 {
+		margin: 0 0 0.5rem;
+		font-size: 1.05rem;
+		font-weight: 800;
+		color: var(--fg);
+		text-transform: none;
+		letter-spacing: -0.01em;
+	}
+	.trial p {
+		margin: 0;
+		color: var(--fg-muted);
+		font-size: 0.9rem;
+		line-height: 1.55;
+	}
+	.caps {
+		margin: 0.8rem 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+	}
+	.caps li {
+		flex: 1 1 8rem;
+		padding: 0.7rem 0.6rem;
+		border-radius: 10px;
+		background: var(--surface-sunken);
+		border: 1px solid var(--line);
+		text-align: center;
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+		line-height: 1.35;
+	}
+	.caps strong {
+		display: block;
+		font-size: 1.4rem;
+		font-weight: 800;
+		color: var(--fg);
+		letter-spacing: -0.02em;
+	}
+	.note {
+		margin-top: 0.8rem;
+		padding-top: 0.8rem;
+		border-top: 1px solid var(--line);
+		font-size: 0.85rem;
+	}
+
 	.foot-note {
 		margin: 2.5rem auto 0;
 		text-align: center;
