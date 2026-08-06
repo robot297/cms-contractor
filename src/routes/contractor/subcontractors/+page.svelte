@@ -1506,7 +1506,7 @@
 		font-weight: 600;
 		text-transform: none;
 		letter-spacing: normal;
-		color: #57606a;
+		color: var(--fg-muted);
 	}
 	.fields input,
 	.fields select,
@@ -1547,12 +1547,12 @@
 		gap: 0.45rem;
 		margin-top: 0.35rem;
 		padding-bottom: 0.3rem;
-		border-bottom: 1px solid #eef0f3;
+		border-bottom: 1px solid var(--line);
 		font-size: 0.72rem;
 		font-weight: 800;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
-		color: #8c959f;
+		color: var(--fg-muted);
 	}
 	.group-label:first-child {
 		margin-top: 0;
@@ -1560,23 +1560,28 @@
 	.opt {
 		font-size: 0.62rem;
 		font-weight: 700;
-		color: #8c959f;
-		background: #f2f3f5;
+		color: var(--fg-muted);
+		background: var(--surface-sunken);
 		border-radius: 999px;
 		padding: 0.05rem 0.45rem;
 		text-transform: none;
 		letter-spacing: 0;
 	}
+	/* The required asterisk keeps its red in both themes; #cf222e goes muddy on a
+	   dark surface, so dark gets the lighter red used elsewhere in the app. */
 	.req {
 		color: #cf222e;
 		font-weight: 900;
+	}
+	:global(:root[data-theme='dark']) .req {
+		color: #ff8f8a;
 	}
 	.form-note {
 		grid-column: 1 / -1;
 		margin: -0.25rem 0 0.1rem;
 		font-size: 0.78rem;
 		font-weight: 500;
-		color: #8c959f;
+		color: var(--fg-muted);
 		line-height: 1.35;
 	}
 	.hint {
@@ -1664,26 +1669,32 @@
 	.confirm-banner form {
 		display: inline-flex;
 	}
+	/* The app's button language: pill, bold outline, soft pop shadow. Primary is
+	   the safety-yellow sticker every other primary in the app uses — text and
+	   border pinned dark, since yellow stays light in both themes. Token-driven,
+	   so dark needs no override (and can't silently outrank `.primary`). */
 	.btn {
 		padding: 0.5rem 0.9rem;
-		border: 1.5px solid #d0d7de;
-		border-radius: 9px;
-		background: #fff;
-		color: #1f2328;
-		font-weight: 600;
+		border: 2px solid var(--pop-line);
+		border-radius: 999px;
+		background: var(--surface);
+		color: var(--fg);
+		font-family: inherit;
+		font-weight: 700;
 		cursor: pointer;
 		font-size: 0.85rem;
+		box-shadow: var(--pop-shadow-sm);
 	}
 	.btn:hover {
-		background: #f6f8fa;
+		background: var(--surface-sunken);
 	}
 	.btn.primary {
-		background: #0969da;
-		border-color: #0969da;
-		color: #fff;
+		background: var(--yellow);
+		border-color: #14171c;
+		color: #14171c;
 	}
 	.btn.primary:hover {
-		background: #0757ba;
+		background: var(--yellow-deep);
 	}
 	.btn.danger {
 		background: #cf222e;
@@ -1694,15 +1705,17 @@
 		background: #b91c1c;
 	}
 	.btn.danger.ghost {
-		background: #fff;
+		background: var(--surface);
 		color: #cf222e;
-		border-color: #f0c0c4;
+		border-color: #cf222e;
 	}
 	.btn.danger.ghost:hover {
-		background: #fdeff0;
+		background: color-mix(in srgb, #cf222e 10%, var(--surface));
 	}
+	/* Ghost is the way out, not a peer of the submit: no fill, no shadow. */
 	.btn.ghost {
 		background: transparent;
+		box-shadow: none;
 	}
 	.empty {
 		border: 1.5px dashed #d0d7de;
@@ -1723,12 +1736,15 @@
 		padding: 1rem;
 		z-index: 100;
 	}
+	/* Token-driven rather than hardcoded light: this is a plain div, so it never
+	   got the global dark `dialog` treatment the add-customer modal rides on, and
+	   dark mode painted light text onto a white card. */
 	.modal {
 		position: relative;
-		background: #fff;
-		border: 1px solid #d0d7de;
+		background: var(--surface);
+		border: 1px solid var(--line);
 		border-radius: 16px;
-		box-shadow: 0 20px 48px rgba(27, 31, 36, 0.28);
+		box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35);
 		padding: 1.25rem;
 		width: 100%;
 		max-width: 560px;
@@ -1746,15 +1762,15 @@
 		justify-content: center;
 		border: none;
 		border-radius: 8px;
-		background: #f2f3f5;
-		color: #57606a;
+		background: var(--surface-sunken);
+		color: var(--fg-muted);
 		font-size: 1rem;
 		line-height: 1;
 		cursor: pointer;
 	}
 	.modal-close:hover {
-		background: #e6e8eb;
-		color: #1f2328;
+		background: var(--line);
+		color: var(--fg);
 	}
 	.modal h2 {
 		margin: 0 0 0.15rem;
@@ -1767,7 +1783,7 @@
 	}
 	.modal-sub {
 		margin: 0 0 1.1rem;
-		color: #57606a;
+		color: var(--fg-muted);
 		font-size: 0.85rem;
 		font-weight: 500;
 		line-height: 1.4;
@@ -1776,7 +1792,7 @@
 		justify-content: flex-end;
 		margin-top: 1rem;
 		padding-top: 0.9rem;
-		border-top: 1px solid #eef0f3;
+		border-top: 1px solid var(--line);
 	}
 	@media (max-width: 560px) {
 		/* `.profile` isn't listed here — its auto-fit track already collapses to a
@@ -1869,19 +1885,6 @@
 	:global(:root[data-theme='dark']) .avatar.placeholder {
 		background: linear-gradient(135deg, #2a3038, #20242b);
 		color: #c3c9d4;
-	}
-	:global(:root[data-theme='dark']) .btn {
-		background: var(--surface);
-		border-color: var(--line-strong);
-		color: var(--fg);
-	}
-	:global(:root[data-theme='dark']) .btn:hover {
-		background: var(--surface-sunken);
-	}
-	:global(:root[data-theme='dark']) .btn.primary {
-		background: #e8ebf0;
-		color: #14171c;
-		border-color: #e8ebf0;
 	}
 	:global(:root[data-theme='dark']) .card-actions .icon-btn.on {
 		background: #2e2a44;

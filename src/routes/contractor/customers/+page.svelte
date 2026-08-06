@@ -1582,27 +1582,34 @@
 		color: var(--fg);
 	}
 	/* Same weight as the primary, different fill: this is an equally valid finish,
-	   not a lesser one. */
+	   not a lesser one. Both are drawn from the theme tokens — they used to be a
+	   blue pair that matched nothing else in the app. */
 	.add-secondary {
-		border: 1px solid #0969da;
-		background: transparent;
-		color: #0969da;
-		font-weight: 600;
+		border: 2px solid var(--pop-line);
+		background: var(--surface);
+		color: var(--fg);
+		font-weight: 700;
+		box-shadow: var(--pop-shadow-sm);
 	}
 	.add-secondary:hover {
-		background: rgba(9, 105, 218, 0.08);
+		background: var(--surface-sunken);
 	}
+	/* The safety-yellow sticker button. Text and border pinned dark rather than
+	   tokenised: yellow stays light in both themes, so its text must stay dark. */
 	.add-primary {
-		border: 1px solid #0969da;
-		background: #0969da;
-		color: #fff;
-		font-weight: 600;
+		border: 2px solid #14171c;
+		background: var(--yellow);
+		color: #14171c;
+		font-weight: 700;
+		box-shadow: var(--pop-shadow-sm);
 	}
 	.add-primary:hover {
-		background: #0860c4;
+		background: var(--yellow-deep);
 	}
+	/* Outlined in the foreground colour, not yellow: the primary is yellow now, and
+	   a yellow ring on a yellow button is no ring at all. */
 	.add-actions button:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--fg);
 		outline-offset: 2px;
 	}
 	@media (max-width: 420px) {
@@ -1618,13 +1625,5 @@
 			flex: 0 0 auto;
 			margin: 0.1rem auto 0;
 		}
-	}
-	/* Dark: the transparent secondary needs a lighter blue to stay legible. */
-	:global(:root[data-theme='dark']) .add-secondary {
-		border-color: #58a6ff;
-		color: #58a6ff;
-	}
-	:global(:root[data-theme='dark']) .add-secondary:hover {
-		background: rgba(88, 166, 255, 0.12);
 	}
 </style>
