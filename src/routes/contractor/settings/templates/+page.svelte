@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { composeEmail, EMAIL_BODY_LENGTH_GUIDANCE, EMAIL_TEMPLATE_PLACEHOLDERS } from '$lib/crm';
+	import {
+		composeEmail,
+		EMAIL_BODY_LENGTH_GUIDANCE,
+		EMAIL_TEMPLATE_PLACEHOLDERS,
+		FOLLOWUP_DAY_CHOICES,
+		followUpDaysLabel
+	} from '$lib/crm';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -97,6 +103,10 @@
 
 	// Which tag is awaiting delete confirmation.
 	let confirmingTag = $state<string | null>(null);
+
+	// Default follow-up interval, seeded once like the signature fields above.
+	let followUpDays = $state(untrack(() => data.followUpDays));
+	const followUpDirty = $derived(followUpDays !== data.followUpDays);
 </script>
 
 <svelte:head><title>Email templates · Settings</title></svelte:head>
@@ -120,12 +130,12 @@
 		<h2>Tags</h2>
 		{#if data.contractorTags.length === 0}
 			<p class="tags-none">
-				No tags yet. Add them on a customer, order or subcontractor and they'll collect here.
+				No tags yet. Add them on an order or subcontractor and they'll collect here.
 			</p>
 		{:else}
 			<p class="tags-hint">
-				Used across your customers, orders and subcontractors. Deleting one removes it from every
-				record that uses it.
+				Used across your orders and subcontractors. Deleting one removes it from every record that
+				uses it.
 			</p>
 			<ul class="tag-list">
 				{#each data.contractorTags as tag (tag)}
@@ -159,6 +169,39 @@
 				{/each}
 			</ul>
 		{/if}
+	</section>
+
+	<!-- Default follow-up interval. Applies to orders created from here on: the
+	     follow-ups already on the dashboard may have been moved by hand. -->
+	<section class="card">
+		<h2>Follow-up reminders</h2>
+		<p class="tags-hint">
+			Every new order schedules a reminder this far out. When one comes due it appears at the top of
+			your dashboard. You can always snooze or re-date a single order from the order itself.
+		</p>
+		<form method="POST" action="?/saveFollowUpDays" use:enhance={keepFields} class="grid">
+			<label class="field">
+				<span>Remind me after</span>
+				<select name="followUpDays" bind:value={followUpDays}>
+					{#each FOLLOWUP_DAY_CHOICES as days (days)}
+						<option value={days}>{followUpDaysLabel(days)}</option>
+					{/each}
+				</select>
+			</label>
+			<div class="row-actions">
+				<button
+					type="submit"
+					class="btn primary"
+					disabled={!followUpDirty}
+					title={followUpDirty ? 'Save interval' : 'No changes to save'}>Save interval</button
+				>
+				{#if form?.saved === 'followUp' && !followUpDirty}<span class="ok">Saved ✓</span>{/if}
+			</div>
+			<p class="followup-note">
+				Changing this leaves follow-ups already scheduled where they are — only new orders use the
+				new interval.
+			</p>
+		</form>
 	</section>
 
 	<!-- Signature / branding -->
@@ -450,6 +493,7 @@
 		color: #57606a;
 	}
 	.field input,
+	.field select,
 	.field textarea {
 		width: 100%;
 		box-sizing: border-box;
@@ -464,6 +508,7 @@
 		resize: vertical;
 	}
 	.field input:focus,
+	.field select:focus,
 	.field textarea:focus {
 		outline: none;
 		border-color: #a98be2;
@@ -673,6 +718,7 @@
 		color: var(--fg-muted);
 	}
 	:global(:root[data-theme='dark']) .field input,
+	:global(:root[data-theme='dark']) .field select,
 	:global(:root[data-theme='dark']) .field textarea {
 		background: var(--field-bg);
 		border-color: var(--field-border);
@@ -736,6 +782,14 @@
 		font-size: 0.85rem;
 		color: var(--fg-muted);
 		line-height: 1.5;
+	}
+	/* Quieter than the hint above the control: it answers "what happens to the
+	   follow-ups I already have", which only matters once you've changed it. */
+	.followup-note {
+		margin: 0;
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+		line-height: 1.45;
 	}
 	.tag-list {
 		list-style: none;

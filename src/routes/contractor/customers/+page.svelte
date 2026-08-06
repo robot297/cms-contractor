@@ -3,9 +3,14 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { customerContactSchema, formatPhone, normalizePreferredContact } from '$lib/crm';
+	import {
+		customerContactSchema,
+		formatPhone,
+		normalizePreferredContact,
+		preferredContactLabel,
+		US_STATES
+	} from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
-	import TagPicker from '$lib/TagPicker.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -205,11 +210,17 @@
 	let gearOpenId: string | null = $state(null);
 	// Which expanded card is showing its message composer (hidden until "Contact").
 	let contactOpenId: string | null = $state(null);
+	// The open pane is tabbed so it stays about one screenful: three stacked
+	// panels plus notes ran well past the fold on a phone. Every card opens on
+	// its first tab, like the subcontractor profile.
+	let detailTab: 'details' | 'account' | 'notes' = $state('details');
+
 	function toggleExpanded(id: string) {
 		expandedId = expandedId === id ? null : id;
 		confirmingArchiveId = null;
 		gearOpenId = null;
 		contactOpenId = null;
+		detailTab = 'details';
 	}
 
 	// --- Live search (debounced) + suggestions ----------------------------
@@ -307,17 +318,46 @@
 			email: formData.get('email')?.toString(),
 			phone: formData.get('phone')?.toString(),
 			address: formData.get('address')?.toString(),
-			notes: formData.get('notes')?.toString(),
-			tags: formData.get('tags')?.toString()
+			city: formData.get('city')?.toString(),
+			state: formData.get('state')?.toString(),
+			postalCode: formData.get('postalCode')?.toString(),
+			notes: formData.get('notes')?.toString()
 		});
 		return result.success ? null : result.error.issues[0].message;
 	}
 
+	/** "Austin, TX" from the captured fields — the profile pane's City row. */
+	function cityState(c: { city: string | null; state: string | null }): string {
+		return [c.city, c.state].filter(Boolean).join(', ');
+	}
+
+	/** How this customer prefers to be reached, for the Contact panel. */
+	function preferredLabel(value: string | null | undefined): string {
+		return preferredContactLabel(normalizePreferredContact(value));
+	}
+
+	/**
+	 * Where the customer stands with the portal. A pending invite that has already
+	 * lapsed is reported as expired rather than pending — "invite sent" is not a
+	 * useful thing to read about a link that no longer opens.
+	 */
+	function portalStatus(c: { id: string; userId: string | null }): string {
+		if (isLinked(c)) return 'Linked';
+		const pending = data.invites.find((i) => i.customerId === c.id && i.status === 'pending');
+		if (!pending) return 'Not linked yet';
+		return new Date(pending.expiresAt).getTime() > Date.now() ? 'Invite pending' : 'Invite expired';
+	}
+
+	/** Short, readable date for the Account panel. */
+	function fmtDay(d: string | Date): string {
+		const date = typeof d === 'string' ? new Date(d) : d;
+		return Number.isNaN(date.getTime())
+			? '—'
+			: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+	}
+
 	const fieldStyle =
 		'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
-	// Gear (⚙) menu that holds Edit / Send app invite / Archive.
-	// Sizing only — the gold look comes from the shared `.icon-btn` class.
-	const gearBtn = 'width: 2.3rem; height: 2.3rem; font-size: 1.55rem;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
@@ -433,10 +473,13 @@
 
 						{#each group.items as c (c.id)}
 							{@const expanded = expandedId === c.id}
-							<article class="card">
+							<!-- The shared `.card` padding is zeroed out here: every row inside
+							     brings its own, and the two together made a collapsed contact
+							     twice as tall as the name it shows. -->
+							<article class="card" style="padding: 0; gap: 0;">
 								<!-- Contact row -->
 								<div
-									style="display: flex; align-items: center; gap: 0.7rem; padding: 0.65rem 0.8rem;"
+									style="display: flex; align-items: center; gap: 0.7rem; padding: 0.45rem 0.7rem;"
 								>
 									<button
 										type="button"
@@ -482,12 +525,6 @@
 											style="font-size: 0.82rem; color: #8c959f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
 											>{c.phone ?? c.email}</span
 										>
-										<!-- Tags at a glance, without expanding the row. -->
-										{#if c.tags.length > 0}
-											<span class="tag-chips" style="margin-top: 0.1rem;">
-												{#each c.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
-											</span>
-										{/if}
 									</button>
 
 									{#if isLinked(c)}
@@ -505,9 +542,7 @@
 								</div>
 
 								{#if expanded}
-									<div
-										style="border-top: 1px solid #eef1f4; padding: 0.8rem; display: grid; gap: 0.75rem;"
-									>
+									<div class="detail">
 										{#if editingId === c.id}
 											<!-- Edit mode -->
 											<form
@@ -529,26 +564,34 @@
 												style="display: grid; gap: 0.5rem;"
 											>
 												<input type="hidden" name="id" value={c.id} />
-												<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-													<input
-														name="name"
-														value={c.name}
-														required
-														style="flex: 1; min-width: 120px; {fieldStyle}"
-													/>
-													<input
-														name="email"
-														type="email"
-														value={c.email}
-														readonly={isLinked(c)}
-														title={isLinked(c)
-															? 'Email is locked once the customer has joined'
-															: ''}
-														style="flex: 1; min-width: 140px; {fieldStyle} background: {isLinked(c)
-															? '#f6f8fa'
-															: '#fff'};"
-													/>
-												</div>
+												<input
+													name="name"
+													value={c.name}
+													required
+													placeholder="Name"
+													aria-label="Name"
+													style="width: 100%; box-sizing: border-box; {fieldStyle}"
+												/>
+												<!-- Email gets its own row rather than sharing one with the name:
+												     addresses are long, and half a row truncated them. It carries the
+												     same field styling as every other input — the locked state is
+												     said in words below, since the old grey fill never survived the
+												     shared input rule in app.css. -->
+												<input
+													name="email"
+													type="email"
+													value={c.email}
+													readonly={isLinked(c)}
+													placeholder="Email"
+													aria-label="Email"
+													title={isLinked(c) ? 'Email is locked once the customer has joined' : ''}
+													style="width: 100%; box-sizing: border-box; {fieldStyle}"
+												/>
+												{#if isLinked(c)}
+													<p style="margin: -0.2rem 0 0; font-size: 0.78rem; color: #8c959f;">
+														Locked — {c.name} has joined with this address.
+													</p>
+												{/if}
 												<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
 													<input
 														name="phone"
@@ -561,11 +604,36 @@
 													<input
 														name="address"
 														value={c.address ?? ''}
-														placeholder="Address"
+														placeholder="Street address"
 														style="flex: 2; min-width: 160px; {fieldStyle}"
 													/>
 												</div>
-												<TagPicker value={c.tags} />
+												<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+													<input
+														name="city"
+														value={c.city ?? ''}
+														placeholder="City"
+														style="flex: 2; min-width: 120px; {fieldStyle}"
+													/>
+													<select
+														name="state"
+														value={c.state ?? ''}
+														aria-label="State"
+														style="flex: 1; min-width: 80px; {fieldStyle}"
+													>
+														<option value="">State</option>
+														{#each US_STATES as s (s.code)}
+															<option value={s.code}>{s.code}</option>
+														{/each}
+													</select>
+													<input
+														name="postalCode"
+														value={c.postalCode ?? ''}
+														inputmode="numeric"
+														placeholder="ZIP"
+														style="flex: 1; min-width: 80px; {fieldStyle}"
+													/>
+												</div>
 												<label
 													style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;"
 												>
@@ -600,9 +668,11 @@
 													</p>
 												{/if}
 												<div style="display: flex; gap: 0.5rem;">
+													<!-- text-transform pinned: the shared primary-button rule in
+													     app.css uppercases these, and "SAVE" shouts next to "Cancel". -->
 													<button
 														type="submit"
-														style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer;"
+														style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; text-transform: none;"
 														>Save</button
 													>
 													<button
@@ -614,35 +684,6 @@
 												</div>
 											</form>
 										{:else}
-											<!-- Contact details -->
-											<div style="display: grid; gap: 0.3rem; font-size: 0.9rem;">
-												<div style="word-break: break-word;">
-													<span style="color: #8c959f;">Email</span> · {c.email}
-												</div>
-												{#if c.phone}
-													<div><span style="color: #8c959f;">Phone</span> · {c.phone}</div>
-												{/if}
-												{#if c.address}
-													<div style="word-break: break-word;">
-														<span style="color: #8c959f;">Address</span> · {c.address}
-													</div>
-												{/if}
-											</div>
-
-											{#if c.tags.length > 0}
-												<div class="tag-chips">
-													{#each c.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
-												</div>
-											{/if}
-
-											{#if c.notes}
-												<p
-													style="margin: 0; font-size: 0.9rem; color: #57606a; white-space: pre-wrap;"
-												>
-													{c.notes}
-												</p>
-											{/if}
-
 											{#if confirmingArchiveId === c.id}
 												<div
 													style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; background: #fff8f8; border: 1px solid #ffd7d5; border-radius: 10px; padding: 0.5rem 0.7rem;"
@@ -674,11 +715,43 @@
 														>Cancel</button
 													>
 												</div>
-											{:else}
-												<!-- Contact (💬) + manage (⚙️) actions, bottom-right like the dashboard -->
-												<div
-													style="display: flex; justify-content: flex-end; align-items: center; gap: 0.4rem; border-top: 1px solid #eef1f4; padding-top: 0.7rem;"
-												>
+											{/if}
+
+											<div class="tab-row">
+												<div class="tabs" role="tablist">
+													<button
+														type="button"
+														role="tab"
+														class="tab"
+														class:active={detailTab === 'details'}
+														aria-selected={detailTab === 'details'}
+														onclick={() => (detailTab = 'details')}>Details</button
+													>
+													<button
+														type="button"
+														role="tab"
+														class="tab"
+														class:active={detailTab === 'account'}
+														aria-selected={detailTab === 'account'}
+														onclick={() => (detailTab = 'account')}>Account</button
+													>
+													{#if c.notes}
+														<button
+															type="button"
+															role="tab"
+															class="tab"
+															class:active={detailTab === 'notes'}
+															aria-selected={detailTab === 'notes'}
+															onclick={() => (detailTab = 'notes')}>Notes</button
+														>
+													{/if}
+												</div>
+
+												<!-- Message (💬) and manage (⚙️) ride opposite the tabs, the same
+													     place the subcontractor profile keeps its ⚙: at the foot of the
+													     card their menus opened past the bottom of the viewport, with
+													     nothing repositioning them as the page scrolled. -->
+												<div class="pane-actions">
 													<!-- Message: opens the composer in a popover, defaulting to the
 													     customer's preferred channel. -->
 													<div style="position: relative;">
@@ -688,8 +761,7 @@
 															aria-label="Message customer"
 															aria-expanded={contactOpenId === c.id}
 															onclick={() => (contactOpenId = contactOpenId === c.id ? null : c.id)}
-															class="icon-btn"
-															style={gearBtn}>💬</button
+															class="icon-btn pane-btn">💬</button
 														>
 														{#if contactOpenId === c.id}
 															<!-- Dimmed click-away scrim so the composer is the focus. -->
@@ -699,7 +771,8 @@
 																onclick={() => (contactOpenId = null)}
 																class="contact-scrim"
 															></button>
-															<div class="contact-pop up">
+															<!-- Opens downward now that it hangs from the top of the pane. -->
+															<div class="contact-pop">
 																<ContactComposer
 																	customer={c}
 																	rows={2}
@@ -717,8 +790,7 @@
 															aria-label="Manage customer"
 															aria-expanded={gearOpenId === c.id}
 															onclick={() => (gearOpenId = gearOpenId === c.id ? null : c.id)}
-															class="icon-btn"
-															style={gearBtn}>⚙️</button
+															class="icon-btn pane-btn">⚙️</button
 														>
 														{#if gearOpenId === c.id}
 															<!-- click-away backdrop -->
@@ -764,6 +836,100 @@
 																>
 															</div>
 														{/if}
+													</div>
+												</div>
+											</div>
+
+											<!-- Facts in titled panels, the same treatment as a subcontractor
+											     profile: grouped by the question being asked, values flush right,
+											     and the grid refilling to one column on a phone. -->
+											{#if detailTab === 'details'}
+												<div class="profile">
+													<div class="fact-group">
+														<div class="fact-head">
+															<span class="fact-icon" aria-hidden="true">✉</span>Contact
+														</div>
+														<dl class="fact-list">
+															<div class="fact">
+																<dt>Email</dt>
+																<dd><a href="mailto:{c.email}">{c.email}</a></dd>
+															</div>
+															<div class="fact">
+																<dt>Phone</dt>
+																<dd>
+																	<!-- Display form keeps its punctuation, the href doesn't. -->
+																	{#if c.phone}<a href="tel:{c.phone.replace(/[^\d+]/g, '')}"
+																			>{c.phone}</a
+																		>{:else}<span class="unset">Not set</span>{/if}
+																</dd>
+															</div>
+															<div class="fact">
+																<dt>Prefers</dt>
+																<dd>{preferredLabel(c.preferredContact)}</dd>
+															</div>
+														</dl>
+													</div>
+
+													<div class="fact-group">
+														<div class="fact-head">
+															<span class="fact-icon" aria-hidden="true">📍</span>Location
+														</div>
+														<dl class="fact-list">
+															<div class="fact">
+																<dt>Street</dt>
+																<dd>
+																	{#if c.address}{c.address}{:else}<span class="unset">Not set</span
+																		>{/if}
+																</dd>
+															</div>
+															<div class="fact">
+																<dt>City</dt>
+																<dd>
+																	{#if cityState(c)}{cityState(c)}{:else}<span class="unset"
+																			>Not set</span
+																		>{/if}
+																</dd>
+															</div>
+															<div class="fact">
+																<dt>ZIP</dt>
+																<dd>
+																	{#if c.postalCode}{c.postalCode}{:else}<span class="unset"
+																			>Not set</span
+																		>{/if}
+																</dd>
+															</div>
+														</dl>
+													</div>
+												</div>
+											{:else if detailTab === 'account'}
+												<div class="profile">
+													<div class="fact-group">
+														<div class="fact-head">
+															<span class="fact-icon" aria-hidden="true">👤</span>Account
+														</div>
+														<dl class="fact-list">
+															<div class="fact">
+																<dt>Portal</dt>
+																<dd>{portalStatus(c)}</dd>
+															</div>
+															<div class="fact">
+																<dt>Added</dt>
+																<dd>{fmtDay(c.createdAt)}</dd>
+															</div>
+															<div class="fact">
+																<dt>Updated</dt>
+																<dd>{fmtDay(c.updatedAt)}</dd>
+															</div>
+														</dl>
+													</div>
+												</div>
+											{:else if c.notes}
+												<div class="profile">
+													<div class="fact-group wide">
+														<div class="fact-head">
+															<span class="fact-icon" aria-hidden="true">📝</span>Notes
+														</div>
+														<p class="notes-body">{c.notes}</p>
 													</div>
 												</div>
 											{/if}
@@ -967,10 +1133,42 @@
 			/>
 		</label>
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
-			Address
+			Street address
 			<input name="address" autocomplete="street-address" style={fieldStyle} />
 		</label>
-		<TagPicker />
+		<!-- City / state / ZIP on one row: three short fields that read as one
+		     address, rather than three full-width rows pretending to be separate. -->
+		<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+			<label
+				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 2; min-width: 130px;"
+			>
+				City
+				<input name="city" autocomplete="address-level2" style={fieldStyle} />
+			</label>
+			<label
+				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 1; min-width: 90px;"
+			>
+				State
+				<select name="state" autocomplete="address-level1" style={fieldStyle}>
+					<option value="">—</option>
+					{#each US_STATES as s (s.code)}
+						<option value={s.code}>{s.code}</option>
+					{/each}
+				</select>
+			</label>
+			<label
+				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 1; min-width: 90px;"
+			>
+				ZIP
+				<input
+					name="postalCode"
+					inputmode="numeric"
+					autocomplete="postal-code"
+					placeholder="12345"
+					style={fieldStyle}
+				/>
+			</label>
+		</div>
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
 			Preferred contact method
 			<select name="preferredContact" style={fieldStyle}>
@@ -1122,6 +1320,160 @@
 </dialog>
 
 <style>
+	/* ------------------------------------------------------- Expanded profile
+	   Same treatment as the subcontractor profile pane, deliberately: both are
+	   "open a contact and read their facts", and they were drifting into two
+	   different languages for the same job. Recessed pane, white panels with a
+	   titled band, hairline rows, values flush right. Token-driven, so dark needs
+	   no override block. */
+	.detail {
+		border-top: 1px solid var(--line);
+		background: var(--surface-inset);
+		padding: 0.85rem;
+		display: grid;
+		gap: 0.85rem;
+	}
+	/* Tabs left, actions right, sharing one underline — the same band and the same
+	   tab treatment as the subcontractor profile. */
+	.tab-row {
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		/* Generous, and wrapping rather than compressing: on a narrow card the
+		   actions drop under the tabs instead of crowding the last one. */
+		gap: 0.5rem 1.75rem;
+		flex-wrap: wrap;
+		border-bottom: 1px solid var(--line);
+	}
+	.tabs {
+		display: flex;
+		gap: 0.25rem;
+	}
+	.tab {
+		padding: 0.4rem 0.7rem;
+		border: none;
+		background: none;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-weight: 700;
+		font-size: 0.82rem;
+		cursor: pointer;
+		border-bottom: 2px solid transparent;
+		margin-bottom: -1px;
+	}
+	.tab:hover {
+		color: var(--fg);
+	}
+	.tab.active {
+		color: var(--fg);
+		border-bottom-color: var(--fg);
+	}
+	.pane-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-left: auto;
+		padding-bottom: 0.3rem;
+	}
+	/* Sized down from the card-head icon buttons: in the tab strip these sit
+	   beside 0.82rem tab labels, and at full size they read as the loudest thing
+	   in the pane. */
+	.pane-btn {
+		width: 2rem;
+		height: 2rem;
+		font-size: 1.05rem;
+	}
+	.profile {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 0.6rem;
+		align-items: start;
+		margin: 0;
+	}
+	.profile .wide {
+		grid-column: 1 / -1;
+	}
+	.fact-group {
+		display: grid;
+		align-content: start;
+		background: var(--surface);
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		overflow: hidden;
+	}
+	.fact-head {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0;
+		padding: 0.42rem 0.7rem;
+		background: var(--surface-sunken);
+		border-bottom: 1px solid var(--line);
+		font-size: 0.75rem;
+		font-weight: 700;
+		letter-spacing: 0.01em;
+		color: var(--fg-muted);
+	}
+	.fact-icon {
+		font-size: 0.8rem;
+		line-height: 1;
+		opacity: 0.75;
+	}
+	.fact-list {
+		margin: 0;
+		padding: 0 0.7rem;
+	}
+	.fact {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.4rem 0;
+		border-bottom: 1px solid var(--line);
+	}
+	.fact:last-child {
+		border-bottom: none;
+	}
+	.profile dt {
+		flex-shrink: 0;
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: var(--fg-muted);
+		font-weight: 700;
+	}
+	/* One size, one weight, one alignment for every value — present or absent. */
+	.profile dd {
+		margin: 0;
+		min-width: 0;
+		font-size: 0.85rem;
+		line-height: 1.35;
+		font-weight: 600;
+		text-align: right;
+		word-break: break-word;
+	}
+	.profile dd a {
+		color: inherit;
+		text-decoration: none;
+		border-bottom: 1px solid var(--line-strong);
+	}
+	.profile dd a:hover {
+		border-bottom-color: currentColor;
+	}
+	.unset {
+		color: var(--fg-muted);
+		font-weight: 500;
+	}
+	/* Notes are prose, so they keep their left edge and their line breaks. */
+	.notes-body {
+		margin: 0;
+		padding: 0.55rem 0.7rem;
+		font-size: 0.88rem;
+		line-height: 1.45;
+		color: var(--fg);
+		white-space: pre-wrap;
+	}
+
 	/* Count on the ✉️ invites button, so the badge carries the number the old
 	   always-visible panel header used to. */
 	.invite-badge {

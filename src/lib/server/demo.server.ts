@@ -150,8 +150,10 @@ async function seedDemoData(contractorId: string): Promise<void> {
 			email: c.email,
 			phone: c.phone,
 			address: c.address,
+			city: c.city,
+			state: c.state,
+			postalCode: c.postalCode,
 			notes: c.notes,
-			tags: c.tags,
 			avatar: c.avatar,
 			preferredContact: c.preferredContact
 		});

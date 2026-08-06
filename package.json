@@ -22,6 +22,7 @@
 		"db:generate": "varlock run -- drizzle-kit generate",
 		"db:migrate": "varlock run -- drizzle-kit migrate",
 		"migrate": "varlock run -- node scripts/migrate.mjs",
+		"backfill:address": "varlock run -- node scripts/backfill-customer-address.mjs",
 		"db:studio": "varlock run -- drizzle-kit studio",
 		"db:seed": "varlock run -- node scripts/seed.mjs",
 		"auth:schema": "NODE_OPTIONS='--import varlock/auto-load' better-auth generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes"

@@ -1,0 +1,1 @@
+ALTER TABLE "contractor_settings" ADD COLUMN "guide_skipped_steps" text[] DEFAULT '{}' NOT NULL;

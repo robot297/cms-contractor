@@ -8,7 +8,7 @@
 	const steps = $derived(
 		guide.state === 'extended' ? [...guide.core, ...guide.extended] : guide.core
 	);
-	const doneCount = $derived(steps.filter((s) => s.done).length);
+	const doneCount = $derived(steps.filter((s) => s.done || s.skipped).length);
 	const pct = $derived(steps.length ? Math.round((doneCount / steps.length) * 100) : 0);
 
 	/**
@@ -17,10 +17,16 @@
 	 * no sense of what to do next, which is the entire job of a getting-started card.
 	 * Steps blocked by an earlier one can't be "current"; the blocker is.
 	 */
-	const currentId = $derived(steps.find((s) => !s.done && !s.blockedBy)?.id ?? null);
+	// A skipped step is settled — it must not stay "current" and block the ones after it.
+	const currentId = $derived(steps.find((s) => !s.done && !s.skipped && !s.blockedBy)?.id ?? null);
 
+	/**
+	 * `resolve` takes a route id, so a step that carries a query string (`?new`, to
+	 * land with a form already open) has to be split and reassembled around it.
+	 */
 	function stepHref(step: GuideStep) {
-		return resolve(step.href as '/contractor/customers');
+		const [path, query] = (step.href ?? '').split('?');
+		return resolve(path as '/contractor/customers') + (query ? `?${query}` : '');
 	}
 </script>
 
@@ -47,8 +53,14 @@
 	<ol>
 		{#each steps as step, i (step.id)}
 			{@const current = step.id === currentId}
-			<li class:done={step.done} class:current class:blocked={!step.done && !!step.blockedBy}>
-				<span class="marker" aria-hidden="true">{step.done ? '✓' : i + 1}</span>
+			<li
+				class:done={step.done}
+				class:skipped={!step.done && step.skipped}
+				class:current
+				class:blocked={!step.done && !step.skipped && !!step.blockedBy}
+			>
+				<span class="marker" aria-hidden="true">{step.done ? '✓' : step.skipped ? '–' : i + 1}</span
+				>
 
 				<div class="body">
 					<span class="label">{step.title}</span>
@@ -57,15 +69,20 @@
 						<p class="desc">{step.description}</p>
 						<div class="action">
 							{#if step.href && step.cta}
+								<!-- stepHref does resolve the path; the rule just can't see through
+								     the query string it reassembles around it. -->
+								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 								<a class="go" href={stepHref(step)}>{step.cta} →</a>
-							{:else if step.id === 'followUp'}
-								<!-- Teaches rather than asks: every order is born with a follow-up,
-								     so this step is completed by acknowledgement. -->
-								<form method="POST" action="?/guideAckFollowUp" use:enhance>
-									<button type="submit" class="go">Got it</button>
+							{/if}
+							{#if step.skippable}
+								<form method="POST" action="?/guideSkipStep" use:enhance>
+									<input type="hidden" name="stepId" value={step.id} />
+									<button type="submit" class="skip">Skip this</button>
 								</form>
 							{/if}
 						</div>
+					{:else if !step.done && step.skipped}
+						<span class="note">Skipped</span>
 					{:else if !step.done && step.blockedBy}
 						<span class="note">{step.blockedBy}</span>
 					{/if}
@@ -198,6 +215,16 @@
 	li.done .label {
 		color: var(--fg-muted);
 	}
+	/* Skipped reads as settled-but-not-done: struck through, never ticked. */
+	li.skipped .label {
+		color: var(--fg-muted);
+		text-decoration: line-through;
+		text-decoration-color: var(--line-strong);
+	}
+	li.skipped .marker {
+		background: var(--line);
+		color: var(--fg-muted);
+	}
 	li.blocked .label {
 		color: var(--fg-muted);
 	}
@@ -215,7 +242,27 @@
 	}
 
 	.action {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
 		margin-top: 0.15rem;
+	}
+	/* Quieter than the primary action — an escape hatch, not the suggestion. */
+	.skip {
+		border: none;
+		background: none;
+		padding: 0.2rem 0;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.76rem;
+		font-weight: 700;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+		cursor: pointer;
+	}
+	.skip:hover {
+		color: var(--fg);
 	}
 	.go {
 		display: inline-block;

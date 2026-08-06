@@ -1,7 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { formatLocation, isOrderIcon, isSnoozePreset } from '$lib/crm';
+import { customerLocation, isOrderIcon, isSnoozePreset } from '$lib/crm';
 import { listContractorOrders, setOrderIcon, snoozeFollowUp } from '$lib/server/crm.server';
-import { ackGuideFollowUp, loadGuide, setGuideState } from '$lib/server/guide.server';
+import { loadGuide, setGuideState, skipGuideStep } from '$lib/server/guide.server';
 import { dismissTrialNotice, getContractorSettings } from '$lib/server/templates.server';
 import type { Actions, PageServerLoad } from './$types';
 import { withBillingErrors } from '$lib/server/billing.server';
@@ -32,7 +32,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			customerName: o.customerName,
 			customerEmail: o.customerEmail,
 			customerPhone: o.customerPhone,
-			customerLocation: formatLocation(o.customerAddress),
+			customerLocation: customerLocation({
+				city: o.customerCity,
+				state: o.customerState,
+				address: o.customerAddress
+			}),
 			customerPreferredContact: o.customerPreferredContact,
 			projectName: o.projectName,
 			projectType: o.projectType,
@@ -80,10 +84,13 @@ export const actions: Actions = withBillingErrors({
 		return { success: true };
 	},
 
-	/** Guide: the follow-up step teaches rather than asks — mark it read. */
-	guideAckFollowUp: async ({ locals }) => {
+	/** Guide: wave an optional step away rather than leave it unticked forever. */
+	guideSkipStep: async ({ request, locals }) => {
 		const user = requireContractor(locals);
-		await ackGuideFollowUp(user.id);
+		const form = await request.formData();
+		const stepId = form.get('stepId')?.toString() ?? '';
+		if (!stepId) return fail(400, { message: 'A step is required' });
+		await skipGuideStep(user.id, stepId);
 		return { success: true };
 	},
 

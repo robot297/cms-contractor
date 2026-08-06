@@ -501,7 +501,21 @@ export async function assignSubcontractor(
 	if (!ord) throw new Error('Order not found');
 	const sub = await ownedSubcontractor(contractorId, subcontractorId);
 	if (!sub) throw new Error('Subcontractor not found');
-	await db.insert(orderSubcontractor).values({ orderId, subcontractorId }).onConflictDoNothing();
+	const inserted = await db
+		.insert(orderSubcontractor)
+		.values({ orderId, subcontractorId })
+		.onConflictDoNothing()
+		.returning();
+	// Already on the job — the conflict was swallowed, so there is nothing to log.
+	if (inserted.length === 0) return;
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'note',
+		title: 'Subcontractor added',
+		detail: `${sub.name} put on this job`,
+		authorRole: 'contractor',
+		internal: true
+	});
 }
 
 export async function unassignSubcontractor(
@@ -519,14 +533,26 @@ export async function unassignSubcontractor(
 		)
 		.limit(1);
 	if (!ord) throw new Error('Order not found');
-	await db
+	const sub = await ownedSubcontractor(contractorId, subcontractorId);
+	const removed = await db
 		.delete(orderSubcontractor)
 		.where(
 			and(
 				eq(orderSubcontractor.orderId, orderId),
 				eq(orderSubcontractor.subcontractorId, subcontractorId)
 			)
-		);
+		)
+		.returning();
+	// Wasn't on the job to begin with, so nothing happened worth recording.
+	if (removed.length === 0) return;
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'note',
+		title: 'Subcontractor removed',
+		detail: `${sub?.name ?? 'Subcontractor'} taken off this job`,
+		authorRole: 'contractor',
+		internal: true
+	});
 }
 
 /** Subcontractors currently assigned to one of the contractor's orders. */

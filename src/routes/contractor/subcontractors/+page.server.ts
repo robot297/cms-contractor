@@ -70,7 +70,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			assignedOrders: await listSubcontractorOrders(user.id, s.id)
 		}))
 	);
-	return { subcontractors: roster, search };
+	return {
+		subcontractors: roster,
+		search,
+		// Open the add form on arrival when there is nothing else to do here: an
+		// empty roster, or a deliberate `?new` from the getting-started guide. The
+		// search-miss case is excluded — that page isn't empty, it's filtered.
+		openAdd: url.searchParams.has('new') || (roster.length === 0 && search === '')
+	};
 };
 
 // Wrapped so a billing refusal from any guarded write returns a 402 the form

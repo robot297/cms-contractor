@@ -42,13 +42,16 @@
    / border literals rather than re-authoring every rule. */
 :root[data-theme='dark'] {
 	--paper: #14171c;
-	--ink: #e8ebf0;
-	--muted: #9aa4b0;
+	/* Body text runs near-white rather than the old #e8ebf0 — that grey read as
+	   washed out against these surfaces, especially at small sizes. Muted comes up
+	   with it so secondary text stays clearly legible instead of merely present. */
+	--ink: #f5f8fb;
+	--muted: #adb8c4;
 	--surface: #1b1f26;
 	--surface-sunken: #232830;
 	--surface-inset: #14171c;
-	--fg: #e8ebf0;
-	--fg-muted: #9aa4b0;
+	--fg: #f5f8fb;
+	--fg-muted: #adb8c4;
 	--line: #333b45;
 	--line-strong: #3d4650;
 	--field-bg: #14171c;

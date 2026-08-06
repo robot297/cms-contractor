@@ -52,11 +52,31 @@
 
 	// Mobile nav: links + user/sign-out collapse behind a hamburger.
 	let menuOpen = $state(false);
-	// Close the menu whenever the route changes (a link was followed).
+	// The account menu behind the avatar: billing and sign-out. The name and a red
+	// SIGN OUT button sitting in the bar was the widest thing in it, and the first
+	// to collide with the trial badge once the rail tightened up on a tablet.
+	let userMenuOpen = $state(false);
+	// Two letters at most — "Jo Bloggs" → JB, "testerooni" → T.
+	const initials = $derived(
+		(data.userName ?? '')
+			.split(/\s+/)
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((word) => word[0]?.toUpperCase() ?? '')
+			.join('') || '?'
+	);
+	function closeMenus() {
+		menuOpen = false;
+		userMenuOpen = false;
+	}
+	// Close both menus whenever the route changes (a link was followed).
 	$effect(() => {
 		void path; // track route changes so the mobile menu closes on navigation
-		menuOpen = false;
+		closeMenus();
 	});
+	// …and on the click itself, because tapping the link for the page you're already
+	// on is not a navigation: the effect above never re-runs, so the menu just sat
+	// there looking broken.
 
 	// The gliding rail indicator. Rather than six links each painting their own
 	// active state, one pill slides to whichever link is current. Its position is
@@ -174,30 +194,49 @@
 				<div class="nav-links" class:ready={railReady} bind:this={railEl}>
 					<span class="rail-glide" style="--x: {railX}px; --w: {railW}px;" aria-hidden="true"
 					></span>
-					<a href={resolve('/contractor')} class="navlink" class:is-active={onDashboard}
-						>Dashboard</a
+					<a
+						href={resolve('/contractor')}
+						class="navlink"
+						class:is-active={onDashboard}
+						onclick={closeMenus}>Dashboard</a
 					>
-					<a href={resolve('/contractor/orders')} class="navlink" class:is-active={onOrders}
-						>Orders</a
+					<a
+						href={resolve('/contractor/orders')}
+						class="navlink"
+						class:is-active={onOrders}
+						onclick={closeMenus}>Orders</a
 					>
-					<a href={resolve('/contractor/customers')} class="navlink" class:is-active={onCustomers}
-						>Customers</a
+					<a
+						href={resolve('/contractor/customers')}
+						class="navlink"
+						class:is-active={onCustomers}
+						onclick={closeMenus}>Customers</a
 					>
 					<a
 						href={resolve('/contractor/subcontractors')}
 						class="navlink"
-						class:is-active={onSubcontractors}>Subcontractors</a
+						class:is-active={onSubcontractors}
+						onclick={closeMenus}>Subcontractors</a
 					>
 					<a
 						href={resolve('/contractor/settings/templates')}
 						class="navlink"
-						class:is-active={onTemplates}>Templates</a
+						class:is-active={onTemplates}
+						onclick={closeMenus}>Templates</a
 					>
-					<a href={resolve('/contractor/support')} class="navlink" class:is-active={onSupport}
-						>Support</a
+					<!-- Only in the collapsed menu. On the bar it lives in the account menu
+					     behind the avatar, which the collapsed menu doesn't use. -->
+					<a
+						href={resolve('/contractor/billing')}
+						class="navlink collapse-only"
+						class:is-active={onBilling}
+						onclick={closeMenus}>Billing</a
 					>
-					<a href={resolve('/contractor/billing')} class="navlink" class:is-active={onBilling}
-						>Billing</a
+					<a
+						href={resolve('/contractor/support')}
+						class="navlink"
+						class:is-active={onSupport}
+						onclick={closeMenus}>Support</a
 					>
 				</div>
 				<div class="nav-right">
@@ -253,8 +292,53 @@
 							</svg>
 						{/if}
 					</button>
-					<span class="username">{data.userName}</span>
-					<form method="POST" action="/logout">
+					<!-- Account: avatar in the bar, everything else behind it. -->
+					<div class="user">
+						<button
+							type="button"
+							class="avatar"
+							class:on={userMenuOpen}
+							aria-haspopup="menu"
+							aria-expanded={userMenuOpen}
+							title={data.userName}
+							aria-label="Account menu"
+							onclick={() => (userMenuOpen = !userMenuOpen)}>{initials}</button
+						>
+						{#if userMenuOpen}
+							<button
+								type="button"
+								class="user-scrim"
+								aria-label="Close account menu"
+								onclick={() => (userMenuOpen = false)}
+							></button>
+							<div class="user-menu" role="menu">
+								<div class="user-menu-head">
+									<span class="user-menu-name">{data.userName}</span>
+									{#if onTrial && trialDays !== null}
+										<span class="user-menu-sub"
+											>Trial · {trialDays}
+											{trialDays === 1 ? 'day' : 'days'} left</span
+										>
+									{/if}
+								</div>
+								<a
+									class="user-menu-item"
+									class:is-active={onBilling}
+									role="menuitem"
+									href={resolve('/contractor/billing')}
+									onclick={closeMenus}>Billing</a
+								>
+								<form method="POST" action="/logout">
+									<button type="submit" class="user-menu-item danger" role="menuitem"
+										>Sign out</button
+									>
+								</form>
+							</div>
+						{/if}
+					</div>
+					<!-- The collapsed menu's sign-out. It has no avatar to hide things
+					     behind, so this is a plain row alongside the links. -->
+					<form method="POST" action="/logout" class="signout-form">
 						<button type="submit" class="signout">Sign out</button>
 					</form>
 				</div>
@@ -549,26 +633,132 @@
 		background: #fff;
 	}
 
-	.username {
-		font-size: 0.8rem;
+	/* Account. One square in the bar; the name, billing and sign-out all live in the
+	   menu behind it, which is what buys the trial badge its room back. */
+	.user {
+		position: relative;
+		flex: none;
+	}
+	.avatar {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		width: 2rem;
+		height: 2rem;
+		padding: 0;
+		border-radius: 999px;
+		border: 1.5px solid var(--bar-edge);
+		background: var(--bar-wash);
 		color: var(--bar-fg);
+		font-family: inherit;
+		font-size: 0.72rem;
+		font-weight: 800;
+		letter-spacing: 0.02em;
+		line-height: 1;
+		cursor: pointer;
+	}
+	.avatar:hover,
+	.avatar.on {
+		background: var(--yellow);
+		border-color: var(--yellow);
+		color: #14171c;
+	}
+	.avatar:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+	}
+	.user-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 90;
+		border: none;
+		background: transparent;
+		cursor: default;
+	}
+	.user-menu {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 8px);
+		z-index: 100;
+		box-sizing: border-box;
+		min-width: 13rem;
+		max-width: calc(100vw - 2rem);
+		padding: 0.35rem;
+		display: grid;
+		gap: 0.1rem;
+		background: var(--surface);
+		border: 1px solid var(--line-strong);
+		border-radius: 12px;
+		box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+	}
+	.user-menu-head {
+		display: grid;
+		gap: 0.1rem;
+		padding: 0.45rem 0.6rem 0.55rem;
+		margin-bottom: 0.15rem;
+		border-bottom: 1px solid var(--line);
+	}
+	.user-menu-name {
+		font-size: 0.88rem;
+		font-weight: 800;
+		color: var(--fg);
+		overflow-wrap: anywhere;
+	}
+	.user-menu-sub {
+		font-size: 0.72rem;
 		font-weight: 700;
+		color: var(--fg-muted);
+	}
+	.user-menu-item {
+		display: block;
+		width: 100%;
+		box-sizing: border-box;
+		padding: 0.5rem 0.6rem;
+		border: none;
+		border-radius: 8px;
+		background: none;
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.85rem;
+		font-weight: 600;
+		text-align: left;
+		text-decoration: none;
+		cursor: pointer;
+	}
+	.user-menu-item:hover {
+		background: var(--surface-sunken);
+	}
+	.user-menu-item.is-active {
+		color: var(--fg);
+		background: color-mix(in srgb, var(--yellow) 22%, var(--surface));
+	}
+	.user-menu-item.danger {
+		color: var(--danger);
+	}
+	.user-menu-item:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: -2px;
+	}
+	/* Collapsed-menu-only pieces. Hidden on the bar, where the account menu behind
+	   the avatar covers the same ground. Turned on in the 1024px block below. */
+	.collapse-only,
+	.signout-form {
+		display: none;
 	}
 	.signout {
-		padding: 0.32rem 0.8rem;
-		border-radius: 999px;
-		border: 1.5px solid #e5534b;
-		background: #cf222e;
-		color: #fff;
+		padding: 0.55rem 0.9rem;
+		border-radius: 10px;
+		border: 1.5px solid var(--danger);
+		background: none;
+		color: var(--danger);
+		font-family: inherit;
+		font-size: 0.9rem;
+		font-weight: 700;
 		cursor: pointer;
-		font-weight: 800;
-		text-transform: uppercase;
-		font-size: 0.72rem;
-		letter-spacing: 0.02em;
 	}
 	.signout:hover {
-		background: #b3202a;
-		border-color: #b3202a;
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
 	}
 
 	/* The theme toggle inside the collapsed menu. Icon-only square, not a full-width
@@ -670,11 +860,6 @@
 
 	/* Hide the signed-in name below wide desktop — it only crowds the bar and the
 	   overlay doesn't need it. */
-	@media (max-width: 1180px) {
-		.username {
-			display: none;
-		}
-	}
 
 	/* Tablet + mobile: collapse behind the hamburger as an animated overlay. The
 	   inline bar can't fit the full link set, so tablets get the menu too. */
@@ -751,33 +936,41 @@
 			color: #14171c;
 			box-shadow: none;
 		}
-		/* One compact line rather than a stack of full-width blocks: name on the left,
-		   theme icon and sign-out on the right. */
+		/* Billing joins the links, and sign-out becomes a row of its own — the avatar
+		   and its popover are dropped entirely here. A menu that opens a second menu
+		   is a poor trade on a screen this size. */
+		.collapse-only {
+			display: block;
+		}
+		.signout-form {
+			display: block;
+			margin-top: 0.15rem;
+		}
+		.signout {
+			width: 100%;
+			box-sizing: border-box;
+		}
+		.user {
+			display: none;
+		}
+		/* One compact line rather than a stack of full-width blocks: trial badge on
+		   the left, theme icon on the right. */
 		.nav-right {
 			flex-direction: row;
 			align-items: center;
-			justify-content: space-between;
+			justify-content: flex-end;
 			gap: 0.5rem;
 			margin-top: 0.35rem;
 			padding-top: 0.7rem;
 			border-top: 1px solid var(--bar-edge);
 		}
-		.username {
-			padding: 0 0.2rem;
-			margin-right: auto;
-		}
-		/* The badge leads the row in the menu, ahead of the name. */
+		/* The badge leads the row in the menu. */
 		.trial-badge {
 			order: -1;
+			margin-right: auto;
 		}
 		.theme-row {
 			display: inline-flex;
-		}
-		.signout {
-			text-transform: none;
-			font-size: 0.85rem;
-			border-radius: 999px;
-			padding: 0.4rem 0.9rem;
 		}
 	}
 

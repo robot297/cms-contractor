@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
 	defaultFollowUp,
+	DEFAULT_FOLLOWUP_DAYS,
+	FOLLOWUP_DAY_CHOICES,
+	followUpDaysLabel,
+	isFollowUpDays,
 	digitsOnly,
 	formatLocation,
 	formatPhone,
@@ -68,6 +72,15 @@ describe('customer contact validation', () => {
 		if (!result.ok) expect(result.field).toBe('phone');
 	});
 
+	it('rejects a state that is not a real code, and a malformed ZIP', () => {
+		const badState = validateCustomerContact({ name: 'Dan', email: 'a@b.com', state: 'ZZ' });
+		expect(badState.ok).toBe(false);
+		if (!badState.ok) expect(badState.field).toBe('state');
+		const badZip = validateCustomerContact({ name: 'Dan', email: 'a@b.com', postalCode: '1234' });
+		expect(badZip.ok).toBe(false);
+		if (!badZip.ok) expect(badZip.field).toBe('postalCode');
+	});
+
 	it('accepts and normalizes a valid contact with optional fields', () => {
 		expect(
 			validateCustomerContact({
@@ -75,8 +88,10 @@ describe('customer contact validation', () => {
 				email: 'Dan@Example.com',
 				phone: '5551234567',
 				address: '  12 Main St ',
-				notes: '',
-				tags: 'kitchen, kitchen , repeat'
+				city: ' Austin ',
+				state: 'tx',
+				postalCode: '78701',
+				notes: ''
 			})
 		).toEqual({
 			ok: true,
@@ -85,8 +100,11 @@ describe('customer contact validation', () => {
 				email: 'dan@example.com',
 				phone: '(555) 123-4567',
 				address: '12 Main St',
+				city: 'Austin',
+				// Stored uppercase whatever the casing it arrived in.
+				state: 'TX',
+				postalCode: '78701',
 				notes: null,
-				tags: ['kitchen', 'repeat'],
 				preferredContact: 'email'
 			}
 		});
@@ -101,8 +119,10 @@ describe('customer contact validation', () => {
 				email: 'a@b.com',
 				phone: null,
 				address: null,
+				city: null,
+				state: null,
+				postalCode: null,
 				notes: null,
-				tags: [],
 				preferredContact: 'email'
 			}
 		});
@@ -139,10 +159,24 @@ describe('location line from free-form address', () => {
 		expect(formatLocation('123 Main St, Austin, TX 78701-1234')).toBe('Austin, TX');
 	});
 
+	it('reads the same shapes written without commas', () => {
+		expect(formatLocation('123 Main St Springfield IL 62704')).toBe('Springfield, IL');
+		expect(formatLocation('123 Main St Springfield IL')).toBe('Springfield, IL');
+		expect(formatLocation('1600 Pennsylvania Ave San Jose CA')).toBe('San Jose, CA');
+		expect(formatLocation('88 Cedar Ln, Springfield IL')).toBe('Springfield, IL');
+	});
+
+	it('takes a bare town at its word', () => {
+		expect(formatLocation('Springfield')).toBe('Springfield');
+		expect(formatLocation('San Luis Obispo')).toBe('San Luis Obispo');
+	});
+
 	it('returns null when no city can be isolated', () => {
 		expect(formatLocation(null)).toBeNull();
 		expect(formatLocation('')).toBeNull();
 		expect(formatLocation('88 Cedar Ln')).toBeNull();
+		// A street with no number is still a street, not a town.
+		expect(formatLocation('Cedar Lane')).toBeNull();
 	});
 });
 
@@ -199,8 +233,27 @@ describe('order setup validation', () => {
 describe('follow-ups', () => {
 	const now = new Date('2026-07-19T00:00:00.000Z');
 
-	it('defaults a new follow-up to 3 days out', () => {
-		expect(defaultFollowUp(now).toISOString()).toBe('2026-07-22T00:00:00.000Z');
+	it('defaults a new follow-up to a week out', () => {
+		expect(defaultFollowUp(DEFAULT_FOLLOWUP_DAYS, now).toISOString()).toBe(
+			'2026-07-26T00:00:00.000Z'
+		);
+	});
+
+	it('honours a contractor-set interval', () => {
+		expect(defaultFollowUp(14, now).toISOString()).toBe('2026-08-02T00:00:00.000Z');
+	});
+
+	it('only accepts the offered intervals', () => {
+		expect(FOLLOWUP_DAY_CHOICES.every((d) => isFollowUpDays(d))).toBe(true);
+		expect(isFollowUpDays(5)).toBe(false);
+		expect(isFollowUpDays(0)).toBe(false);
+	});
+
+	it('reads the interval back in words', () => {
+		expect(followUpDaysLabel(3)).toBe('3 days');
+		expect(followUpDaysLabel(7)).toBe('a week');
+		expect(followUpDaysLabel(14)).toBe('2 weeks');
+		expect(followUpDaysLabel(30)).toBe('30 days');
 	});
 
 	it('is due when set on or before now', () => {

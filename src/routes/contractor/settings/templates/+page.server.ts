@@ -6,8 +6,10 @@ import {
 	listEmailTemplates,
 	reorderEmailTemplates,
 	saveContractorSettings,
+	saveFollowUpDays,
 	updateEmailTemplate
 } from '$lib/server/templates.server';
+import { isFollowUpDays } from '$lib/crm';
 import { deleteContractorTag } from '$lib/server/tags.server';
 import type { Actions, PageServerLoad } from './$types';
 import { withBillingErrors } from '$lib/server/billing.server';
@@ -27,7 +29,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 	return {
 		templates: templates.map((t) => ({ id: t.id, name: t.name, subject: t.subject, body: t.body })),
 		signature: settings.signature,
-		businessName: settings.businessName
+		businessName: settings.businessName,
+		followUpDays: settings.followUpDays
 	};
 };
 
@@ -112,5 +115,19 @@ export const actions: Actions = withBillingErrors({
 			signature: (form.get('signature')?.toString() ?? '').trim()
 		});
 		return { success: true, saved: 'signature' };
+	},
+
+	/**
+	 * Change how far out new orders schedule their first follow-up. Existing
+	 * follow-ups are left where they are — see `saveFollowUpDays`.
+	 */
+	saveFollowUpDays: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const days = Number(form.get('followUpDays'));
+		if (!isFollowUpDays(days))
+			return fail(400, { action: 'followUp', message: 'Pick one of the listed intervals' });
+		await saveFollowUpDays(user.id, days);
+		return { success: true, saved: 'followUp' };
 	}
 });

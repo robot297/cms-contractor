@@ -28,6 +28,9 @@ import {
 // /contractor layout: a lapsed contractor must still be able to read everything
 // they built. See docs/adr/0005-lapsing-never-reaches-customers.md.
 import { assertCanCreate, assertCanWrite } from './billing.server';
+// A new order's first follow-up lands at the contractor's own interval, so
+// creating one has to read their settings.
+import { getContractorSettings } from './templates.server';
 
 /** How long a customer invite / magic link stays valid. */
 const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -43,6 +46,8 @@ export type ContractorOrderView = OrderRow & {
 	customerEmail: string;
 	customerPhone: string | null;
 	customerAddress: string | null;
+	customerCity: string | null;
+	customerState: string | null;
 	customerPreferredContact: PreferredContact;
 	customerVisibleState: string;
 	followUpDue: boolean;
@@ -75,6 +80,8 @@ function toContractorView(row: OrderRow, cust: CustomerRow | null): ContractorOr
 		customerEmail: cust?.email ?? '',
 		customerPhone: cust?.phone ?? null,
 		customerAddress: cust?.address ?? null,
+		customerCity: cust?.city ?? null,
+		customerState: cust?.state ?? null,
 		customerPreferredContact: normalizePreferredContact(cust?.preferredContact),
 		customerVisibleState: getVisibleCustomerState(row.state as ContractorOrderState),
 		followUpDue: isFollowUpDue(row.nextFollowUpAt)
@@ -109,9 +116,12 @@ export type CustomerDetailsInput = {
 	name: string;
 	email: string;
 	phone?: string | null;
+	/** Street line only; city/state/postalCode are captured separately. */
 	address?: string | null;
+	city?: string | null;
+	state?: string | null;
+	postalCode?: string | null;
 	notes?: string | null;
-	tags?: string[];
 	preferredContact?: PreferredContact;
 };
 
@@ -136,8 +146,10 @@ export async function createCustomer(
 			email,
 			phone: input.phone ?? null,
 			address: input.address ?? null,
+			city: input.city ?? null,
+			state: input.state ?? null,
+			postalCode: input.postalCode ?? null,
 			notes: input.notes ?? null,
-			tags: input.tags ?? [],
 			preferredContact: input.preferredContact ?? 'email'
 		})
 		.returning();
@@ -175,8 +187,10 @@ export async function editCustomer(
 			email: emailChanged ? email : current.email,
 			phone: input.phone ?? null,
 			address: input.address ?? null,
+			city: input.city ?? null,
+			state: input.state ?? null,
+			postalCode: input.postalCode ?? null,
 			notes: input.notes ?? null,
-			tags: input.tags ?? [],
 			preferredContact: input.preferredContact ?? 'email'
 		})
 		.where(eq(customer.id, id))
@@ -327,7 +341,10 @@ export async function createOrder(
 	input: CreateOrderInput
 ): Promise<OrderRow> {
 	await assertCanCreate(contractorId, 'order');
-	const owned = await ownedCustomer(contractorId, input.customerId);
+	const [owned, settings] = await Promise.all([
+		ownedCustomer(contractorId, input.customerId),
+		getContractorSettings(contractorId)
+	]);
 	if (!owned) throw new Error('Customer not found');
 	const [row] = await db
 		.insert(order)
@@ -338,8 +355,8 @@ export async function createOrder(
 			projectType: input.projectType ?? null,
 			state: input.state ?? 'Inquiry',
 			tags: input.tags ?? [],
-			// New orders get a default follow-up 3 days out.
-			nextFollowUpAt: defaultFollowUp()
+			// New orders get a follow-up at the contractor's default interval.
+			nextFollowUpAt: defaultFollowUp(settings.followUpDays)
 		})
 		.returning();
 
@@ -368,6 +385,24 @@ export async function setOrderTags(
 	const owned = await contractorOrder(orderId, contractorId);
 	if (!owned) throw new Error('Order not found');
 	await db.update(order).set({ tags }).where(eq(order.id, orderId));
+
+	// Log what actually changed rather than the fact that the picker was saved —
+	// closing it without touching anything shouldn't leave a trace in the history.
+	const before = owned.tags ?? [];
+	const added = tags.filter((tag) => !before.includes(tag));
+	const removed = before.filter((tag) => !tags.includes(tag));
+	if (added.length === 0 && removed.length === 0) return;
+	const parts: string[] = [];
+	if (added.length > 0) parts.push(`Added ${added.join(', ')}`);
+	if (removed.length > 0) parts.push(`Removed ${removed.join(', ')}`);
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'note',
+		title: 'Tags updated',
+		detail: parts.join(' · '),
+		authorRole: 'contractor',
+		internal: true
+	});
 }
 
 /** Set (or clear, with null) an order's next follow-up date. */
@@ -576,6 +611,14 @@ export async function addAttachment(
 		size: file.size,
 		data: file.data
 	});
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'note',
+		title: 'File added',
+		detail: file.filename,
+		authorRole: 'contractor',
+		internal: true
+	});
 }
 
 /** Fetch one attachment (including its bytes) scoped to its owning contractor. */
@@ -591,9 +634,26 @@ export async function getAttachment(id: string, contractorId: string) {
 /** Delete an attachment owned by the contractor. */
 export async function deleteAttachment(id: string, contractorId: string): Promise<void> {
 	await assertCanWrite(contractorId);
+	// Read the row's identifying columns first — the history entry needs the order
+	// and filename, and both are gone once the delete lands. Deliberately NOT
+	// `select()`: that would drag the file's bytes back out of the database.
+	const [row] = await db
+		.select({ orderId: attachment.orderId, filename: attachment.filename })
+		.from(attachment)
+		.where(and(eq(attachment.id, id), eq(attachment.contractorId, contractorId)))
+		.limit(1);
+	if (!row) return;
 	await db
 		.delete(attachment)
 		.where(and(eq(attachment.id, id), eq(attachment.contractorId, contractorId)));
+	await db.insert(timelineEntry).values({
+		orderId: row.orderId,
+		kind: 'note',
+		title: 'File removed',
+		detail: row.filename,
+		authorRole: 'contractor',
+		internal: true
+	});
 }
 
 /** Append an internal, contractor-only note to an order's timeline. */

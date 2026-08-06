@@ -3,8 +3,14 @@
 	import { enhance } from '$app/forms';
 	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { formatBytes, MAX_ATTACHMENT_BYTES, QUICK_UPDATE_STATES } from '$lib/crm';
+	import {
+		customerLocation,
+		formatBytes,
+		MAX_ATTACHMENT_BYTES,
+		QUICK_UPDATE_STATES
+	} from '$lib/crm';
 	import ContactComposer from '$lib/ContactComposer.svelte';
+	import InlineEditor from '$lib/InlineEditor.svelte';
 	import TagPicker from '$lib/TagPicker.svelte';
 	import type { PageData, ActionData } from './$types';
 
@@ -12,20 +18,34 @@
 
 	// Tags edit in place on the header rather than behind a separate screen.
 	let editingTags = $state(false);
+	// Past four, tags collapse behind a "+N" chip: a heavily-tagged order used to
+	// wrap the header into three lines and push the status badge down the page.
+	const TAG_LIMIT = 4;
+	let showAllTags = $state(false);
+	const shownTags = $derived(showAllTags ? data.order.tags : data.order.tags.slice(0, TAG_LIMIT));
+	const hiddenTags = $derived(data.order.tags.slice(TAG_LIMIT));
 
 	// Two panels only. Subcontractors got its own card and attachments moved behind
 	// an icon button, which left the tab strip carrying just the two views you
 	// genuinely switch between.
-	let tab = $state<'timeline' | 'customer'>('timeline');
+	let tab = $state<'timeline' | 'contractors' | 'files'>('timeline');
 	const TABS = $derived([
 		{ id: 'timeline' as const, label: 'Timeline', count: data.timeline.length },
-		{ id: 'customer' as const, label: 'Customer', count: null }
+		{ id: 'contractors' as const, label: 'Contractors', count: data.assignedSubs.length },
+		{ id: 'files' as const, label: 'Files', count: data.attachments.length }
 	]);
-
-	// Attachments editor card, opened from the prompt beside tags and subcontractors.
-	let filesOpen = $state(false);
+	// Customer details open in place under the customer line, the same way tags do.
+	let customerOpen = $state(false);
 
 	const order = $derived(data.order);
+	// "City, ST" from the customer's captured fields, for the header line.
+	const orderLocation = $derived(
+		customerLocation({
+			city: order.customerCity,
+			state: order.customerState,
+			address: order.customerAddress
+		})
+	);
 	const customer = $derived(data.customer);
 
 	// Back link follows where you came from: the dashboard sends you back to the
@@ -68,10 +88,6 @@
 	let snoozeOpen = $state(false);
 	// Customer contact (email/call) popover, mirroring the dashboard cards.
 	let contactOpen = $state(false);
-	// The subcontractor editor card stays behind a prompt until asked for. It stays
-	// open while you toggle people on and off — closing after each pick would make
-	// assigning two subs a four-tap job.
-	let assignOpen = $state(false);
 	// Attachment rules (types + size) live in an info modal, off the main flow.
 	let infoDialog: HTMLDialogElement | undefined = $state();
 	// The timeline's note input is hidden until the + button reveals it.
@@ -122,8 +138,6 @@
 	const field = 'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 	const pill =
 		'padding: 0.4rem 0.75rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; font-size: 0.85rem;';
-	const primaryBtn =
-		'padding: 0.55rem 1rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
 	const sectionTitle =
 		'margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: #8c959f;';
 
@@ -158,7 +172,28 @@
 								· {typeSuffix(order.projectName, order.projectType)}</span
 							>{/if}
 					</h1>
-					<span class="order-sub">{order.customerName}</span>
+					<!-- Customer, then where the work is — same shape as the list card, so
+					     the two surfaces read alike. Omitted when the address has no city
+					     to isolate rather than shown as a dangling separator. -->
+					<span class="order-sub">
+						<span class="sub-customer">{order.customerName}</span>{#if orderLocation}<span
+								class="sub-sep">·</span
+							>{orderLocation}{/if}
+						{#if customer}
+							<button
+								type="button"
+								class="icon-btn cust-toggle"
+								class:on={customerOpen}
+								style="width: 1.6rem; height: 1.6rem; font-size: 0.9rem;"
+								title={customerOpen ? 'Hide customer details' : 'Customer details'}
+								aria-label={customerOpen ? 'Hide customer details' : 'Customer details'}
+								aria-expanded={customerOpen}
+								onclick={() => (customerOpen = !customerOpen)}
+							>
+								🪪
+							</button>
+						{/if}
+					</span>
 				</div>
 				<!-- Status and its editor on one row, mirroring the follow-up line below. -->
 				<div class="statusline">
@@ -210,10 +245,10 @@
 								/>
 								<button
 									type="submit"
-									class="save-status"
+									class="primary-btn save-status"
 									disabled={!statusDirty}
 									title={statusDirty ? 'Save status' : 'Pick a different status first'}
-									style="{primaryBtn} width: 100%;">Save status</button
+									style="width: 100%;">Save status</button
 								>
 							</form>
 						{/if}
@@ -221,35 +256,140 @@
 				</div>
 			</div>
 
-			<!-- Tags, subcontractors and files. Each opens a card below rather than
-			     expanding inline, so the editing surface has room on a phone. -->
-			<div class="attrs">
-				<button type="button" class="attr" onclick={() => (editingTags = !editingTags)}>
-					{#if order.tags.length > 0}
-						{#each order.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
-					{:else}
-						<span class="attr-add">+ Add tags</span>
+			<!-- Customer details open directly beneath the customer line they belong
+			     to — below the tags row they read as part of the tags. -->
+			{#if customerOpen && customer}
+				<InlineEditor title="Customer" onclose={() => (customerOpen = false)}>
+					{#snippet actions()}
+						<!-- Contact (email / call) behind one button, like the dashboard -->
+						<div style="position: relative;">
+							<button
+								type="button"
+								class="icon-btn"
+								style="width: 1.9rem; height: 1.9rem; font-size: 1.1rem;"
+								title="Contact customer"
+								aria-label="Contact customer"
+								aria-expanded={contactOpen}
+								onclick={() => (contactOpen = !contactOpen)}>💬</button
+							>
+							{#if contactOpen && customer}
+								<!-- Dimmed click-away scrim so the composer is the focus. -->
+								<button
+									type="button"
+									aria-label="Close contact menu"
+									onclick={() => (contactOpen = false)}
+									class="contact-scrim"
+								></button>
+								<div class="contact-pop">
+									<ContactComposer
+										customer={{
+											name: customer.name,
+											email: customer.email,
+											phone: customer.phone,
+											preferredContact: customer.preferredContact
+										}}
+										project={order.projectName}
+										rows={2}
+										onsent={() => (contactOpen = false)}
+										onclose={() => (contactOpen = false)}
+									/>
+								</div>
+							{/if}
+						</div>
+					{/snippet}
+					<dl class="cust-facts">
+						<div class="fact">
+							<dt>Email</dt>
+							<dd class="cust-value">{customer.email}</dd>
+						</div>
+						{#if customer.phone}
+							<div class="fact">
+								<dt>Phone</dt>
+								<dd class="cust-value">{customer.phone}</dd>
+							</div>
+						{/if}
+						{#if customer.address}
+							<div class="fact">
+								<dt>Address</dt>
+								<dd class="cust-value">{customer.address}</dd>
+							</div>
+						{/if}
+					</dl>
+					{#if order.customerId}
+						<form
+							method="POST"
+							action="?/sendInvite"
+							use:enhance={() => {
+								customerOpen = false;
+								return async ({ update }) => await update();
+							}}
+						>
+							<input type="hidden" name="customerId" value={order.customerId} />
+							<button type="submit" class="invite-link">🔗 Invite customer to portal</button>
+						</form>
 					{/if}
-				</button>
+				</InlineEditor>
+			{/if}
 
-				<button type="button" class="attr" onclick={() => (assignOpen = !assignOpen)}>
-					{#if data.assignedSubs.length > 0}
-						{#each data.assignedSubs as sub (sub.id)}
-							<span class="subchip on" class:guest={sub.tier !== 'trusted'}>{sub.name}</span>
-						{/each}
-					{:else}
-						<span class="attr-add">+ Add subcontractors</span>
-					{/if}
-				</button>
+			<!-- Tags read here, in the order's own details, with the editor toggle
+			     sitting after them the way the ⏰ follows the follow-up date. Who's on
+			     the job lives in the Contractors tab. -->
+			<dl class="order-facts">
+				<div class="fact">
+					<dt>Tags</dt>
+					<dd>
+						{#each shownTags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
+						{#if hiddenTags.length > 0}
+							<!-- Hover shows the rest; clicking expands, since a tooltip is
+							     nothing a touch device can reach. -->
+							<button
+								type="button"
+								class="tag-more"
+								title={showAllTags ? 'Show fewer tags' : hiddenTags.join(', ')}
+								aria-expanded={showAllTags}
+								onclick={() => (showAllTags = !showAllTags)}
+							>
+								{showAllTags ? 'Show less' : `+${hiddenTags.length} more`}
+							</button>
+						{/if}
+						{#if order.tags.length === 0}
+							<span class="fact-empty">None yet</span>
+						{/if}
+						<button
+							type="button"
+							class="icon-btn tag-toggle"
+							style="width: 1.5rem; height: 1.5rem; font-size: 0.95rem;"
+							title={editingTags ? 'Close tag editor' : 'Add or edit tags'}
+							aria-label={editingTags ? 'Close tag editor' : 'Add or edit tags'}
+							aria-expanded={editingTags}
+							onclick={() => (editingTags = !editingTags)}
+						>
+							{editingTags ? '−' : '+'}
+						</button>
+					</dd>
+				</div>
+			</dl>
 
-				<button type="button" class="attr" onclick={() => (filesOpen = !filesOpen)}>
-					<span class="attr-add"
-						>📎 {data.attachments.length > 0
-							? `${data.attachments.length} file${data.attachments.length === 1 ? '' : 's'}`
-							: 'Add files'}</span
+			<!-- Both editors open in place, directly under the thing they edit, rather
+			     than as cards further down the page — the toggle and the surface it
+			     opens stay within a glance of each other. -->
+			{#if editingTags}
+				<InlineEditor title="Tags" onclose={() => (editingTags = false)}>
+					<form
+						method="POST"
+						action="?/setTags"
+						use:enhance={() =>
+							async ({ update }) => {
+								editingTags = false;
+								await update();
+							}}
+						class="editor-form"
 					>
-				</button>
-			</div>
+						<TagPicker value={order.tags} />
+						<button type="submit" class="editor-save">Save tags</button>
+					</form>
+				</InlineEditor>
+			{/if}
 
 			<!-- Follow-up, reduced from a full-width card to a line in the header:
 			     it's a date you glance at, not a surface you work in. The ⏰ still
@@ -257,7 +397,7 @@
 			<div class="followup">
 				<span class="followup-label">Follow-up</span>
 				<strong class:due={order.followUpDue}>{fmtDate(order.nextFollowUpAt)}</strong>
-				<div style="position: relative;">
+				<div class="fu-anchor">
 					<button
 						type="button"
 						class="icon-btn"
@@ -268,46 +408,46 @@
 						onclick={() => (snoozeOpen = !snoozeOpen)}>⏰</button
 					>
 					{#if snoozeOpen}
+						<!-- Same dimmed scrim the contact composer uses, so the two popovers
+						     behave alike rather than one dimming the page and one not. -->
 						<button
 							type="button"
 							aria-label="Close follow-up options"
 							onclick={() => (snoozeOpen = false)}
-							style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
+							class="contact-scrim"
 						></button>
 						<div class="followup-pop">
-							<div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+							<div class="fu-presets">
 								<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
 									<input type="hidden" name="preset" value="1d" />
-									<button type="submit" style={pill}>+1 day</button>
+									<button type="submit" class="fu-btn">+1 day</button>
 								</form>
 								<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
 									<input type="hidden" name="preset" value="3d" />
-									<button type="submit" style={pill}>+3 days</button>
+									<button type="submit" class="fu-btn">+3 days</button>
 								</form>
 								<form method="POST" action="?/snoozeFollowUp" use:enhance={snoozeThenClose}>
 									<input type="hidden" name="preset" value="1w" />
-									<button type="submit" style={pill}>+1 week</button>
+									<button type="submit" class="fu-btn">+1 week</button>
 								</form>
 							</div>
 							<form
 								method="POST"
 								action="?/setFollowUp"
 								use:enhance={snoozeThenClose}
-								style="display: flex; gap: 0.4rem; align-items: center;"
+								class="fu-set"
 							>
 								<input
 									type="date"
 									name="date"
+									class="fu-date"
 									value={toDateInput(order.nextFollowUpAt)}
-									style="flex: 1; min-width: 0; {field}"
 								/>
-								<button type="submit" style={pill}>Set</button>
+								<button type="submit" class="fu-btn primary">Set</button>
 							</form>
 							{#if order.nextFollowUpAt}
 								<form method="POST" action="?/clearFollowUp" use:enhance={snoozeThenClose}>
-									<button type="submit" style="{pill} width: 100%; color: #cf222e;"
-										>Clear follow-up</button
-									>
+									<button type="submit" class="fu-btn danger">Clear follow-up</button>
 								</form>
 							{/if}
 						</div>
@@ -327,100 +467,12 @@
 		<!-- Tabs. The detail page used to stack six full-width cards, which meant
 		     scrolling past the customer and the files to reach the timeline. One panel
 		     at a time keeps the working surface at the top of the screen. -->
-		{#if editingTags}
-			<section class="card editor">
-				<div class="editor-head">
-					<h2 style={sectionTitle}>Tags</h2>
-					<button
-						type="button"
-						class="editor-x"
-						aria-label="Close"
-						onclick={() => (editingTags = false)}>✕</button
-					>
-				</div>
-				<form
-					method="POST"
-					action="?/setTags"
-					use:enhance={() =>
-						async ({ update }) => {
-							editingTags = false;
-							await update();
-						}}
-					class="editor-form"
-				>
-					<TagPicker value={order.tags} />
-					<button type="submit" class="editor-save">Save tags</button>
-				</form>
-			</section>
-		{/if}
-
-		{#if assignOpen}
-			<section class="card editor">
-				<div class="editor-head">
-					<h2 style={sectionTitle}>Subcontractors</h2>
-					<button
-						type="button"
-						class="editor-x"
-						aria-label="Close"
-						onclick={() => (assignOpen = false)}>✕</button
-					>
-				</div>
-
-				{#if data.assignedSubs.length === 0 && data.availableSubs.length === 0}
-					<p class="editor-note">
-						You haven't added any subcontractors yet — set them up on the <a
-							href={resolve('/contractor/subcontractors')}>Subcontractors</a
-						> page, then put them on jobs from here.
-					</p>
-				{:else}
-					<p class="editor-note">Tap a name to put them on this job, or take them off.</p>
-					<div class="editor-chips">
-						{#each data.assignedSubs as sub (sub.id)}
-							<form method="POST" action="?/unassignSub" use:enhance>
-								<input type="hidden" name="subcontractorId" value={sub.id} />
-								<button
-									type="submit"
-									class="subchip on"
-									class:guest={sub.tier !== 'trusted'}
-									aria-pressed="true"
-									title={`${sub.trade ?? 'Trade not set'} · ${sub.tier === 'trusted' ? 'Trusted' : 'Guest'}`}
-								>
-									{sub.name}
-								</button>
-							</form>
-						{/each}
-						{#each data.availableSubs as sub (sub.id)}
-							<form method="POST" action="?/assignSub" use:enhance>
-								<input type="hidden" name="subcontractorId" value={sub.id} />
-								<button
-									type="submit"
-									class="subchip"
-									aria-pressed="false"
-									title={`${sub.trade ?? 'Trade not set'} · ${sub.tier === 'trusted' ? 'Trusted' : 'Guest'}`}
-								>
-									{sub.name}
-								</button>
-							</form>
-						{/each}
-					</div>
-				{/if}
-			</section>
-		{/if}
-
-		{#if filesOpen}
-			<section class="card editor">
-				<div class="editor-head">
-					<h2 style={sectionTitle}>Attachments</h2>
-					<button
-						type="button"
-						class="editor-x"
-						aria-label="Close"
-						onclick={() => (filesOpen = false)}>✕</button
-					>
-				</div>
+		{#snippet filesPanel()}
+			<div style="display: grid; gap: 0.7rem;">
 				<div
 					style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;"
 				>
+					<h2 style={sectionTitle}>Files</h2>
 					<form
 						method="POST"
 						action="?/uploadAttachment"
@@ -444,8 +496,7 @@
 						</label>
 						<button
 							type="button"
-							class="icon-btn"
-							style="width: 2rem; height: 2rem; font-size: 1.2rem;"
+							class="bare-icon"
 							title="Attachment rules"
 							aria-label="Attachment rules"
 							onclick={() => infoDialog?.showModal()}>ℹ️</button
@@ -521,8 +572,8 @@
 						{/each}
 					</div>
 				{/if}
-			</section>
-		{/if}
+			</div>
+		{/snippet}
 
 		<div class="card panel">
 			<div class="tabs" role="tablist" aria-label="Order sections">
@@ -551,11 +602,12 @@
 						<button
 							type="button"
 							class="icon-btn"
-							style="width: 2.3rem; height: 2.3rem; font-size: 1.65rem;"
+							class:on={noteOpen}
+							style="width: 2.1rem; height: 2.1rem; font-size: 1.05rem;"
 							title="Add note"
 							aria-label="Add note"
 							aria-expanded={noteOpen}
-							onclick={() => (noteOpen = !noteOpen)}>＋</button
+							onclick={() => (noteOpen = !noteOpen)}>📝</button
 						>
 					</div>
 					{#if noteOpen}
@@ -571,7 +623,7 @@
 								required
 								style="flex: 1; {field}"
 							/>
-							<button type="submit" style={primaryBtn}>Add</button>
+							<button type="submit" class="primary-btn">Add</button>
 						</form>
 					{/if}
 
@@ -593,84 +645,61 @@
 							{/each}
 						</ol>
 					{/if}
-				{:else if tab === 'customer'}
+				{:else if tab === 'contractors'}
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
 					>
-						<h2 style={sectionTitle}>Customer</h2>
-						{#if customer}
-							<div style="display: flex; gap: 0.5rem; align-items: center;">
-								<!-- Contact (email / call) behind one button, like the dashboard -->
-								<div style="position: relative;">
-									<button
-										type="button"
-										class="icon-btn"
-										style="width: 2.3rem; height: 2.3rem; font-size: 1.45rem;"
-										title="Contact customer"
-										aria-label="Contact customer"
-										aria-expanded={contactOpen}
-										onclick={() => (contactOpen = !contactOpen)}>💬</button
-									>
-									{#if contactOpen}
-										<!-- Dimmed click-away scrim so the composer is the focus. -->
-										<button
-											type="button"
-											aria-label="Close contact menu"
-											onclick={() => (contactOpen = false)}
-											class="contact-scrim"
-										></button>
-										<div class="contact-pop">
-											<ContactComposer
-												customer={{
-													name: customer.name,
-													email: customer.email,
-													phone: customer.phone,
-													preferredContact: customer.preferredContact
-												}}
-												project={order.projectName}
-												rows={2}
-												onsent={() => (contactOpen = false)}
-												onclose={() => (contactOpen = false)}
-											/>
-											{#if order.customerId}
-												<form
-													method="POST"
-													action="?/sendInvite"
-													use:enhance={() => {
-														contactOpen = false;
-														return async ({ update }) => await update();
-													}}
-												>
-													<input type="hidden" name="customerId" value={order.customerId} />
-													<button type="submit" class="invite-link"
-														>🔗 Invite customer to portal</button
-													>
-												</form>
-											{/if}
-										</div>
-									{/if}
-								</div>
-							</div>
-						{/if}
+						<h2 style={sectionTitle}>Contractors</h2>
+						<a class="panel-link" href={resolve('/contractor/subcontractors')}>Manage roster →</a>
 					</div>
-					{#if customer}
-						<div style="display: grid; gap: 0.3rem; font-size: 0.9rem;">
-							<div style="word-break: break-word;">
-								<span style="color: #57606a;">Email:</span>
-								{customer.email}
-							</div>
-							{#if customer.phone}<div>
-									<span style="color: #57606a;">Phone:</span>
-									{customer.phone}
-								</div>{/if}
-							{#if customer.address}<div>
-									<span style="color: #57606a;">Address:</span>
-									{customer.address}
-								</div>{/if}
-						</div>
+
+					{#if data.assignedSubs.length === 0 && data.availableSubs.length === 0}
+						<p class="editor-note">
+							You haven't added any subcontractors yet — set them up on the <a
+								href={resolve('/contractor/subcontractors')}>Subcontractors</a
+							> page, then put them on jobs from here.
+						</p>
 					{:else}
-						<p style="margin: 0; color: #57606a;">No customer linked to this order.</p>
+						<p class="editor-note">Tap a name to put them on this job, or take them off.</p>
+						<div class="sub-list">
+							{#each data.assignedSubs as sub (sub.id)}
+								<form method="POST" action="?/unassignSub" use:enhance>
+									<input type="hidden" name="subcontractorId" value={sub.id} />
+									<button type="submit" class="sub-row on" aria-pressed="true">
+										<span class="sub-mark" aria-hidden="true">✓</span>
+										<span class="sub-text">
+											<span class="sub-name">{sub.name}</span>
+											<span class="sub-meta">
+												<span class="sub-trade">{sub.trade ?? 'Trade not set'}</span>
+												<span class="tier" class:guest={sub.tier !== 'trusted'}>
+													{sub.tier === 'trusted' ? 'Trusted' : 'Guest'}
+												</span>
+											</span>
+										</span>
+									</button>
+								</form>
+							{/each}
+							{#each data.availableSubs as sub (sub.id)}
+								<form method="POST" action="?/assignSub" use:enhance>
+									<input type="hidden" name="subcontractorId" value={sub.id} />
+									<button type="submit" class="sub-row" aria-pressed="false">
+										<span class="sub-mark" aria-hidden="true">+</span>
+										<span class="sub-text">
+											<span class="sub-name">{sub.name}</span>
+											<span class="sub-meta">
+												<span class="sub-trade">{sub.trade ?? 'Trade not set'}</span>
+												<span class="tier" class:guest={sub.tier !== 'trusted'}>
+													{sub.tier === 'trusted' ? 'Trusted' : 'Guest'}
+												</span>
+											</span>
+										</span>
+									</button>
+								</form>
+							{/each}
+						</div>
 					{/if}
+				{:else if tab === 'files'}
+					{@render filesPanel()}
 				{/if}
 			</div>
 		</div>
@@ -719,19 +748,34 @@
 	   status across from them on the right — because the status is *about* the title
 	   and reads as a caption to it. The prompts and follow-up sit full width below,
 	   where they have room to wrap on a phone. */
+	/* The header stacks four things — title block, any open editor, follow-up, and
+	   the file prompt. They were 0.6rem apart with the title and customer line
+	   almost touching, which read as one dense clump rather than a hierarchy. */
 	.order-head {
 		display: grid;
-		gap: 0.6rem;
+		/* Both of these are load-bearing on a phone. As a grid item of .page the
+		   header defaults to min-width:auto, so its widest content sets a floor and
+		   pushes past the viewport; and its own implicit column does the same to the
+		   editors inside it. `.panel` (the tab card) carries the same min-width:0,
+		   which is why that one has always fitted. */
+		min-width: 0;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.9rem;
 	}
 	.head-top {
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 0.75rem;
+		gap: 1rem;
+		min-width: 0;
 	}
+	/* Title and customer line only. The editors and the tags row are siblings of
+	   .head-top, not children of this column — inside it they were boxed into
+	   whatever width the status badge left over, which on a phone is not much. */
 	.head-main {
+		flex: 1;
 		display: grid;
-		gap: 0.15rem;
+		gap: 0.35rem;
 		min-width: 0;
 	}
 
@@ -814,6 +858,27 @@
 		color: var(--fg-muted);
 	}
 
+	/* The page's filled submit — add-note and save-status. Was an inline blue fill
+	   relying on the `[style*='background: #0969da']` interception in app.css to
+	   turn into the theme button; drawn from the tokens directly instead, so it
+	   can't fall through to blue. */
+	.primary-btn {
+		padding: 0.55rem 1rem;
+		border-radius: 999px;
+		border: 2px solid var(--pop-line);
+		/* Pinned dark: yellow stays light in both themes. */
+		background: var(--yellow);
+		color: #14171c;
+		font-family: inherit;
+		font-size: 0.9rem;
+		font-weight: 700;
+		cursor: pointer;
+		box-shadow: var(--pop-shadow-sm);
+	}
+	.primary-btn:hover:not(:disabled) {
+		background: var(--yellow-deep);
+	}
+
 	/* Status "Save" stays inert until a different state is picked. The accent is
 	   greyed out (not just dimmed) so "nothing to save" reads without hovering. */
 	.save-status:disabled {
@@ -841,12 +906,91 @@
 		border-radius: 8px;
 	}
 	/* The order title should read as a title but stay subtle — no chunky yellow
-	   hero box, and a normal-weight font instead of the heavy display face. */
+	   hero box, and a normal-weight font instead of the heavy display face.
+	   The customer carries the line, so it takes the full text colour and the
+	   location trails it in muted — the whole line used to sit at one muted weight,
+	   which gave the eye nothing to land on. */
 	.order-sub {
-		font-size: 0.92rem;
-		font-weight: 600;
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		font-size: 0.95rem;
+		font-weight: 500;
+		line-height: 1.5;
 		color: var(--fg-muted);
 		overflow-wrap: anywhere;
+	}
+	.sub-customer {
+		font-weight: 700;
+		color: var(--fg);
+	}
+	.sub-sep {
+		opacity: 0.55;
+	}
+	/* What's on the job, listed under the customer line. Labelled rather than a bare
+	   run of chips so tags and subcontractors don't read as one undifferentiated
+	   pile once both are present. */
+	.order-facts {
+		display: flex;
+		flex-wrap: wrap;
+		min-width: 0;
+		gap: 0.3rem 1.1rem;
+		margin: 0;
+	}
+	.fact {
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
+		min-width: 0;
+	}
+	.fact dt {
+		flex: none;
+		font-size: 0.68rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--fg-muted);
+	}
+	.fact dd {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.3rem;
+		margin: 0;
+		min-width: 0;
+	}
+	.fact-empty {
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+	}
+	/* Reads as a tag chip, behaves as a control — it's the overflow count, so it
+	   belongs to the run of chips rather than standing apart from it. */
+	.tag-more {
+		padding: 0.1rem 0.55rem;
+		border-radius: 999px;
+		border: 1px dashed var(--line-strong);
+		background: transparent;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.72rem;
+		font-weight: 700;
+		line-height: 1.5;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	.tag-more:hover {
+		border-color: var(--fg-muted);
+		color: var(--fg);
+	}
+	.tag-more:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 1px;
+	}
+	/* Nudged off the chips so the toggle doesn't read as one of them. */
+	.tag-toggle {
+		margin-left: 0.15rem;
+		font-weight: 700;
 	}
 	/* The project type rides the title without competing with it. */
 	.order-type {
@@ -857,11 +1001,11 @@
 	.order-title {
 		margin: 0;
 		font-family: 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif;
-		font-size: 1.5rem;
+		font-size: 1.6rem;
 		overflow-wrap: anywhere;
 		font-weight: 700;
-		line-height: 1.2;
-		letter-spacing: -0.01em;
+		line-height: 1.25;
+		letter-spacing: -0.015em;
 		text-transform: none;
 		color: #1f2328;
 		background: none;
@@ -939,115 +1083,163 @@
 		background: var(--yellow);
 		color: #14171c;
 	}
-	.subchip {
-		padding: 0.25rem 0.65rem;
-		border-radius: 999px;
-		border: 1.5px solid var(--line-strong);
-		background: var(--surface);
-		color: var(--fg-muted);
-		font-family: inherit;
-		font-size: 0.76rem;
+	/* Quiet link in a panel's header row, across from its title. */
+	.panel-link {
+		flex: none;
+		font-size: 0.78rem;
 		font-weight: 700;
-		cursor: pointer;
+		color: var(--fg-muted);
+		text-decoration: none;
+		white-space: nowrap;
 	}
-	.subchip:hover {
-		border-color: var(--fg-muted);
+	.panel-link:hover {
 		color: var(--fg);
+		text-decoration: underline;
 	}
-	/* On the job. Label pinned dark: yellow stays light in both themes. */
-	.subchip.on {
-		background: var(--yellow);
-		border-color: #14171c;
-		color: #14171c;
+
+	/* ------------------------------------------------ Subcontractor picker
+	   A row per person rather than a pill: the trade and tier were previously only
+	   in a title tooltip, which a phone never shows, so picking came down to
+	   recognising a name. The mark on the left carries the on/off state. */
+	.sub-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+		gap: 0.5rem;
 	}
-	/* A Guest sees the job with the customer's details redacted, so they read as a
-	   dashed fill rather than a solid one — visible without needing a legend. */
-	.subchip.on.guest {
-		background: repeating-linear-gradient(
-			-45deg,
-			var(--yellow) 0,
-			var(--yellow) 5px,
-			transparent 5px,
-			transparent 10px
-		);
-		border-style: dashed;
+	/* Each form wraps one row; contents keeps the button itself as the grid item. */
+	.sub-list form {
+		display: contents;
 	}
-	.subchip:focus-visible {
+	.sub-row {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		width: 100%;
+		/* No global border-box in this app — every `width: 100%` next to padding
+		   needs this or it overflows its grid cell by the padding. */
+		box-sizing: border-box;
+		padding: 0.55rem 0.7rem;
+		border: 1.5px solid var(--line-strong);
+		border-radius: 12px;
+		background: var(--surface);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+		transition:
+			border-color 0.12s ease,
+			background 0.12s ease;
+	}
+	.sub-row:hover {
+		border-color: var(--fg-muted);
+	}
+	.sub-row:focus-visible {
 		outline: 2px solid var(--yellow-deep);
 		outline-offset: 2px;
 	}
-
-	/* ------------------------------------------------- Order attributes
-	   Tags, subcontractors and files. Each carries a visible border at rest — a
-	   hover-only outline is invisible on a phone, which left three bare phrases
-	   floating with nothing to say they were tappable. */
-	.attrs {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.4rem;
-		width: 100%;
-		margin-top: 0.2rem;
+	.sub-row.on {
+		border-color: var(--yellow-deep);
+		background: color-mix(in srgb, var(--yellow) 16%, var(--surface));
 	}
-	.attr {
-		display: inline-flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.3rem;
-		max-width: 100%;
-		min-width: 0;
-		/* 2.25rem keeps the tap target close to the 44px guideline once the border
-		   and line-height are counted. */
-		min-height: 2.25rem;
-		padding: 0.35rem 0.7rem;
-		border: 1.5px solid var(--line);
+	.sub-mark {
+		flex: none;
+		display: grid;
+		place-items: center;
+		width: 1.4rem;
+		height: 1.4rem;
 		border-radius: 999px;
-		background: var(--surface);
-		font: inherit;
-		line-height: 1.3;
-		text-align: left;
-		cursor: pointer;
-	}
-	.attr:hover {
-		border-color: var(--fg-muted);
-	}
-	.attr:focus-visible {
-		outline: 2px solid var(--yellow);
-		outline-offset: 1px;
-	}
-	.attr-add {
+		border: 1.5px solid var(--line-strong);
+		color: var(--fg-muted);
 		font-size: 0.8rem;
 		font-weight: 700;
-		color: var(--fg-muted);
+		line-height: 1;
+	}
+	.sub-row.on .sub-mark {
+		background: var(--yellow);
+		border-color: var(--yellow-deep);
+		color: #14171c;
+	}
+	.sub-text {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		min-width: 0;
+	}
+	.sub-name {
+		font-size: 0.9rem;
+		font-weight: 700;
+		color: var(--fg);
+		overflow: hidden;
+		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.attr:hover .attr-add {
-		color: var(--fg);
-	}
-
-	/* ----------------------------------------------------- Editor cards
-	   Opening either prompt gives a real card rather than an inline expansion, so
-	   the chips have room to wrap properly on a phone. */
-	.editor {
-		gap: 0.7rem;
-	}
-	.editor-head {
+	.sub-meta {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 0.5rem;
+		gap: 0.35rem;
+		min-width: 0;
+		font-size: 0.72rem;
+		color: var(--fg-muted);
 	}
-	.editor-x {
+	.sub-trade {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.tier {
+		flex: none;
+		padding: 0.05rem 0.35rem;
+		border: 1px solid var(--line-strong);
+		border-radius: 999px;
+		font-weight: 700;
+	}
+	.tier.guest {
+		border-style: dashed;
+	}
+
+	/* A glyph on its own — no chip, no border. For secondary affordances (the
+	   attachment-rules ℹ️) that shouldn't compete with the real controls beside them. */
+	.bare-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.9rem;
+		height: 1.9rem;
+		padding: 0;
 		border: none;
 		background: none;
 		font-size: 1.05rem;
 		line-height: 1;
-		color: var(--fg-muted);
+		opacity: 0.75;
 		cursor: pointer;
-		padding: 0.1rem 0.25rem;
 	}
-	.editor-x:hover {
+	.bare-icon:hover {
+		opacity: 1;
+	}
+	.bare-icon:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+		border-radius: 8px;
+	}
+
+	/* ----------------------------------------------------- Editor cards
+	   The panel shell itself lives in InlineEditor.svelte; what's left here is only
+	   what goes *inside* one. */
+	.cust-facts {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.35rem;
+		margin: 0;
+	}
+	.cust-value {
+		margin: 0;
+		font-size: 0.88rem;
 		color: var(--fg);
+		overflow-wrap: anywhere;
+	}
+	/* Sits on the customer line the way the tag toggle sits after the tags. */
+	.cust-toggle {
+		margin-left: 0.15rem;
+		flex: none;
 	}
 	.editor-note {
 		margin: 0;
@@ -1075,11 +1267,6 @@
 		cursor: pointer;
 		box-shadow: var(--pop-shadow-sm);
 	}
-	.editor-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-	}
 	/* ------------------------------------------------------------ Phones */
 	@media (max-width: 560px) {
 		.page {
@@ -1090,8 +1277,7 @@
 			font-size: 1.25rem;
 			overflow-wrap: anywhere;
 		}
-		.panel-body,
-		.editor {
+		.panel-body {
 			padding: 0.9rem;
 		}
 		.tabs {
@@ -1194,11 +1380,17 @@
 	/* ----------------------------------------------------------- Follow-up
 	   A line in the header rather than a card of its own. */
 	.followup {
+		position: relative;
 		display: flex;
 		align-items: center;
+		flex-wrap: wrap;
+		min-width: 0;
 		gap: 0.4rem;
 		font-size: 0.85rem;
 		color: var(--fg-muted);
+	}
+	.fu-anchor {
+		position: relative;
 	}
 	.followup-label {
 		font-weight: 700;
@@ -1210,19 +1402,114 @@
 	.followup strong.due {
 		color: var(--danger);
 	}
+	/* Opens rightward from the ⏰. It used to be `right: 0`, which anchored the
+	   panel's right edge to a button sitting near the LEFT of the header — so the
+	   230px of panel extended off the left of the screen on a phone. */
 	.followup-pop {
 		position: absolute;
-		right: 0;
+		left: 0;
 		top: calc(100% + 6px);
-		z-index: 20;
-		min-width: 230px;
+		right: auto;
+		/* Above .contact-scrim (z 90), which this shares with the contact composer. */
+		z-index: 100;
+		/* A definite width. `max-content` made the panel measure itself against
+		   percentage-width children, which is how the presets came out ragged. */
+		width: min(20rem, calc(100vw - 2rem));
+		box-sizing: border-box;
 		background: var(--surface);
 		border: 1px solid var(--line-strong);
 		border-radius: 12px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-		padding: 0.6rem;
+		box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+		padding: 0.7rem;
 		display: grid;
-		gap: 0.5rem;
+		gap: 0.55rem;
+	}
+	/* Three even columns. Each preset is its own <form>, so the forms are dropped
+	   out of the layout with `display: contents` and the buttons become the grid
+	   items — otherwise the pills size to their labels and sit ragged. */
+	.fu-presets {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 0.35rem;
+	}
+	.fu-presets form {
+		display: contents;
+	}
+	/* The popover's controls used to be the page's inline `pill` / `field` style
+	   constants, which are hardcoded light literals — pale pills on a dark panel.
+	   Token-driven so both themes work. */
+	.fu-btn {
+		width: 100%;
+		box-sizing: border-box;
+		padding: 0.4rem 0.5rem;
+		border: 1px solid var(--line-strong);
+		border-radius: 999px;
+		background: var(--surface-sunken);
+		color: var(--fg);
+		font: inherit;
+		font-size: 0.82rem;
+		font-weight: 600;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	.fu-btn:hover {
+		border-color: var(--fg-muted);
+		background: var(--surface-inset);
+	}
+	.fu-btn:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 1px;
+	}
+	.fu-btn.primary {
+		width: auto;
+		flex: none;
+		background: var(--yellow);
+		border-color: var(--yellow-deep);
+		color: #14171c;
+		font-weight: 700;
+	}
+	.fu-btn.primary:hover {
+		background: var(--yellow-deep);
+	}
+	.fu-btn.danger {
+		color: var(--danger);
+	}
+	.fu-set {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
+	}
+	.fu-date {
+		flex: 1;
+		min-width: 0;
+		box-sizing: border-box;
+		padding: 0.4rem 0.5rem;
+		border: 1px solid var(--field-border);
+		border-radius: 8px;
+		background: var(--field-bg);
+		color: var(--fg);
+		font: inherit;
+		font-size: 0.85rem;
+	}
+	/* Bottom sheet on a phone, matching the contact composer — a panel anchored to a
+	   button that sits mid-row has nowhere good to go on a narrow screen, which is
+	   how it ended up running off the edge.
+
+	   This block MUST come after the base .followup-pop rule. A media query adds no
+	   specificity, so the two rules tie and source order decides; sitting up with the
+	   other phone rules it lost every declaration to the base and did nothing at all.
+	   Same trap as `.contact-pop.up` in app.css. */
+	@media (max-width: 560px) {
+		.followup-pop {
+			position: fixed;
+			top: auto;
+			right: 0.6rem;
+			bottom: 0.6rem;
+			left: 0.6rem;
+			width: auto;
+			max-height: 80vh;
+			overflow-y: auto;
+		}
 	}
 
 	/* Dark theme */

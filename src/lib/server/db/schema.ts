@@ -37,12 +37,21 @@ export const customer = pgTable(
 		// 'text' (legacy 'phone' is read as 'call'). Drives which contact action is
 		// highlighted as preferred in the UI.
 		preferredContact: text('preferred_contact').notNull().default('email'),
-		// Service / mailing address, free-form for the MVP.
+		// Service / mailing address. `address` is the street line only; city, state
+		// and postal code are captured separately so "where is this job" is a field
+		// we can read rather than a string we have to guess at. Rows created before
+		// this split may still carry a whole address in `address` with the rest
+		// null — `customerLocation` falls back to parsing it. See scripts/
+		// backfill-customer-address.mjs.
 		address: text('address'),
+		city: text('city'),
+		// Two-letter US state code, uppercase. See US_STATES.
+		state: text('state'),
+		postalCode: text('postal_code'),
 		// Project details and any other free-form context about this customer.
 		notes: text('notes'),
-		// Free-form labels the contractor applies to organize customers.
-		tags: text('tags').array().notNull().default([]),
+		// No tags here: a customer is identified by who they are, not by labels.
+		// Only orders and subcontractors carry tags (see tags.server.ts).
 		// A downscaled photo of the customer, stored as a bounded data URL.
 		avatar: text('avatar'),
 		// Set when an invited customer accepts and binds their login (by token).
@@ -135,7 +144,8 @@ export const order = pgTable(
 		// so the list carries quick context ("urgent", "warranty", "awaiting permit")
 		// without opening anything. Same shape as customer/subcontractor tags.
 		tags: text('tags').array().notNull().default([]),
-		// Contractor-set date for the next follow-up (defaults to +3 days on create).
+		// Contractor-set date for the next follow-up. On create it lands at their
+		// `contractorSettings.followUpDays` interval — a week unless they changed it.
 		nextFollowUpAt: timestamp('next_follow_up_at'),
 		// Soft-delete: "Delete order" sets this timestamp; rows with it set are
 		// treated as gone everywhere in the app and never shown.
@@ -322,13 +332,21 @@ export const contractorSettings = pgTable('contractor_settings', {
 		.references(() => user.id, { onDelete: 'cascade' }),
 	businessName: text('business_name').notNull().default(''),
 	signature: text('signature').notNull().default(''),
+	// How far out a new Order's first follow-up lands, in days. Stored per
+	// contractor because the right interval is a trade, not a product decision — a
+	// remodeller chasing a quote weekly and a roofer working a month out both
+	// need the dashboard to stay believable. See DEFAULT_FOLLOWUP_DAYS.
+	followUpDays: integer('follow_up_days').notNull().default(7),
 	// Getting-started Guide. Only the contractor's own choice is stored — whether a
 	// step is done is always derived from their real Customers / Orders / Invites /
 	// Assignments. See docs/adr/0004-derive-guide-progress-from-domain-data.md.
 	guideState: text('guide_state').notNull().default('active'),
-	// The one step that can't be derived: every Order is born with a 3-day follow-up,
-	// so "has a follow-up" would tick itself. This step teaches and is acknowledged.
-	guideFollowUpAckAt: timestamp('guide_follow_up_ack_at'),
+	// Steps the contractor chose to skip, by step id. Like `guideState`, this is a
+	// choice that cannot be read back from domain data — "they didn't invite
+	// anyone" and "they decided not to" look identical in the Customers table. An
+	// array rather than a column per step, so a new skippable step needs no
+	// migration.
+	guideSkippedSteps: text('guide_skipped_steps').array().notNull().default([]),
 	// The contractor put the trial welcome away. Same category as `guideState`: a
 	// choice that cannot be read back from domain data, so it is the kind of thing
 	// ADR-0004 says to store. The trial itself is still derived from `subscription`.

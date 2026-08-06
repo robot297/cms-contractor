@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { invalidateAll } from '$app/navigation';
@@ -32,7 +32,10 @@
 		})
 	);
 
-	let showAdd = $state(false);
+	// Seeded once per page load (untrack: closing it must not spring back open
+	// while the roster is still empty). Never auto-opens at the trial limit —
+	// a form they can't submit is a worse greeting than the roster itself.
+	let showAdd = $state(untrack(() => data.openAdd && !atSubLimit));
 	let editingId = $state<string | null>(null);
 	let expandedId = $state<string | null>(null);
 	// Which card's "Manage" menu is open (one at a time).
@@ -70,6 +73,27 @@
 	function onPhoneInput(e: Event) {
 		const el = e.currentTarget as HTMLInputElement;
 		el.value = formatPhone(el.value);
+	}
+
+	/**
+	 * Insurance expiry as a status rather than a bare date — a lapsed certificate
+	 * is the one fact on this profile that can stop a sub going on a job, and
+	 * "exp 2026-02-14" makes the reader do that arithmetic themselves.
+	 */
+	function insuranceStatus(d: string | Date | null): { label: string; tone: string } {
+		if (!d) return { label: 'Not on file', tone: 'none' };
+		const date = typeof d === 'string' ? new Date(d) : d;
+		if (Number.isNaN(date.getTime())) return { label: 'Not on file', tone: 'none' };
+		const on = date.toLocaleDateString('en-US', {
+			month: 'short',
+			day: 'numeric',
+			year: 'numeric'
+		});
+		const days = Math.ceil((date.getTime() - Date.now()) / 86_400_000);
+		if (days < 0) return { label: `Expired ${on}`, tone: 'bad' };
+		if (days <= 30)
+			return { label: `${days === 0 ? 'Expires today' : `${days}d left`} · ${on}`, tone: 'warn' };
+		return { label: on, tone: 'ok' };
 	}
 
 	function toDateInput(d: string | Date | null): string {
@@ -508,119 +532,52 @@
 							</form>
 						{:else}
 							<!-- ---------- Read-only profile (tabbed) ---------- -->
-							<div class="tabs" role="tablist">
-								<button
-									type="button"
-									role="tab"
-									class="tab"
-									class:active={detailTab === 'details'}
-									aria-selected={detailTab === 'details'}
-									onclick={() => (detailTab = 'details')}>Details</button
-								>
-								<button
-									type="button"
-									role="tab"
-									class="tab"
-									class:active={detailTab === 'orders'}
-									aria-selected={detailTab === 'orders'}
-									onclick={() => (detailTab = 'orders')}>Orders ({s.assignedOrders.length})</button
-								>
-								{#if s.notes}
+							<div class="tab-row">
+								<div class="tabs" role="tablist">
 									<button
 										type="button"
 										role="tab"
 										class="tab"
-										class:active={detailTab === 'notes'}
-										aria-selected={detailTab === 'notes'}
-										onclick={() => (detailTab = 'notes')}>Notes</button
+										class:active={detailTab === 'details'}
+										aria-selected={detailTab === 'details'}
+										onclick={() => (detailTab = 'details')}>Details</button
 									>
-								{/if}
-							</div>
-
-							{#if detailTab === 'details'}
-								<dl class="profile">
-									<div>
-										<dt>Email</dt>
-										<dd>{s.email}</dd>
-									</div>
-									<div>
-										<dt>Phone</dt>
-										<dd>{s.phone ?? '—'}</dd>
-									</div>
-									<div>
-										<dt>Trade</dt>
-										<dd>{s.trade ?? '—'}</dd>
-									</div>
-									<div>
-										<dt>Company</dt>
-										<dd>{s.company ?? '—'}</dd>
-									</div>
-									<div>
-										<dt>Tier</dt>
-										<dd>{label(s.tier)}</dd>
-									</div>
-									<div>
-										<dt>Account</dt>
-										<dd>{statusLabel(s.status)}</dd>
-									</div>
-									<div>
-										<dt>License #</dt>
-										<dd>{s.licenseNumber ?? '—'}</dd>
-									</div>
-									<div>
-										<dt>Insurance</dt>
-										<dd>
-											{s.insuranceCarrier ?? '—'}{s.insuranceExpiresAt
-												? ` · exp ${toDateInput(s.insuranceExpiresAt)}`
-												: ''}
-										</dd>
-									</div>
-									<div class="wide">
-										<dt>Address</dt>
-										<dd>{s.address ?? '—'}</dd>
-									</div>
-									{#if s.tags.length}
-										<div class="wide">
-											<dt>Tags</dt>
-											<dd class="tag-chips">
-												{#each s.tags as t (t)}<span class="tag-chip">{t}</span>{/each}
-											</dd>
-										</div>
-									{/if}
-								</dl>
-							{:else if detailTab === 'orders'}
-								<div class="assigned">
-									{#if s.assignedOrders.length === 0}
-										<p class="muted">Not assigned to any orders yet.</p>
-									{:else}
-										<ul>
-											{#each s.assignedOrders as o (o.id)}
-												<li>
-													<a href={resolve(`/contractor/orders/${o.id}`)}
-														>{o.projectName ?? 'Untitled order'}</a
-													>
-													<span class="chip small">{o.state}</span>
-												</li>
-											{/each}
-										</ul>
+									<button
+										type="button"
+										role="tab"
+										class="tab"
+										class:active={detailTab === 'orders'}
+										aria-selected={detailTab === 'orders'}
+										onclick={() => (detailTab = 'orders')}
+										>Orders ({s.assignedOrders.length})</button
+									>
+									{#if s.notes}
+										<button
+											type="button"
+											role="tab"
+											class="tab"
+											class:active={detailTab === 'notes'}
+											aria-selected={detailTab === 'notes'}
+											onclick={() => (detailTab = 'notes')}>Notes</button
+										>
 									{/if}
 								</div>
-							{:else if s.notes}
-								<p class="notes-reveal">{s.notes}</p>
-							{/if}
 
-							<div class="row-actions">
-								<!-- All management actions live behind one "Manage" menu so the card
-								     isn't a wall of buttons. Destructive actions confirm first. -->
+								<!-- Management sits at the top of the pane, opposite the tabs, rather
+								     than as a "Manage ▾" button at the foot of the card: down there the
+								     menu opened past the bottom of the viewport on any card below the
+								     fold, and nothing repositioned it as the page scrolled. -->
 								<div class="manage">
 									<button
-										class="btn"
+										type="button"
+										class="icon-btn manage-btn"
+										class:on={menuOpenId === s.id}
 										aria-haspopup="menu"
 										aria-expanded={menuOpenId === s.id}
-										onclick={() => (menuOpenId = menuOpenId === s.id ? null : s.id)}
+										title="Manage {s.name}"
+										aria-label="Manage {s.name}"
+										onclick={() => (menuOpenId = menuOpenId === s.id ? null : s.id)}>⚙</button
 									>
-										Manage ▾
-									</button>
 									{#if menuOpenId === s.id}
 										<!-- click-away backdrop -->
 										<button
@@ -710,11 +667,134 @@
 										</div>
 									{/if}
 								</div>
-
-								{#if s.status === 'linked'}
-									<span class="chip chip-linked">Linked login</span>
-								{/if}
 							</div>
+
+							{#if detailTab === 'details'}
+								<!-- Three panels across the pane rather than one list hugging the left
+								     edge: the facts group the way someone asks for them — how do I
+								     reach them, what do they do, are they covered — and the grid
+								     refills to one column on a phone. -->
+								{@const ins = insuranceStatus(s.insuranceExpiresAt)}
+								<div class="profile">
+									<div class="fact-group">
+										<div class="fact-head">
+											<span class="fact-icon" aria-hidden="true">✉</span>Contact
+										</div>
+										<dl class="fact-list">
+											<div class="fact">
+												<dt>Email</dt>
+												<dd><a href="mailto:{s.email}">{s.email}</a></dd>
+											</div>
+											<div class="fact">
+												<dt>Phone</dt>
+												<dd>
+													<!-- Same normalization as ContactComposer: the display form keeps
+													     its punctuation, the href doesn't. -->
+													{#if s.phone}<a href="tel:{s.phone.replace(/[^\d+]/g, '')}">{s.phone}</a
+														>{:else}<span class="unset">Not set</span>{/if}
+												</dd>
+											</div>
+											<div class="fact">
+												<dt>Address</dt>
+												<dd>
+													{#if s.address}{s.address}{:else}<span class="unset">Not set</span>{/if}
+												</dd>
+											</div>
+										</dl>
+									</div>
+
+									<div class="fact-group">
+										<div class="fact-head">
+											<span class="fact-icon" aria-hidden="true">🛠</span>Trade
+										</div>
+										<dl class="fact-list">
+											<div class="fact">
+												<dt>Trade</dt>
+												<dd>
+													{#if s.trade}{s.trade}{:else}<span class="unset">Not set</span>{/if}
+												</dd>
+											</div>
+											<div class="fact">
+												<dt>Company</dt>
+												<dd>
+													{#if s.company}{s.company}{:else}<span class="unset">Not set</span>{/if}
+												</dd>
+											</div>
+											<div class="fact">
+												<dt>Tier</dt>
+												<dd>{label(s.tier)}</dd>
+											</div>
+											<div class="fact">
+												<dt>Account</dt>
+												<dd>{statusLabel(s.status)}</dd>
+											</div>
+										</dl>
+									</div>
+
+									<div class="fact-group">
+										<div class="fact-head">
+											<span class="fact-icon" aria-hidden="true">🛡</span>Credentials
+										</div>
+										<dl class="fact-list">
+											<div class="fact">
+												<dt>License #</dt>
+												<dd>
+													{#if s.licenseNumber}{s.licenseNumber}{:else}<span class="unset"
+															>Not on file</span
+														>{/if}
+												</dd>
+											</div>
+											<div class="fact">
+												<dt>Carrier</dt>
+												<dd>
+													{#if s.insuranceCarrier}{s.insuranceCarrier}{:else}<span class="unset"
+															>Not on file</span
+														>{/if}
+												</dd>
+											</div>
+											<div class="fact">
+												<dt>Insured to</dt>
+												<dd>
+													<!-- Absent reads exactly like the two rows above it; only a real
+													     date earns the pill. -->
+													{#if ins.tone === 'none'}<span class="unset">{ins.label}</span
+														>{:else}<span class="ins-pill {ins.tone}">{ins.label}</span>{/if}
+												</dd>
+											</div>
+										</dl>
+									</div>
+
+									{#if s.tags.length}
+										<div class="fact-group wide">
+											<div class="fact-head">
+												<span class="fact-icon" aria-hidden="true">🏷</span>Tags
+											</div>
+											<div class="tag-chips">
+												{#each s.tags as t (t)}<span class="tag-chip">{t}</span>{/each}
+											</div>
+										</div>
+									{/if}
+								</div>
+							{:else if detailTab === 'orders'}
+								<div class="assigned">
+									{#if s.assignedOrders.length === 0}
+										<p class="muted">Not assigned to any orders yet.</p>
+									{:else}
+										<ul>
+											{#each s.assignedOrders as o (o.id)}
+												<li>
+													<a href={resolve(`/contractor/orders/${o.id}`)}
+														>{o.projectName ?? 'Untitled order'}</a
+													>
+													<span class="chip small">{o.state}</span>
+												</li>
+											{/each}
+										</ul>
+									{/if}
+								</div>
+							{:else if s.notes}
+								<p class="notes-reveal">{s.notes}</p>
+							{/if}
 
 							<!-- Destructive confirms: an explicit "are you sure?" before firing. -->
 							{#if confirmRevokeId === s.id && s.pendingInviteId}
@@ -788,9 +868,7 @@
 				onclick={() => (showAdd = false)}>✕</button
 			>
 			<h2>Add subcontractor</h2>
-			<p class="modal-sub">
-				Add a trade partner to your roster — you can assign them to jobs afterward.
-			</p>
+			<br />
 			{#if atSubLimit}
 				<p class="limit-note">
 					Your trial covers {data.billing.limits?.subcontractor.limit} subcontractors and you have {data
@@ -809,7 +887,6 @@
 					}}
 			>
 				<div class="fields">
-					<div class="group-label">Contact</div>
 					<label>
 						<span class="lbl">Name <span class="req" aria-hidden="true">*</span></span>
 						<input name="name" required placeholder="Jordan Rivera" />
@@ -1211,37 +1288,156 @@
 		opacity: 1;
 		visibility: visible;
 	}
+	/* The open pane is a recessed area under the card head, so the white fact
+	   panels sitting in it have something to lift off. */
 	.detail {
-		border-top: 1px solid #eef1f4;
+		border-top: 1px solid var(--line);
+		background: var(--surface-inset);
 		padding: 0.9rem;
 		display: grid;
-		gap: 1rem;
+		gap: 0.85rem;
 	}
+	/* Profile facts, grouped into panels that refill the pane at any width:
+	   auto-fit means three across on a desktop card, two on a tablet, one on a
+	   phone, with no breakpoint to keep in sync. Token-driven, so dark needs no
+	   override block of its own. */
 	.profile {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.5rem 1rem;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 0.6rem;
+		align-items: start;
 		margin: 0;
 	}
 	.profile .wide {
 		grid-column: 1 / -1;
 	}
+	/* Each group is a panel with a titled band rather than a heading floating over
+	   loose text: the band, the hairline rows and the flush-right values are what
+	   make it read as a spec sheet instead of a list. */
+	.fact-group {
+		display: grid;
+		align-content: start;
+		background: var(--surface);
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		overflow: hidden;
+	}
+	.fact-head {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0;
+		padding: 0.42rem 0.7rem;
+		background: var(--surface-sunken);
+		border-bottom: 1px solid var(--line);
+		font-size: 0.75rem;
+		font-weight: 700;
+		letter-spacing: 0.01em;
+		color: var(--fg-muted);
+	}
+	.fact-icon {
+		font-size: 0.8rem;
+		line-height: 1;
+		opacity: 0.75;
+	}
+	.fact-list {
+		margin: 0;
+		padding: 0 0.7rem;
+	}
+	/* Label left, value hard right, hairline between — the pair spans the panel
+	   instead of both hugging the left edge with dead space beside them. */
+	.fact {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.4rem 0;
+		border-bottom: 1px solid var(--line);
+	}
+	.fact:last-child {
+		border-bottom: none;
+	}
 	.profile dt {
-		font-size: 0.7rem;
+		flex-shrink: 0;
+		font-size: 0.72rem;
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
-		color: #777;
-		font-weight: 800;
+		color: var(--fg-muted);
+		font-weight: 700;
 	}
+	/* One size, one weight, one alignment for every value in the pane — including
+	   the ones that are absent. Mixed sizes read as mixed importance. */
 	.profile dd {
 		margin: 0;
+		min-width: 0;
+		font-size: 0.85rem;
+		line-height: 1.35;
 		font-weight: 600;
+		text-align: right;
+		word-break: break-word;
 	}
-	/* Tab strip for the detail pane. */
+	.profile dd a {
+		color: inherit;
+		text-decoration: none;
+		border-bottom: 1px solid var(--line-strong);
+	}
+	.profile dd a:hover {
+		border-bottom-color: currentColor;
+	}
+	/* An absent fact is stated, not dashed: "—" reads as data the reader has to
+	   decode, and these are fields worth noticing the gap in. Same size and
+	   position as a filled value; only the weight and color step back. */
+	.unset {
+		color: var(--fg-muted);
+		font-weight: 500;
+	}
+	.profile .tag-chips {
+		padding: 0.55rem 0.7rem;
+	}
+	/* Insurance expiry carries its own urgency — the only value in the pane that
+	   earns a pill. Colors pinned rather than tokenised: these are status
+	   reds/ambers/greens, not surfaces. */
+	.ins-pill {
+		display: inline-block;
+		padding: 0.05rem 0.5rem;
+		border-radius: 999px;
+		border: 1px solid transparent;
+		font-size: 0.8rem;
+		font-weight: 700;
+		white-space: nowrap;
+	}
+	.ins-pill.ok {
+		color: #1a7f37;
+		background: #e6f4ea;
+		border-color: #4ea866;
+	}
+	.ins-pill.warn {
+		color: #8a5a00;
+		background: #fff4d6;
+		border-color: #e0b34d;
+	}
+	.ins-pill.bad {
+		color: #cf222e;
+		background: #ffebe9;
+		border-color: #e5534b;
+	}
+	/* Tabs on the left, the ⚙ opposite them, sharing one underline. */
+	.tab-row {
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 0.5rem;
+		border-bottom: 1px solid var(--line);
+	}
+	.manage-btn {
+		width: 2rem;
+		height: 2rem;
+		font-size: 1rem;
+		margin-bottom: 0.25rem;
+	}
 	.tabs {
 		display: flex;
 		gap: 0.25rem;
-		border-bottom: 1px solid #eef1f4;
 	}
 	.tab {
 		padding: 0.4rem 0.7rem;
@@ -1279,10 +1475,17 @@
 		display: grid;
 		gap: 0.35rem;
 	}
+	/* Full-width rows with the state pinned right, so this tab fills the pane the
+	   same way the Details panels do. */
 	.assigned li {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		justify-content: space-between;
+		gap: 0.75rem;
+		background: var(--surface-sunken);
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		padding: 0.4rem 0.6rem;
 	}
 	.muted {
 		color: #888;
@@ -1389,11 +1592,9 @@
 		flex-wrap: wrap;
 		margin-top: 0.6rem;
 	}
-	.row-actions form {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-	}
+	/* `.row-actions form` lived here for the read-only pane's inline action forms;
+	   those moved into the ⚙ menu, and only the edit form and the modal use this
+	   row now — both of which are the form, not a container of them. */
 	.confirm {
 		font-weight: 800;
 	}
@@ -1411,7 +1612,9 @@
 	}
 	.menu {
 		position: absolute;
-		left: 0;
+		/* Hung from the gear's right edge: it opens at the top of the pane, so it
+		   has the whole card below it and never runs off the viewport. */
+		right: 0;
 		top: calc(100% + 6px);
 		z-index: 40;
 		min-width: 190px;
@@ -1576,8 +1779,9 @@
 		border-top: 1px solid #eef0f3;
 	}
 	@media (max-width: 560px) {
-		.fields,
-		.profile {
+		/* `.profile` isn't listed here — its auto-fit track already collapses to a
+		   single column once the panels can't hold their 220px minimum. */
+		.fields {
 			grid-template-columns: 1fr;
 		}
 		/* Full-width, thumb-friendly actions; primary sits on top. */
@@ -1610,9 +1814,6 @@
 	}
 	:global(:root[data-theme='dark']) .detail {
 		border-top-color: var(--line);
-	}
-	:global(:root[data-theme='dark']) .tabs {
-		border-bottom-color: var(--line);
 	}
 	:global(:root[data-theme='dark']) .tab {
 		color: var(--fg-muted);

@@ -88,8 +88,8 @@ async function main() {
 		if (account) await sql`update "user" set role = 'customer' where id = ${account.id}`;
 		const id = randomUUID();
 		await sql`
-			insert into customer (id, contractor_id, name, email, phone, address, notes, tags, avatar, preferred_contact, user_id)
-			values (${id}, ${contractor.id}, ${c.name}, ${c.email}, ${c.phone}, ${c.address}, ${c.notes}, ${c.tags}, ${c.avatar ?? null}, ${c.preferredContact ?? 'email'}, ${account?.id ?? null})
+			insert into customer (id, contractor_id, name, email, phone, address, city, state, postal_code, notes, avatar, preferred_contact, user_id)
+			values (${id}, ${contractor.id}, ${c.name}, ${c.email}, ${c.phone}, ${c.address}, ${c.city ?? null}, ${c.state ?? null}, ${c.postalCode ?? null}, ${c.notes}, ${c.avatar ?? null}, ${c.preferredContact ?? 'email'}, ${account?.id ?? null})
 		`;
 		customerIds[c.key] = { id, userId: account?.id ?? null };
 	}

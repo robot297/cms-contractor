@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isStateCode } from './address.js';
 
 export const CONTRACTOR_ORDER_STATES = [
 	'Inquiry',
@@ -88,9 +89,12 @@ export type CustomerContact = {
 	name: string;
 	email: string;
 	phone: string | null;
+	/** Street line only — city/state/postalCode are their own fields. */
 	address: string | null;
+	city: string | null;
+	state: string | null;
+	postalCode: string | null;
 	notes: string | null;
-	tags: string[];
 	preferredContact: PreferredContact;
 };
 
@@ -120,47 +124,51 @@ export const customerContactSchema = z.object({
 		.string()
 		.optional()
 		.transform((v) => blankToNull(v)),
+	city: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v)),
+	// The form offers a picker, so anything else arrived by hand — reject it
+	// rather than store a state nothing else will recognise.
+	state: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v)?.toUpperCase() ?? null)
+		.refine((v) => v === null || isStateCode(v), 'Choose a state'),
+	postalCode: z
+		.string()
+		.optional()
+		.transform((v) => blankToNull(v))
+		.refine((v) => v === null || /^\d{5}(-\d{4})?$/.test(v), 'Enter a 5-digit ZIP'),
 	notes: z
 		.string()
 		.optional()
 		.transform((v) => blankToNull(v)),
-	tags: z
-		.string()
-		.optional()
-		.transform((v) => parseTags(v ?? '')),
 	preferredContact: z
 		.string()
 		.optional()
 		.transform((v): PreferredContact => normalizePreferredContact(v))
 });
 
-/**
- * Extract a short "City" or "City, ST" location line from a free-form address.
- * Handles the common US shapes: "Street, City", "Street, City, ST" and
- * "Street, City, ST 12345". Returns null when no city can be isolated (e.g. a
- * lone street with no comma, or an empty address).
- */
-export function formatLocation(address: string | null): string | null {
-	if (!address) return null;
-	const parts = address
-		.split(',')
-		.map((p) => p.trim())
-		.filter(Boolean);
-	if (parts.length === 0) return null;
-	// A trailing 2-letter state, optionally followed by a ZIP.
-	const last = parts[parts.length - 1];
-	const stateMatch = last.match(/^([A-Za-z]{2})(?:\s+\d{5}(?:-\d{4})?)?$/);
-	if (stateMatch && parts.length >= 2) {
-		return `${parts[parts.length - 2]}, ${stateMatch[1].toUpperCase()}`;
-	}
-	// No state present — the last non-street segment is the city.
-	if (parts.length >= 2) return parts[parts.length - 1];
-	return null;
-}
+// Address capture + parsing lives in plain JS so the backfill script can share
+// it (see src/lib/address.js). Re-exported here so the app has one import site.
+export {
+	US_STATES,
+	isStateCode,
+	splitAddress,
+	customerLocation,
+	formatLocation
+} from './address.js';
+/** @see src/lib/address.js */
+export type { AddressParts } from './address.js';
+
+/** Fields a contact error can be attributed to; anything else reports as `name`. */
+const REPORTABLE_FIELDS = ['email', 'phone', 'state', 'postalCode'] as const;
+export type CustomerContactField = 'name' | (typeof REPORTABLE_FIELDS)[number];
 
 export type CustomerContactValidation =
 	| { ok: true; value: CustomerContact }
-	| { ok: false; field: 'name' | 'email' | 'phone'; message: string };
+	| { ok: false; field: CustomerContactField; message: string };
 
 /** Validate a new/edited customer's fields via the shared Zod schema. */
 export function validateCustomerContact(input: {
@@ -168,8 +176,10 @@ export function validateCustomerContact(input: {
 	email?: string;
 	phone?: string;
 	address?: string;
+	city?: string;
+	state?: string;
+	postalCode?: string;
 	notes?: string;
-	tags?: string;
 	preferredContact?: string;
 }): CustomerContactValidation {
 	const result = customerContactSchema.safeParse(input);
@@ -178,7 +188,9 @@ export function validateCustomerContact(input: {
 	const field = issue.path[0];
 	return {
 		ok: false,
-		field: field === 'email' || field === 'phone' ? field : 'name',
+		field: (REPORTABLE_FIELDS as readonly unknown[]).includes(field)
+			? (field as CustomerContactField)
+			: 'name',
 		message: issue.message
 	};
 }
@@ -418,18 +430,49 @@ export function validateOrderSetup(input: {
 // ---------------------------------------------------------------- Follow-ups
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** New orders are followed up on 3 days out by default. */
-export const DEFAULT_FOLLOWUP_DAYS = 3;
+/**
+ * New orders are followed up a week out unless the contractor says otherwise.
+ * A week is the shortest interval that doesn't nag: a job that went quiet for
+ * three days usually hasn't gone quiet at all, and a dashboard full of
+ * not-yet-real follow-ups is one contractors learn to ignore.
+ */
+export const DEFAULT_FOLLOWUP_DAYS = 7;
+
+/**
+ * What a contractor may set their default to. A short list rather than a free
+ * number field: the choice is "how patient are you", not an exact day count.
+ */
+export const FOLLOWUP_DAY_CHOICES = [3, 7, 14, 30] as const;
+export type FollowUpDays = (typeof FOLLOWUP_DAY_CHOICES)[number];
+
+export function isFollowUpDays(value: number): value is FollowUpDays {
+	return (FOLLOWUP_DAY_CHOICES as readonly number[]).includes(value);
+}
+
+/** How the interval reads in a sentence: "a week", not "7 days". */
+export function followUpDaysLabel(days: number): string {
+	if (days === 1) return 'a day';
+	if (days === 7) return 'a week';
+	if (days % 7 === 0) return `${days / 7} weeks`;
+	return `${days} days`;
+}
+
+/**
+ * The default next-follow-up date for a freshly created order. `days` is the
+ * contractor's own setting; it falls back to the house default so callers that
+ * genuinely have no contractor in hand (tests, fixtures) still get a date.
+ */
+export function defaultFollowUp(
+	days: number = DEFAULT_FOLLOWUP_DAYS,
+	from: Date = new Date()
+): Date {
+	return new Date(from.getTime() + days * DAY_MS);
+}
 
 export type SnoozePreset = '1d' | '3d' | '1w';
 
 export function isSnoozePreset(value: string): value is SnoozePreset {
 	return value === '1d' || value === '3d' || value === '1w';
-}
-
-/** The default next-follow-up date for a freshly created order. */
-export function defaultFollowUp(from: Date = new Date()): Date {
-	return new Date(from.getTime() + DEFAULT_FOLLOWUP_DAYS * DAY_MS);
 }
 
 /** A follow-up is "due" when it is set and on or before now. */

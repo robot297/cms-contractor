@@ -106,6 +106,41 @@
       "when": 1785594345754,
       "tag": "0014_overjoyed_payback",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1785606048317,
+      "tag": "0015_unknown_reptil",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1785618777169,
+      "tag": "0016_red_doorman",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785623899546,
+      "tag": "0017_certain_kingpin",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785640157174,
+      "tag": "0018_mute_power_pack",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785809883564,
+      "tag": "0019_known_norman_osborn",
+      "breakpoints": true
     }
   ]
 }

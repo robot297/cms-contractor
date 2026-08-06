@@ -3,7 +3,7 @@
 	import { slide } from 'svelte/transition';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
-	import { formatLocation, PROJECT_TYPES } from '$lib/crm';
+	import { customerLocation, PROJECT_TYPES } from '$lib/crm';
 	import TagPicker from '$lib/TagPicker.svelte';
 	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData, ActionData } from './$types';
@@ -78,8 +78,13 @@
 	let projectType = $state('');
 
 	/** "Dana Whitfield — Austin, TX", falling back to the bare name. */
-	function customerLabel(c: { name: string; address: string | null }): string {
-		const where = formatLocation(c.address);
+	function customerLabel(c: {
+		name: string;
+		address: string | null;
+		city: string | null;
+		state: string | null;
+	}): string {
+		const where = customerLocation(c);
 		return where ? `${c.name} — ${where}` : c.name;
 	}
 
@@ -132,8 +137,6 @@
 		}
 	}
 
-	const primaryBtn =
-		'padding: 0.5rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 500;';
 	const iconBtn = 'width: 2.5rem; height: 2.5rem; font-size: 1.7rem;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
@@ -226,6 +229,11 @@
 
 		{#each visibleOrders as order (order.id)}
 			{@const badge = statusBadge(order.state)}
+			{@const where = customerLocation({
+				city: order.customerCity,
+				state: order.customerState,
+				address: order.customerAddress
+			})}
 			<article class="card">
 				<!-- Header: project name leads, customer + city underneath; status on the right -->
 				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start;">
@@ -239,8 +247,8 @@
 								>{/if}
 						</a>
 						<div class="card-sub">
-							{order.customerName}{#if formatLocation(order.customerAddress)}
-								· {formatLocation(order.customerAddress)}{/if}
+							{order.customerName}{#if where}
+								· {where}{/if}
 						</div>
 						{#if order.tags.length > 0}
 							<div class="tag-chips" style="margin-top: 0.15rem;">
@@ -314,7 +322,7 @@
 									required
 									style="flex: 1; min-width: 140px; {field}"
 								/>
-								<button type="submit" style={primaryBtn}>Add</button>
+								<button type="submit" class="primary-btn">Add</button>
 							</form>
 						</div>
 					{/if}
@@ -656,6 +664,27 @@
 	.icon-btn.on:hover {
 		background: #e2daf7;
 	}
+	/* Submit inside the add-note panel. Was an inline blue fill that leaned on the
+	   `[style*='background: #0969da']` interception in app.css to become the theme
+	   button — which never fired here, leaving one stray blue button on the page.
+	   Drawn from the tokens directly instead, so it matches by construction. */
+	.primary-btn {
+		padding: 0.5rem 1rem;
+		border-radius: 999px;
+		border: 2px solid var(--pop-line);
+		/* Pinned dark: yellow stays light in both themes. */
+		background: var(--yellow);
+		color: #14171c;
+		font-family: inherit;
+		font-size: 0.9rem;
+		font-weight: 700;
+		cursor: pointer;
+		box-shadow: var(--pop-shadow-sm);
+	}
+	.primary-btn:hover {
+		background: var(--yellow-deep);
+	}
+
 	/* The expanded add-note area, visually grouped so it reads as belonging to
 	   the note button that opened it. */
 	.note-panel {

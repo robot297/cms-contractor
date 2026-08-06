@@ -42,8 +42,10 @@ export const actions: Actions = withBillingErrors({
 			email: form.get('email')?.toString(),
 			phone: form.get('phone')?.toString(),
 			address: form.get('address')?.toString(),
+			city: form.get('city')?.toString(),
+			state: form.get('state')?.toString(),
+			postalCode: form.get('postalCode')?.toString(),
 			notes: form.get('notes')?.toString(),
-			tags: form.get('tags')?.toString(),
 			preferredContact: form.get('preferredContact')?.toString()
 		});
 		if (!contact.ok)
@@ -75,8 +77,10 @@ export const actions: Actions = withBillingErrors({
 			email: form.get('email')?.toString(),
 			phone: form.get('phone')?.toString(),
 			address: form.get('address')?.toString(),
+			city: form.get('city')?.toString(),
+			state: form.get('state')?.toString(),
+			postalCode: form.get('postalCode')?.toString(),
 			notes: form.get('notes')?.toString(),
-			tags: form.get('tags')?.toString(),
 			preferredContact: form.get('preferredContact')?.toString()
 		});
 		if (!contact.ok)
