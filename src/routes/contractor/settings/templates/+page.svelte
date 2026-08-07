@@ -8,6 +8,7 @@
 		FOLLOWUP_DAY_CHOICES,
 		followUpDaysLabel
 	} from '$lib/crm';
+	import { renderEmail } from '$lib/email';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -101,6 +102,27 @@
 		)
 	);
 
+	// The formatted preview is the send path's own output — same renderer, same
+	// branding — so what's on screen is what lands in the inbox rather than an
+	// approximation of it. See docs/adr/0007-the-app-sends-email-mailto-is-the-fallback.md.
+	const branding = $derived({ businessName, signature });
+	const editHtml = $derived(
+		renderEmail(
+			{ subject: editSubject, body: editBody },
+			{ ...SAMPLE, contractor: businessName },
+			branding
+		).html
+	);
+	const createHtml = $derived(
+		renderEmail(
+			{ subject: newSubject, body: newBody },
+			{ ...SAMPLE, contractor: businessName },
+			branding
+		).html
+	);
+	// One toggle for the page: the accordion only ever has a single panel open.
+	let previewMode = $state<'html' | 'text'>('html');
+
 	// Which tag is awaiting delete confirmation.
 	let confirmingTag = $state<string | null>(null);
 
@@ -108,6 +130,28 @@
 	let followUpDays = $state(untrack(() => data.followUpDays));
 	const followUpDirty = $derived(followUpDays !== data.followUpDays);
 </script>
+
+<!-- Preview header, shared by the create and edit panels: a label plus the
+     formatted/plain-text switch. Both parts are sent, so both are viewable. -->
+{#snippet previewHead()}
+	<div class="preview-head">
+		<span class="preview-label">Preview</span>
+		<div class="preview-switch">
+			<button
+				type="button"
+				class:on={previewMode === 'html'}
+				aria-pressed={previewMode === 'html'}
+				onclick={() => (previewMode = 'html')}>Formatted</button
+			>
+			<button
+				type="button"
+				class:on={previewMode === 'text'}
+				aria-pressed={previewMode === 'text'}
+				onclick={() => (previewMode = 'text')}>Plain text</button
+			>
+		</div>
+	</div>
+{/snippet}
 
 <svelte:head><title>Email templates · Settings</title></svelte:head>
 
@@ -288,11 +332,20 @@
 						>
 					</label>
 					<div class="preview">
-						<span class="preview-label">Preview</span>
+						{@render previewHead()}
 						{#if createPreview.subject}<div class="preview-subject">
 								{createPreview.subject}
 							</div>{/if}
-						<pre>{createPreview.body || '—'}</pre>
+						{#if previewMode === 'html'}
+							<iframe
+								class="preview-frame"
+								title="Formatted email preview"
+								sandbox=""
+								srcdoc={createHtml}
+							></iframe>
+						{:else}
+							<pre>{createPreview.body || '—'}</pre>
+						{/if}
 					</div>
 					{#if form?.action === 'create' && form?.message}
 						<p class="err">{form.message}</p>
@@ -385,11 +438,20 @@
 									<textarea name="body" bind:value={editBody} rows="5"></textarea>
 								</label>
 								<div class="preview">
-									<span class="preview-label">Preview</span>
+									{@render previewHead()}
 									{#if editPreview.subject}<div class="preview-subject">
 											{editPreview.subject}
 										</div>{/if}
-									<pre>{editPreview.body || '—'}</pre>
+									{#if previewMode === 'html'}
+										<iframe
+											class="preview-frame"
+											title="Formatted email preview"
+											sandbox=""
+											srcdoc={editHtml}
+										></iframe>
+									{:else}
+										<pre>{editPreview.body || '—'}</pre>
+									{/if}
 								</div>
 								<div class="row-actions">
 									<button
@@ -522,12 +584,53 @@
 		display: grid;
 		gap: 0.3rem;
 	}
+	.preview-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
 	.preview-label {
 		font-size: 0.72rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: #8b949e;
 		font-weight: 700;
+	}
+	/* Segmented switch between the two parts of the same message. */
+	.preview-switch {
+		display: flex;
+		gap: 0.15rem;
+		padding: 0.1rem;
+		border-radius: 999px;
+		border: 1px solid var(--line);
+		background: var(--surface);
+	}
+	.preview-switch button {
+		border: none;
+		background: none;
+		border-radius: 999px;
+		padding: 0.18rem 0.6rem;
+		font-family: inherit;
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+		cursor: pointer;
+	}
+	.preview-switch button.on {
+		background: var(--yellow);
+		/* Pinned dark: yellow stays light in both themes. */
+		color: #14171c;
+	}
+	/* The email renders in its own document, so app.css can't leak into it and the
+	   preview is the real thing rather than a styled approximation. */
+	.preview-frame {
+		width: 100%;
+		height: 340px;
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: #f6f8fa;
 	}
 	.preview-subject {
 		font-weight: 700;
