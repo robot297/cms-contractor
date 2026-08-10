@@ -30,6 +30,14 @@ _Avoid_: Vendor, crew, worker, contractor (a Subcontractor is a distinct record,
 An access level the primary Contractor assigns to each Subcontractor, gating both visibility and write access on assigned Orders. A **Trusted Subcontractor** sees the full Order (including the Customer's contact details + timeline) and may write back (timeline notes, job photos). A **Guest Contractor** sees work details only — project, type, status, work timeline — with the Customer's contact PII redacted, and is read-only. The Tier lives on the Subcontractor record and applies to all their assignments.
 _Avoid_: Permission, role (role is a User concept; Tier is a Subcontractor-record concept).
 
+**ID Scan**:
+Filling the Add/Edit Subcontractor form by photographing the Subcontractor's ID instead of typing it. Two paths: the PDF417 barcode on the back of a US/CA licence, decoded on the contractor's own device, and — for a card with no barcode, such as a trade licence — sending the photo to be read, which is off entirely unless the deployment configures it. An ID Scan never writes: it prefills a form the Contractor then reviews and saves, so every rule that governs a typed entry still governs a scanned one.
+_Avoid_: OCR (only one of the two paths is optical), verification (a scan captures what the card says, it does not vouch for it), import.
+
+**Scanned ID**:
+What one ID Scan read: a name, a single-line address, a document number, a date of birth and an expiry, plus which path produced it. A Scanned ID is never stored — neither is the photo. Only the name and address prefill a Subcontractor; the rest is shown on the confirm step so the Contractor can see the scan read the right card, then discarded with the image. The one exception is a trade licence read by vision, whose number is what `licenseNumber` on a Subcontractor actually means — a driver's licence number never fills that field.
+_Avoid_: Document (a Document is a stored artifact; a Scanned ID is deliberately not stored), record.
+
 **Subcontractor Invite**:
 A magic/invite link a Contractor sends so a Subcontractor can access their portal, bound to the Subcontractor record by token (email is a fallback) — the same load-bearing binding as the customer Invite ([ADR-0001](docs/adr/0001-bind-customer-to-user-by-invite-token.md)), implemented as a parallel mechanism rather than by generalizing the customer Invite. See [ADR-0003](docs/adr/0003-parallel-subcontractor-invite.md).
 _Avoid_: Signup, registration.

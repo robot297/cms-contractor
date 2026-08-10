@@ -94,7 +94,16 @@ function paragraphs(text: string, style: string): string {
 export function renderEmail(
 	template: { subject: string; body: string },
 	vars: TemplateVars,
-	branding: EmailBranding
+	branding: EmailBranding,
+	opts?: {
+		/**
+		 * The grey line under the card. Defaults to the contractor-message footer
+		 * ("just hit reply…"); transactional mail from the product itself passes its
+		 * own sentence, and `null` drops the footer entirely. Inserted as HTML —
+		 * product-authored copy only, never user input.
+		 */
+		footerNote?: string | null;
+	}
 ): RenderedEmail {
 	const { subject, body: text } = composeEmail(template, vars, branding.signature);
 
@@ -104,6 +113,12 @@ export function renderEmail(
 	const message = composeEmail({ subject: '', body: template.body }, vars, null).body;
 	const signature = composeEmail({ subject: '', body: '' }, vars, branding.signature).body;
 	const businessName = branding.businessName.trim();
+	const footerNote =
+		opts?.footerNote === undefined
+			? businessName
+				? `Sent by ${escapeHtml(businessName)}. Just hit reply — it goes straight to them.`
+				: ''
+			: (opts.footerNote ?? '');
 
 	const bodyStyle = `margin: 0 0 14px; font-family: ${FONT}; font-size: 16px; line-height: 1.55; color: ${BODY_FG};`;
 	const signatureStyle = `margin: 0 0 6px; font-family: ${FONT}; font-size: 15px; line-height: 1.5; color: ${MUTED_FG};`;
@@ -162,9 +177,9 @@ export function renderEmail(
 						}
 					</table>
 					${
-						businessName
+						footerNote
 							? `<div style="max-width: 600px; padding: 14px 8px 0; font-family: ${FONT}; font-size: 12px; line-height: 1.5; color: ${MUTED_FG};">
-						Sent by ${escapeHtml(businessName)}. Just hit reply — it goes straight to them.
+						${footerNote}
 					</div>`
 							: ''
 					}

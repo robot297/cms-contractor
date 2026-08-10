@@ -99,6 +99,7 @@ export const subcontractor = pgTable(
 		tier: text('tier').notNull().default('guest'),
 		// License / insurance are stored for reference only — no compliance alerts (v1).
 		licenseNumber: text('license_number'),
+		licenseExpiresAt: timestamp('license_expires_at'),
 		insuranceCarrier: text('insurance_carrier'),
 		insuranceExpiresAt: timestamp('insurance_expires_at'),
 		notes: text('notes'),

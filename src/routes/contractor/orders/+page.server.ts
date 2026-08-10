@@ -12,6 +12,7 @@ import {
 } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
 import { withBillingErrors } from '$lib/server/billing.server';
+import { sendEmailAction } from '$lib/server/email-action.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -43,6 +44,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 // Wrapped so a billing refusal from any guarded write returns a 402 the form
 // can render, rather than a 500. See withBillingErrors.
 export const actions: Actions = withBillingErrors({
+	/**
+	 * Sending a composed message. Shared by every surface that mounts the
+	 * composer — the implementation lives in one file so the rule about when a
+	 * send is recorded on a timeline can't drift between pages.
+	 */
+	sendEmail: sendEmailAction,
+
 	createOrder: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();

@@ -80,6 +80,7 @@ export type SubcontractorDetailsInput = {
 	trade?: string | null;
 	tier?: SubcontractorTier;
 	licenseNumber?: string | null;
+	licenseExpiresAt?: Date | null;
 	insuranceCarrier?: string | null;
 	insuranceExpiresAt?: Date | null;
 	notes?: string | null;
@@ -153,6 +154,7 @@ export async function createSubcontractor(
 			trade: input.trade ?? null,
 			tier: input.tier ?? 'guest',
 			licenseNumber: input.licenseNumber ?? null,
+			licenseExpiresAt: input.licenseExpiresAt ?? null,
 			insuranceCarrier: input.insuranceCarrier ?? null,
 			insuranceExpiresAt: input.insuranceExpiresAt ?? null,
 			notes: input.notes ?? null,
@@ -200,6 +202,7 @@ export async function editSubcontractor(
 			trade: input.trade ?? null,
 			tier: input.tier ?? current.tier,
 			licenseNumber: input.licenseNumber ?? null,
+			licenseExpiresAt: input.licenseExpiresAt ?? null,
 			insuranceCarrier: input.insuranceCarrier ?? null,
 			insuranceExpiresAt: input.insuranceExpiresAt ?? null,
 			notes: input.notes ?? null,

@@ -5,6 +5,8 @@ import {
 	listEmailTemplates
 } from '$lib/server/templates.server';
 import { getLimitStatus, getSubscriptionView } from '$lib/server/billing.server';
+import { isEmailConfigured, isEmailDevToolsEnabled } from '$lib/server/email.server';
+import { isDemoUser } from '$lib/server/demo.server';
 import { listContractorTags } from '$lib/server/tags.server';
 import type { LayoutServerLoad } from './$types';
 
@@ -19,6 +21,9 @@ import type { LayoutServerLoad } from './$types';
 export const load: LayoutServerLoad = async ({ locals }) => {
 	if (!locals.user) redirect(302, '/login');
 	if (locals.user.role !== 'contractor') redirect(302, '/');
+	// Unverified accounts get the holding page, not the app. Only enforced where
+	// this install can deliver the verification mail — see auth.ts.
+	if (!locals.user.emailVerified && isEmailConfigured()) redirect(302, '/verify-email');
 
 	// Seed starter templates for contractors who have never made one, then load the
 	// templates + branding once here so the composer has them on every contractor
@@ -52,6 +57,14 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 			currentPeriodEnd: subscription.subscription.currentPeriodEnd,
 			limits
 		},
+		// Whether the composer posts to the send action or falls straight back to the
+		// `mailto:` handoff. Resolved here so every surface agrees, and so an
+		// unconfigured install never makes a pointless round-trip to find out.
+		emailSendingConfigured: isEmailConfigured(),
+		emailDevTools: isEmailDevToolsEnabled(),
+		// The shared demo login never sends mail through the app; the composer
+		// reads this to say so instead of offering a Send that would be refused.
+		demoAccount: isDemoUser(locals.user.email),
 		emailTemplates: templates.map((t) => ({
 			id: t.id,
 			name: t.name,

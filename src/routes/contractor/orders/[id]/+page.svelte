@@ -37,6 +37,48 @@
 	// Customer details open in place under the customer line, the same way tags do.
 	let customerOpen = $state(false);
 
+	// Crew changes are staged, not applied on tap: every assignment writes to the
+	// job's history (and is where subcontractor notifications will hang later), so
+	// nothing commits until the "✓ Save" in the panel header. Keyed by sub id,
+	// value = the desired assigned state; toggling back to the server state simply
+	// drops the key.
+	let stagedSubs = $state<Record<string, boolean>>({});
+	function toggleSub(id: string, currentlyAssigned: boolean) {
+		const next = { ...stagedSubs };
+		if (id in next) delete next[id];
+		else next[id] = !currentlyAssigned;
+		stagedSubs = next;
+	}
+	const stagedAssign = $derived(
+		Object.entries(stagedSubs)
+			.filter(([, assigned]) => assigned)
+			.map(([id]) => id)
+	);
+	const stagedUnassign = $derived(
+		Object.entries(stagedSubs)
+			.filter(([, assigned]) => !assigned)
+			.map(([id]) => id)
+	);
+	const stagedCount = $derived(stagedAssign.length + stagedUnassign.length);
+	// The add box. Assigned crew renders inline; the rest of the roster only ever
+	// appears as search matches, so a fifty-person roster doesn't bury the three
+	// people actually on the job.
+	let subQuery = $state('');
+	const SUB_RESULT_LIMIT = 8;
+	// Staged adds surface in the crew list itself (as pending rows), so a picked
+	// person doesn't vanish when the search that found them is cleared…
+	const stagedAddSubs = $derived(data.availableSubs.filter((s) => stagedSubs[s.id] === true));
+	// …and drop out of the results, where they'd otherwise render twice.
+	const subMatches = $derived.by(() => {
+		const q = subQuery.trim().toLowerCase();
+		if (!q) return [];
+		return data.availableSubs.filter(
+			(s) =>
+				stagedSubs[s.id] !== true &&
+				(s.name.toLowerCase().includes(q) || (s.trade ?? '').toLowerCase().includes(q))
+		);
+	});
+
 	const order = $derived(data.order);
 	// "City, ST" from the customer's captured fields, for the header line.
 	const orderLocation = $derived(
@@ -289,6 +331,7 @@
 											preferredContact: customer.preferredContact
 										}}
 										project={order.projectName}
+										orderId={order.id}
 										rows={2}
 										onsent={() => (contactOpen = false)}
 										onclose={() => (contactOpen = false)}
@@ -463,6 +506,38 @@
 				{form.message}
 			</p>
 		{/if}
+
+		<!-- One row of the crew picker, shared by the assigned list, staged adds and
+		     the search results. `currentlyAssigned` is the SERVER state — the mark and
+		     highlight render the staged (effective) state on top of it. -->
+		{#snippet crewRow(
+			sub: { id: string; name: string; trade: string | null; tier: string },
+			currentlyAssigned: boolean
+		)}
+			{@const effective = stagedSubs[sub.id] ?? currentlyAssigned}
+			{@const pending = sub.id in stagedSubs}
+			<button
+				type="button"
+				class="sub-row"
+				class:on={effective}
+				class:pending
+				aria-pressed={effective}
+				onclick={() => toggleSub(sub.id, currentlyAssigned)}
+			>
+				<span class="sub-mark" aria-hidden="true"
+					>{effective ? '✓' : currentlyAssigned ? '–' : '+'}</span
+				>
+				<span class="sub-text">
+					<span class="sub-name">{sub.name}</span>
+					<span class="sub-meta">
+						<span class="sub-trade">{sub.trade ?? 'Trade not set'}</span>
+						<span class="tier" class:guest={sub.tier !== 'trusted'}>
+							{sub.tier === 'trusted' ? 'Trusted' : 'Guest'}
+						</span>
+					</span>
+				</span>
+			</button>
+		{/snippet}
 
 		<!-- Tabs. The detail page used to stack six full-width cards, which meant
 		     scrolling past the customer and the files to reach the timeline. One panel
@@ -646,11 +721,40 @@
 						</ol>
 					{/if}
 				{:else if tab === 'contractors'}
+					<!-- The commit control lives up here: while changes are staged, the
+					     roster link hands its corner to a compact save + discard pair, so
+					     confirming is one glance up instead of a banner under the list. -->
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
 					>
 						<h2 style={sectionTitle}>Contractors</h2>
-						<a class="panel-link" href={resolve('/contractor/subcontractors')}>Manage roster →</a>
+						{#if stagedCount > 0}
+							<div class="subs-commit">
+								<button type="button" class="sub-discard" onclick={() => (stagedSubs = {})}
+									>Discard</button
+								>
+								<form
+									method="POST"
+									action="?/saveSubs"
+									use:enhance={() =>
+										async ({ result, update }) => {
+											await update();
+											if (result.type === 'success') {
+												stagedSubs = {};
+												subQuery = '';
+											}
+										}}
+								>
+									<input type="hidden" name="assign" value={stagedAssign.join(',')} />
+									<input type="hidden" name="unassign" value={stagedUnassign.join(',')} />
+									<button type="submit" class="subs-save">
+										<span aria-hidden="true">✓</span> Save {stagedCount}
+									</button>
+								</form>
+							</div>
+						{:else}
+							<a class="panel-link" href={resolve('/contractor/subcontractors')}>Manage roster →</a>
+						{/if}
 					</div>
 
 					{#if data.assignedSubs.length === 0 && data.availableSubs.length === 0}
@@ -660,43 +764,54 @@
 							> page, then put them on jobs from here.
 						</p>
 					{:else}
-						<p class="editor-note">Tap a name to put them on this job, or take them off.</p>
-						<div class="sub-list">
-							{#each data.assignedSubs as sub (sub.id)}
-								<form method="POST" action="?/unassignSub" use:enhance>
-									<input type="hidden" name="subcontractorId" value={sub.id} />
-									<button type="submit" class="sub-row on" aria-pressed="true">
-										<span class="sub-mark" aria-hidden="true">✓</span>
-										<span class="sub-text">
-											<span class="sub-name">{sub.name}</span>
-											<span class="sub-meta">
-												<span class="sub-trade">{sub.trade ?? 'Trade not set'}</span>
-												<span class="tier" class:guest={sub.tier !== 'trusted'}>
-													{sub.tier === 'trusted' ? 'Trusted' : 'Guest'}
-												</span>
-											</span>
-										</span>
-									</button>
-								</form>
-							{/each}
-							{#each data.availableSubs as sub (sub.id)}
-								<form method="POST" action="?/assignSub" use:enhance>
-									<input type="hidden" name="subcontractorId" value={sub.id} />
-									<button type="submit" class="sub-row" aria-pressed="false">
-										<span class="sub-mark" aria-hidden="true">+</span>
-										<span class="sub-text">
-											<span class="sub-name">{sub.name}</span>
-											<span class="sub-meta">
-												<span class="sub-trade">{sub.trade ?? 'Trade not set'}</span>
-												<span class="tier" class:guest={sub.tier !== 'trusted'}>
-													{sub.tier === 'trusted' ? 'Trusted' : 'Guest'}
-												</span>
-											</span>
-										</span>
-									</button>
-								</form>
-							{/each}
-						</div>
+						<!-- The crew on this job (including staged adds), then a search box to
+						     pull more people in. The roster is never dumped wholesale — with a
+						     few dozen subs the old flat list buried the three assigned people
+						     under everyone else. -->
+						{#if data.assignedSubs.length === 0 && stagedAddSubs.length === 0}
+							<p class="editor-note">No one is on this job yet — search your roster below.</p>
+						{:else}
+							<p class="editor-note">
+								Tap a row to stage a change; nothing applies until you save.
+							</p>
+							<div class="sub-list">
+								{#each data.assignedSubs as sub (sub.id)}
+									{@render crewRow(sub, true)}
+								{/each}
+								{#each stagedAddSubs as sub (sub.id)}
+									{@render crewRow(sub, false)}
+								{/each}
+							</div>
+						{/if}
+
+						{#if data.availableSubs.length > 0}
+							<div class="crew-add">
+								<span class="crew-add-icon" aria-hidden="true">🔍</span>
+								<input
+									class="crew-search"
+									type="search"
+									placeholder="Add crew — search name or trade…"
+									aria-label="Search your roster to add crew"
+									bind:value={subQuery}
+								/>
+							</div>
+							{#if subQuery.trim()}
+								{#if subMatches.length === 0}
+									<p class="crew-none">No one in your roster matches “{subQuery.trim()}”.</p>
+								{:else}
+									<div class="sub-list">
+										{#each subMatches.slice(0, SUB_RESULT_LIMIT) as sub (sub.id)}
+											{@render crewRow(sub, false)}
+										{/each}
+									</div>
+									{#if subMatches.length > SUB_RESULT_LIMIT}
+										<p class="crew-none">
+											+{subMatches.length - SUB_RESULT_LIMIT} more — keep typing to narrow it down.
+										</p>
+									{/if}
+								{/if}
+							{/if}
+						{/if}
 					{/if}
 				{:else if tab === 'files'}
 					{@render filesPanel()}
@@ -865,7 +980,7 @@
 	.primary-btn {
 		padding: 0.55rem 1rem;
 		border-radius: 999px;
-		border: 2px solid var(--pop-line);
+		border: none;
 		/* Pinned dark: yellow stays light in both themes. */
 		background: var(--yellow);
 		color: #14171c;
@@ -1106,10 +1221,6 @@
 		grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
 		gap: 0.5rem;
 	}
-	/* Each form wraps one row; contents keeps the button itself as the grid item. */
-	.sub-list form {
-		display: contents;
-	}
 	.sub-row {
 		display: flex;
 		align-items: center;
@@ -1157,6 +1268,93 @@
 		background: var(--yellow);
 		border-color: var(--yellow-deep);
 		color: #14171c;
+	}
+	/* A staged, uncommitted toggle: dashed amber so it clearly isn't saved yet.
+	   The header's "✓ Save N" is the other half of the signal. */
+	.sub-row.pending {
+		border-style: dashed;
+		border-color: var(--yellow-deep);
+	}
+
+	/* The add box: the roster only ever appears as search matches under it. */
+	.crew-add {
+		position: relative;
+		margin-top: 0.35rem;
+	}
+	.crew-add-icon {
+		position: absolute;
+		left: 0.7rem;
+		top: 50%;
+		transform: translateY(-50%);
+		font-size: 0.85rem;
+		color: #8c959f;
+		pointer-events: none;
+	}
+	.crew-search {
+		width: 100%;
+		box-sizing: border-box;
+		padding: 0.55rem 0.75rem 0.55rem 2.2rem;
+		border: 1px solid var(--field-border);
+		border-radius: 10px;
+		background: var(--field-bg);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.92rem;
+	}
+	.crew-search:focus {
+		outline: none;
+		border-color: var(--yellow-deep);
+		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		background: var(--field-bg-focus);
+	}
+	.crew-none {
+		margin: 0;
+		font-size: 0.82rem;
+		color: var(--fg-muted);
+	}
+
+	/* The header commit pair: discard as quiet text, save as a compact yellow
+	   pill carrying the staged count. */
+	.subs-commit {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		flex-shrink: 0;
+	}
+	.subs-save {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.4rem 0.85rem;
+		border: none;
+		border-radius: 999px;
+		background: var(--yellow);
+		color: #14171c;
+		font-family: inherit;
+		font-size: 0.85rem;
+		font-weight: 700;
+		cursor: pointer;
+		box-shadow: var(--pop-shadow-sm);
+	}
+	.subs-save:hover {
+		background: var(--yellow-deep);
+	}
+	.subs-save:focus-visible {
+		outline: 2px solid var(--fg);
+		outline-offset: 2px;
+	}
+	.sub-discard {
+		border: none;
+		background: none;
+		padding: 0.45rem 0.6rem;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.85rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.sub-discard:hover {
+		color: var(--fg);
 	}
 	.sub-text {
 		display: flex;
@@ -1255,15 +1453,15 @@
 	.editor-save {
 		padding: 0.5rem 1rem;
 		border-radius: 999px;
-		border: 2px solid var(--pop-line);
+		border: none;
 		background: var(--yellow);
 		/* Pinned dark: yellow stays light in both themes. */
 		color: #14171c;
 		font-family: inherit;
-		font-size: 0.8rem;
-		font-weight: 800;
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
+		font-size: 0.9rem;
+		font-weight: 700;
+		text-transform: none;
+		letter-spacing: normal;
 		cursor: pointer;
 		box-shadow: var(--pop-shadow-sm);
 	}

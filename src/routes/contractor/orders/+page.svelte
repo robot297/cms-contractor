@@ -67,9 +67,20 @@
 	// The project of the order the composer was opened from, so `{{project}}`
 	// resolves in email templates.
 	let contactProject = $state<string | null>(null);
-	function openContact(id: string | null, project: string | null = null) {
+	// And the order itself, so a successful send is recorded on its timeline.
+	let contactOrderId = $state<string | null>(null);
+	// The customer's contact details (email/phone/address/notes), folded behind the
+	// ⓘ next to their name — composing is the dialog's job; the details are lookup.
+	let contactInfoOpen = $state(false);
+	function openContact(
+		id: string | null,
+		project: string | null = null,
+		orderId: string | null = null
+	) {
 		customerDetail = id ? (data.customers.find((c) => c.id === id) ?? null) : null;
 		contactProject = project;
+		contactOrderId = orderId;
+		contactInfoOpen = false;
 		if (customerDetail) customerDialog?.showModal();
 	}
 
@@ -352,7 +363,7 @@
 							type="button"
 							title="Contact customer"
 							aria-label="Contact customer"
-							onclick={() => openContact(order.customerId, order.projectName)}
+							onclick={() => openContact(order.customerId, order.projectName, order.id)}
 							class="icon-btn"
 							style={iconBtn}>✉️</button
 						>
@@ -432,7 +443,33 @@
 		{@const c = customerDetail}
 		<div style="display: grid; gap: 0.7rem; padding: 1.25rem;">
 			<div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
-				<h2 style="margin: 0; font-size: 1.1rem;">{c.name}</h2>
+				<div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0;">
+					<h2 style="margin: 0; font-size: 1.1rem; overflow-wrap: anywhere;">{c.name}</h2>
+					<button
+						type="button"
+						class="info-btn"
+						class:on={contactInfoOpen}
+						title="Customer details"
+						aria-label="Customer details"
+						aria-expanded={contactInfoOpen}
+						onclick={() => (contactInfoOpen = !contactInfoOpen)}
+					>
+						<svg
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2.2"
+							stroke-linecap="round"
+							aria-hidden="true"
+						>
+							<circle cx="12" cy="12" r="10" />
+							<line x1="12" y1="11" x2="12" y2="16.5" />
+							<circle cx="12" cy="7.5" r="0.5" fill="currentColor" />
+						</svg>
+					</button>
+				</div>
 				<button
 					type="button"
 					onclick={() => customerDialog?.close()}
@@ -440,26 +477,30 @@
 					>✕</button
 				>
 			</div>
+			{#if contactInfoOpen}
+				<div class="contact-info" transition:slide={{ duration: 180 }}>
+					<div style="word-break: break-word;">
+						<span style="color: #57606a;">Email:</span>
+						{c.email}
+					</div>
+					{#if c.phone}<div><span style="color: #57606a;">Phone:</span> {c.phone}</div>{/if}
+					{#if c.address}<div><span style="color: #57606a;">Address:</span> {c.address}</div>{/if}
+					{#if c.notes}
+						<div style="margin-top: 0.3rem; color: #57606a; white-space: pre-wrap;">{c.notes}</div>
+					{/if}
+					<a
+						href={resolve('/contractor/customers')}
+						style="justify-self: start; font-size: 0.85rem; color: #0969da;"
+						>Manage in customers →</a
+					>
+				</div>
+			{/if}
 			<ContactComposer
 				customer={c}
 				project={contactProject}
+				orderId={contactOrderId}
 				onsent={() => customerDialog?.close()}
 			/>
-			<div style="display: grid; gap: 0.4rem; font-size: 0.9rem;">
-				<div style="word-break: break-word;">
-					<span style="color: #57606a;">Email:</span>
-					{c.email}
-				</div>
-				{#if c.phone}<div><span style="color: #57606a;">Phone:</span> {c.phone}</div>{/if}
-				{#if c.address}<div><span style="color: #57606a;">Address:</span> {c.address}</div>{/if}
-				{#if c.notes}
-					<div style="margin-top: 0.3rem; color: #57606a; white-space: pre-wrap;">{c.notes}</div>
-				{/if}
-			</div>
-			<a
-				href={resolve('/contractor/customers')}
-				style="justify-self: start; font-size: 0.85rem; color: #0969da;">Manage in customers →</a
-			>
 		</div>
 	{/if}
 </dialog>
@@ -576,7 +617,7 @@
 		gap: 0.45rem;
 		padding: 0.4rem 0.8rem;
 		border-radius: 999px;
-		border: 2px solid var(--pop-line);
+		border: 1px solid var(--line-strong);
 		background: var(--surface);
 		color: var(--fg);
 		font-size: 0.85rem;
@@ -671,7 +712,7 @@
 	.primary-btn {
 		padding: 0.5rem 1rem;
 		border-radius: 999px;
-		border: 2px solid var(--pop-line);
+		border: none;
 		/* Pinned dark: yellow stays light in both themes. */
 		background: var(--yellow);
 		color: #14171c;
@@ -737,6 +778,51 @@
 		background: var(--surface-sunken);
 		border-color: var(--line);
 		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+	}
+
+	/* ------------------------------------------------- Contact dialog details
+	   The ⓘ beside the customer's name; the detail rows it reveals sit in a quiet
+	   inset panel above the composer. */
+	.info-btn {
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.7rem;
+		height: 1.7rem;
+		padding: 0;
+		border: 1px solid var(--line-strong);
+		border-radius: 999px;
+		background: none;
+		color: var(--fg-muted);
+		cursor: pointer;
+		transition:
+			color 0.12s ease,
+			background 0.12s ease,
+			border-color 0.12s ease;
+	}
+	.info-btn:hover {
+		color: var(--fg);
+		background: var(--surface-sunken);
+	}
+	.info-btn.on,
+	.info-btn.on:hover {
+		background: var(--yellow);
+		border-color: var(--yellow);
+		color: #14171c;
+	}
+	.info-btn:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+	}
+	.contact-info {
+		display: grid;
+		gap: 0.4rem;
+		font-size: 0.9rem;
+		padding: 0.7rem 0.8rem;
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		background: var(--surface-sunken);
 	}
 
 	/* Shown in the new-order modal when a trial has run out of order slots. */
@@ -824,14 +910,18 @@
 	.no-cancel:hover {
 		color: var(--fg);
 	}
+	/* Same treatment as the page's other primary actions: yellow fill, no border.
+	   (This was the page's one leftover blue button — the class escapes the
+	   inline-style interception in app.css.) */
 	.no-submit {
-		border: 1px solid #0969da;
-		background: #0969da;
-		color: #fff;
-		font-weight: 600;
+		border: none;
+		background: var(--yellow);
+		color: #14171c;
+		font-weight: 700;
+		box-shadow: var(--pop-shadow-sm);
 	}
 	.no-submit:hover {
-		background: #0860c4;
+		background: var(--yellow-deep);
 	}
 	.neworder-actions button:focus-visible {
 		outline: 2px solid var(--yellow);
@@ -900,7 +990,7 @@
 		min-height: 2.75rem;
 		padding: 0.55rem 0.7rem;
 		border-radius: 10px;
-		border: 1.5px solid var(--field-border);
+		border: 1px solid var(--field-border);
 		background: var(--field-bg);
 		color: var(--fg);
 		font-family: inherit;
@@ -912,7 +1002,8 @@
 	.field:focus-visible {
 		outline: none;
 		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.28);
+		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		background: var(--field-bg-focus);
 	}
 	/* Native select, restyled: keeps the OS picker on mobile (the right control on
 	   a phone) while losing the default chrome. The chevron is a data-URI so it

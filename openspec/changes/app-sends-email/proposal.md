@@ -40,12 +40,14 @@ per-template HTML bodies, inbound mail, and delivery/bounce webhooks. Each is ad
 ## Capabilities
 
 ### New Capabilities
+
 - `email-delivery`: sending a composed message through a transactional provider — the provider
   interface and its configured-or-degrade rule, sender identity and reply routing, the multipart
   message, failure handling and the `mailto:` fallback, and the Order timeline record of a send.
 
 ### Modified Capabilities
-- `email-templates`: *Template Selection in the Contact Composer* currently specifies that the
+
+- `email-templates`: _Template Selection in the Contact Composer_ currently specifies that the
   contractor edits the subject and body "before the email client opens" — the composer's send path is
   now a server action, and the email client only opens on the fallback path. The requirement's
   substance (pick a template, placeholders resolved, still editable) is unchanged.

@@ -50,6 +50,21 @@
 		{#if form?.message}
 			<p class="error">{form.message}</p>
 		{/if}
+		{#if form?.verificationSent}
+			<p class="verify-note" role="status">
+				Check your inbox — a verification link is on its way to <strong>{form.email}</strong>. The
+				account stays locked until it's clicked.
+			</p>
+		{/if}
+		<!-- The unverified-sign-in refusal is the one failure that carries the email
+		     back (so the resend form knows who to mail); keyed on that rather than
+		     its own flag, which the generated ActionData union fails to carry. -->
+		{#if form?.email && !form.verificationSent}
+			<form method="POST" action="?/resendVerification" use:enhance>
+				<input type="hidden" name="email" value={form.email} />
+				<button type="submit" class="resend">Resend the verification email</button>
+			</form>
+		{/if}
 
 		{#if mode === 'signIn'}
 			<form method="POST" action="?/signIn" use:enhance class="fields">
@@ -176,10 +191,10 @@
 		margin: 0 auto;
 		padding: 0.45rem 1.1rem;
 		border-radius: 999px;
-		/* Brand yellow is light in both themes, so border + label stay pinned dark. */
+		/* Brand yellow is light in both themes, so the label stays pinned dark. */
 		background: #ffcc00;
 		color: #14171c;
-		border: 2px solid #14171c;
+		border: none;
 		box-shadow: var(--pop-shadow-sm);
 		font-size: 0.75rem;
 	}
@@ -233,12 +248,11 @@
 		color: var(--fg);
 	}
 	/* Selected tab takes the app's brand-yellow pill — same active-state language
-	   as the nav. Border/label pinned dark: yellow is light in both themes. */
+	   as the nav. Label pinned dark: yellow is light in both themes. */
 	.tabs button.active {
 		background: var(--yellow);
-		border-color: #14171c;
 		color: #14171c;
-		box-shadow: 2px 2px 0 #14171c;
+		box-shadow: 0 1px 3px rgba(27, 31, 36, 0.18);
 	}
 	.tabs button:focus-visible {
 		outline: 2px solid var(--fg);
@@ -263,11 +277,11 @@
 	.fields label:focus-within {
 		color: var(--fg);
 	}
-	/* Hard-outlined field, matching the bordered controls elsewhere in the app —
-	   the outline does the work, so the box reads at a glance in either theme. */
+	/* Hairline field, matching the app's field recipe — the sunken fill and the
+	   focus ring do the work rather than a heavy outline. */
 	.fields input {
 		padding: 0.7rem 0.75rem;
-		border: 2.5px solid var(--field-line);
+		border: 1px solid var(--field-line);
 		border-radius: 10px;
 		font-size: 0.95rem;
 		font-weight: 600;
@@ -287,14 +301,14 @@
 		outline: none;
 		background: var(--field-fill-lift);
 		border-color: var(--field-line-focus);
-		box-shadow: 0 0 0 3px var(--yellow);
+		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.25);
 	}
 	/* The submit action wears the brand: safety yellow with the pinned dark border
 	   and label, same as every other primary action in the app. --pop-shadow keeps
 	   the hard offset in light and softens to a blur in dark. */
 	.primary {
 		padding: 0.6rem;
-		border: 2px solid #14171c;
+		border: none;
 		border-radius: 10px;
 		background: var(--yellow);
 		color: #14171c;
@@ -310,6 +324,38 @@
 		color: #cf222e;
 		font-size: 0.88rem;
 	}
+	/* "Check your inbox" — good news, so green rather than the error red above. */
+	.verify-note {
+		margin: 0;
+		padding: 0.6rem 0.7rem;
+		border: 1px solid #b7e0c4;
+		border-radius: 10px;
+		background: #eaf6ee;
+		color: #14532d;
+		font-size: 0.85rem;
+		line-height: 1.5;
+	}
+	:global(:root[data-theme='dark']) .verify-note {
+		background: #14301f;
+		border-color: #2f6b45;
+		color: #b7ecc6;
+	}
+	/* The way through an unverified refusal: a quiet link-shaped action. */
+	.resend {
+		width: 100%;
+		padding: 0.4rem;
+		border: none;
+		background: none;
+		color: var(--fg);
+		font: inherit;
+		font-size: 0.85rem;
+		font-weight: 700;
+		text-decoration: underline;
+		text-decoration-color: var(--yellow-deep);
+		text-decoration-thickness: 2px;
+		text-underline-offset: 3px;
+		cursor: pointer;
+	}
 	/* Secondary sticker: outlined rather than filled, so it stays below the submit
 	   button in the hierarchy while still looking like the same family of control. */
 	.github {
@@ -319,7 +365,7 @@
 		justify-content: center;
 		gap: 0.45rem;
 		padding: 0.5rem;
-		border: 2px solid var(--pop-line);
+		border: 1px solid var(--line-strong);
 		border-radius: 10px;
 		background: var(--surface);
 		color: var(--fg);

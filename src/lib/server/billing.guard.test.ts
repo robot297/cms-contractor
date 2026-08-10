@@ -45,6 +45,7 @@ describe('contractor writes are billing-guarded', () => {
 		'addAttachment',
 		'deleteAttachment',
 		'addOrderNote',
+		'recordEmailSent',
 		'deleteOrder',
 		'createInvite',
 		'resendInvite',

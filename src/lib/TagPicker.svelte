@@ -102,7 +102,7 @@
 	   yellow stays light in both themes. */
 	.chip.on {
 		background: var(--yellow);
-		border-color: #14171c;
+		border-color: transparent;
 		color: #14171c;
 	}
 	.chip:focus-visible {

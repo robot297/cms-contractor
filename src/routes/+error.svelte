@@ -108,11 +108,11 @@
 		padding: 2rem 1rem;
 	}
 
-	/* Pop-art panel: hard border + offset shadow, same language as the app's cards. */
+	/* Clean elevated panel, same language as the app's cards. */
 	.panel {
 		width: min(34rem, 100%);
 		background: var(--surface);
-		border: 3px solid var(--pop-line);
+		border: 1px solid var(--line);
 		border-radius: 18px;
 		box-shadow: var(--pop-shadow-lg);
 		padding: 2rem 1.6rem 1.6rem;
@@ -131,7 +131,7 @@
 		padding: 0.35rem 1rem;
 		background: var(--yellow);
 		color: #14171c;
-		border: 3px solid var(--pop-line);
+		border: none;
 		border-radius: 999px;
 		box-shadow: var(--pop-shadow-sm);
 		font-size: 2rem;
@@ -189,9 +189,9 @@
 		display: inline-block;
 		padding: 0.55rem 1.1rem;
 		border-radius: 999px;
-		border: 2.5px solid var(--pop-line);
+		border: 1px solid var(--line-strong);
 		font: inherit;
-		font-weight: 800;
+		font-weight: 700;
 		font-size: 0.9rem;
 		cursor: pointer;
 		text-decoration: none;
@@ -203,15 +203,16 @@
 	.go {
 		background: var(--yellow);
 		color: #14171c;
+		border-color: transparent;
 	}
 	.alt {
 		background: var(--surface);
 		color: var(--fg);
 	}
-	/* Press the button into its own shadow — the app's hard-shadow idiom. */
+	/* Settle on press. */
 	.go:active,
 	.alt:active {
-		transform: translate(2px, 2px);
+		transform: translateY(1px);
 		box-shadow: none;
 	}
 	.go:focus-visible,

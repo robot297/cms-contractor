@@ -246,8 +246,23 @@
 		background: var(--hero-bg);
 		overflow: hidden;
 	}
+	/* Seam blur: the hero's glows end wherever the viewport cuts them, which drew
+	   a hard line against the features band. This strip fades whatever the hero is
+	   doing into the next section's exact surface, so the two read as one page. */
+	.hero::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: clamp(90px, 18vh, 170px);
+		background: linear-gradient(180deg, transparent, var(--surface-sunken));
+		pointer-events: none;
+	}
 	.hero-inner {
 		position: relative;
+		/* Above the seam fade, which paints after it in the stacking order. */
+		z-index: 1;
 		max-width: 780px;
 		text-align: center;
 		color: var(--hero-fg);
@@ -355,8 +370,15 @@
 	/* ---------- Features ---------- */
 	.features {
 		padding: clamp(3.5rem, 8vw, 6rem) clamp(1rem, 5vw, 3rem);
-		background: var(--surface-sunken);
-		border-bottom: 1px solid var(--line);
+		/* Holds the sunken tone through the cards, then eases into the closing
+		   section's surface — a gradient hand-off instead of the old hairline,
+		   which split the page into three obvious slabs. */
+		background: linear-gradient(
+			180deg,
+			var(--surface-sunken) 0%,
+			var(--surface-sunken) 72%,
+			var(--surface) 100%
+		);
 	}
 	.features-inner {
 		max-width: 1080px;
@@ -395,7 +417,7 @@
 			color-mix(in srgb, var(--card-accent) 12%, var(--panel)),
 			color-mix(in srgb, var(--card-accent) 4%, var(--panel))
 		);
-		border: 2.5px solid color-mix(in srgb, var(--card-accent) 40%, var(--panel-line));
+		border: 1px solid color-mix(in srgb, var(--card-accent) 45%, var(--panel-line));
 		border-radius: 18px;
 		padding: 1.8rem 1.5rem 1.5rem;
 		box-shadow: var(--pop-shadow-sm);
@@ -474,7 +496,7 @@
 			color-mix(in srgb, var(--card-accent) 12%, var(--panel)),
 			color-mix(in srgb, var(--card-accent) 4%, var(--panel))
 		);
-		border: 2.5px solid color-mix(in srgb, var(--card-accent) 40%, var(--panel-line));
+		border: 1px solid color-mix(in srgb, var(--card-accent) 45%, var(--panel-line));
 		border-radius: 18px;
 		box-shadow: var(--pop-shadow-sm);
 	}

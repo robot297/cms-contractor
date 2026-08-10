@@ -4,6 +4,7 @@ import { env } from '$env/dynamic/private';
 import { auth } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { checkDatabaseConnection, runMigrations } from '$lib/server/db';
+import { ensureDevLogin } from '$lib/server/dev-login.server';
 
 export const init: ServerInit = async () => {
 	if (building) return;
@@ -21,6 +22,10 @@ export const init: ServerInit = async () => {
 		}
 	}
 	await checkDatabaseConnection();
+	// Local convenience only (SEED_DEV_LOGIN=true): a pre-verified contractor
+	// login, so a fresh database doesn't demand a real email-verification loop
+	// before you can look at anything. No-op unless the flag is set.
+	await ensureDevLogin();
 };
 
 const handleBetterAuth: Handle = async ({ event, resolve }) => {

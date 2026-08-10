@@ -27,6 +27,7 @@ import {
 } from '$lib/server/subcontractor.server';
 import type { Actions, PageServerLoad } from './$types';
 import { withBillingErrors } from '$lib/server/billing.server';
+import { sendEmailAction } from '$lib/server/email-action.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -54,6 +55,13 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 // Wrapped so a billing refusal from any guarded write returns a 402 the form
 // can render, rather than a 500. See withBillingErrors.
 export const actions: Actions = withBillingErrors({
+	/**
+	 * Sending a composed message. Shared by every surface that mounts the
+	 * composer — the implementation lives in one file so the rule about when a
+	 * send is recorded on a timeline can't drift between pages.
+	 */
+	sendEmail: sendEmailAction,
+
 	updateStatus: async ({ request, locals, params }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
@@ -143,21 +151,31 @@ export const actions: Actions = withBillingErrors({
 		return { success: true };
 	},
 
-	assignSub: async ({ request, locals, params }) => {
+	/**
+	 * Apply a staged set of crew changes in one commit. The picker collects
+	 * toggles client-side and only posts on an explicit save: every assignment
+	 * writes to the job's history, so a tap should never commit by itself. One
+	 * batched action is also the single seam to hang subcontractor notifications
+	 * on later — one "you're on this job" per save, not one per tap.
+	 */
+	saveSubs: async ({ request, locals, params }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
-		const subcontractorId = form.get('subcontractorId')?.toString() ?? '';
-		if (!subcontractorId) return fail(400, { message: 'A subcontractor is required' });
-		await assignSubcontractor(user.id, params.id, subcontractorId);
-		return { success: true };
-	},
-
-	unassignSub: async ({ request, locals, params }) => {
-		const user = requireContractor(locals);
-		const form = await request.formData();
-		const subcontractorId = form.get('subcontractorId')?.toString() ?? '';
-		if (!subcontractorId) return fail(400, { message: 'A subcontractor is required' });
-		await unassignSubcontractor(user.id, params.id, subcontractorId);
+		const ids = (field: string) =>
+			(form.get(field)?.toString() ?? '')
+				.split(',')
+				.map((s) => s.trim())
+				.filter(Boolean);
+		const assign = ids('assign');
+		const unassign = ids('unassign');
+		if (assign.length === 0 && unassign.length === 0)
+			return fail(400, { message: 'No crew changes to save' });
+		// Sequential on purpose: each call re-checks ownership and writes its own
+		// timeline entry, and the lists are a handful of people, not thousands.
+		for (const subcontractorId of assign)
+			await assignSubcontractor(user.id, params.id, subcontractorId);
+		for (const subcontractorId of unassign)
+			await unassignSubcontractor(user.id, params.id, subcontractorId);
 		return { success: true };
 	},
 

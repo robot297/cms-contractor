@@ -46,12 +46,12 @@ recording a send is an insert, not a migration.
 returning a discriminated result rather than throwing, plus `isEmailConfigured()` mirroring
 `isBillingConfigured()`. It is the only file that imports `resend` or names a provider type.
 
-*Why:* the ADR asks for exactly this, and Stripe already proves the shape in this codebase. A result
+_Why:_ the ADR asks for exactly this, and Stripe already proves the shape in this codebase. A result
 type rather than an exception because "the provider failed" is an expected outcome the composer must
 render, not an exceptional one — making callers wrap every send in `try`/`catch` invites a caller who
 forgets to.
 
-*Alternative considered:* calling Resend's SDK directly from the server action. Rejected — it puts a
+_Alternative considered:_ calling Resend's SDK directly from the server action. Rejected — it puts a
 provider type in the action's signature, and the ADR's one-file-swap promise dies the moment a second
 file imports the SDK.
 
@@ -60,7 +60,7 @@ file imports the SDK.
 `isEmailConfigured()` is `Boolean(ENV.RESEND_API_KEY && ENV.EMAIL_FROM)`. Both `@optional`, both blank
 by default, matching how `STRIPE_SECRET_KEY` is left blank in development.
 
-*Why:* a key without a verified from-address produces a provider rejection on every send — a broken
+_Why:_ a key without a verified from-address produces a provider rejection on every send — a broken
 feature that looks configured. Treating partial configuration as unconfigured turns a runtime failure
 into a fallback that already works.
 
@@ -69,10 +69,10 @@ into a fallback that already works.
 Email posts to a `?/sendEmail` action via `use:enhance`, so the composed message survives a failure and
 the fallback stays available client-side. Text and Call keep `window.location`.
 
-*Why:* only Email has a server component. Routing `sms:`/`tel:` through the server would add a
+_Why:_ only Email has a server component. Routing `sms:`/`tel:` through the server would add a
 round-trip to reach a handler the browser can invoke directly.
 
-*Alternative considered:* a `POST /api/email/send` endpoint instead of a form action. Rejected —
+_Alternative considered:_ a `POST /api/email/send` endpoint instead of a form action. Rejected —
 progressive enhancement comes free with an action, and the composer is already inside route trees that
 own their data.
 
@@ -82,7 +82,7 @@ The action lives at `src/routes/contractor/+layout.server.ts`'s route (or a shar
 re-export) so all five call sites reach the same handler, rather than each route growing its own copy.
 The composer posts `customerEmail`, `customerName`, `subject`, `body`, and an optional `orderId`.
 
-*Why:* the composer is one component; it should have one server counterpart. Five copies of a send
+_Why:_ the composer is one component; it should have one server counterpart. Five copies of a send
 action is five places for the timeline rule to drift.
 
 ### The server recomposes; it does not trust the posted rendering
@@ -90,7 +90,7 @@ action is five places for the timeline rule to drift.
 The action re-runs `composeEmail` and `renderEmail` server-side from the posted subject/body plus the
 contractor's own settings loaded from the database. The client posts only what the contractor typed.
 
-*Why:* the signature, business name, and branding are the contractor's record, not form input — posting
+_Why:_ the signature, business name, and branding are the contractor's record, not form input — posting
 them would let a crafted request send mail under another contractor's name from the product's verified
 domain. Recomposing server-side is also what keeps the preview and the sent mail identical, since both
 call the same `renderEmail`.
@@ -100,14 +100,14 @@ call the same `renderEmail`.
 Before writing a timeline entry the action confirms the Order belongs to the signed-in contractor.
 An `orderId` that fails the check is treated as absent: the mail still sends, no entry is written.
 
-*Why:* `orderId` arrives from a form field. Writing to a timeline on the strength of that is a
+_Why:_ `orderId` arrives from a form field. Writing to a timeline on the strength of that is a
 cross-contractor write.
 
 ### Reply-To is the contractor's account email
 
 Read from the signed-in `user.email`. No new settings field.
 
-*Why:* it is already correct for every contractor and needs no migration, no UI, and no explanation. A
+_Why:_ it is already correct for every contractor and needs no migration, no UI, and no explanation. A
 separate `replyToEmail` on `contractor_settings` is the additive upgrade if someone asks for an office
 inbox; nobody has.
 
@@ -116,7 +116,7 @@ inbox; nobody has.
 Every composer send goes through the provider regardless of who the recipient is. Only the
 `orderId`-carrying call sites produce a timeline entry.
 
-*Why:* the alternative gives one button two behaviours depending on which page it is on, which is a bug
+_Why:_ the alternative gives one button two behaviours depending on which page it is on, which is a bug
 report waiting to be filed. The ADR's timeline reasoning is Order-scoped, not Customer-scoped, and the
 `orderId` presence check already expresses that exactly.
 
@@ -124,7 +124,7 @@ report waiting to be filed. The ADR's timeline reasoning is Order-scoped, not Cu
 
 `title` names the send ("Emailed Dana"), `detail` carries the subject line. `authorRole: 'contractor'`.
 
-*Why:* it reuses the existing `timeline_entry` vocabulary with no migration. Not `internal` because the
+_Why:_ it reuses the existing `timeline_entry` vocabulary with no migration. Not `internal` because the
 customer receiving the mail already knows it was sent — hiding it from their portal would make the
 portal's history disagree with their inbox.
 

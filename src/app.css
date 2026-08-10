@@ -1,6 +1,7 @@
 /* ============================================================
-   Contractor CRM — "Job Site" pop-art theme
-   Safety yellow + black + white borders, hard shadows.
+   Contractor CRM — "Job Site" theme
+   Safety-yellow accent on clean surfaces: hairline borders and
+   soft elevation rather than the original hard pop-art chrome.
    Layered over the app's existing inline styles by keying on
    the color literals those styles already use.
    ============================================================ */
@@ -12,9 +13,11 @@
 	--paper: #fffdf5;
 	--muted: #4b5159;
 	--danger: #e5301a;
-	--pop-shadow: 4px 4px 0 var(--ink);
-	--pop-shadow-lg: 6px 6px 0 var(--ink);
-	--pop-shadow-sm: 2px 2px 0 var(--ink);
+	/* Once hard `4px 4px 0` offset blocks; now soft elevation. The names stay so
+	   every component keeps working — only the rendering modernized. */
+	--pop-shadow: 0 1px 2px rgba(27, 31, 36, 0.06), 0 4px 14px rgba(27, 31, 36, 0.1);
+	--pop-shadow-lg: 0 8px 24px rgba(27, 31, 36, 0.16);
+	--pop-shadow-sm: 0 1px 2px rgba(27, 31, 36, 0.08), 0 2px 6px rgba(27, 31, 36, 0.06);
 
 	/* Semantic surface tokens — components reference these in their dark blocks so
 	   the whole app shares one dark palette. Light values here; dark below. */
@@ -25,12 +28,15 @@
 	--fg-muted: #57606a;
 	--line: #e2e6ea;
 	--line-strong: #d0d7de;
-	--field-bg: #ffffff;
-	--field-border: #d9dde3;
+	/* Fields sit a shade below the card they're on — a quietly sunken well rather
+	   than white-on-white — and lift back to white when focused. */
+	--field-bg: #f9fafb;
+	--field-bg-focus: #ffffff;
+	--field-border: #dcdfe4;
 	--card-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 4px 12px rgba(27, 31, 36, 0.06);
-	/* The bold pop-art border: black in light, a soft grey in dark. Routing the
-	   interception rules through this keeps light identical while dark just works. */
-	--pop-line: #111111;
+	/* Structural border for intercepted elements. Used to be solid black — the
+	   "heavy border" look — now a hairline grey in both themes. */
+	--pop-line: #d0d7de;
 
 	color-scheme: light;
 }
@@ -55,6 +61,7 @@
 	--line: #333b45;
 	--line-strong: #3d4650;
 	--field-bg: #14171c;
+	--field-bg-focus: #171b21;
 	--field-border: #363d47;
 	--pop-line: #3d4650;
 	/* The pop-art hard offset shadows are drawn in --ink, which is light in dark —
@@ -113,17 +120,9 @@
 :root[data-theme='dark'] [style*='1px solid #eaeef2'] {
 	border-color: #333b45 !important;
 }
-/* Hazard stripe: the yellow/light stripes are painfully bright on a dark UI, so
-   dim to a muted amber over near-black. */
+/* Brand accent line: full yellow is glaring on a dark UI, so dim to amber. */
 :root[data-theme='dark'] .hazard {
-	background: repeating-linear-gradient(
-		-45deg,
-		#7a6100 0,
-		#7a6100 16px,
-		#15181d 16px,
-		#15181d 32px
-	);
-	border-color: #2a2f37;
+	background: linear-gradient(90deg, #6d5700, #8a6f00 25%, #8a6f00 75%, #6d5700);
 }
 
 /* Icon buttons: a raised dark surface instead of bright white. */
@@ -192,10 +191,11 @@ h3 {
 }
 
 h1 {
-	/* Chunky yellow highlight behind the page title */
+	/* Yellow highlight behind the page title — borderless now, floating on soft
+	   elevation instead of sitting in a black frame. */
 	display: inline-block;
 	background: var(--yellow);
-	border: 3px solid var(--ink);
+	color: #14171c;
 	border-radius: 10px;
 	padding: 0.15em 0.5em;
 	box-shadow: var(--pop-shadow);
@@ -245,48 +245,49 @@ summary,
 	-webkit-tap-highlight-color: transparent;
 }
 
-/* Primary (was blue fill) → safety-yellow sticker button. Text/border pinned dark
-   (#14171c) rather than var(--ink): yellow is light in both themes, so its text
-   must always be dark — var(--ink) would flip light-on-yellow in dark mode. */
+/* Primary (was blue fill) → safety-yellow button. Borderless: the fill is the
+   emphasis, with soft elevation and a gentle lift on hover instead of the old
+   black frame + hard offset shadow. Text pinned dark (#14171c) rather than
+   var(--ink): yellow is light in both themes, so its text must always be dark. */
 button[style*='background: #0969da'],
 a[style*='background: #0969da'] {
 	background: var(--yellow) !important;
 	color: #14171c !important;
-	border: 2.5px solid #14171c !important;
-	box-shadow: var(--pop-shadow);
-	font-weight: 800 !important;
-	text-transform: uppercase;
-	letter-spacing: 0.01em;
+	border: none !important;
+	box-shadow: var(--pop-shadow-sm);
+	font-weight: 700 !important;
 	transition:
-		transform 0.05s ease,
-		box-shadow 0.05s ease;
+		transform 0.12s ease,
+		box-shadow 0.12s ease,
+		background 0.12s ease;
 }
 button[style*='background: #0969da']:hover,
 a[style*='background: #0969da']:hover {
-	transform: translate(-1px, -1px);
-	box-shadow: var(--pop-shadow-lg);
+	background: var(--yellow-deep) !important;
+	transform: translateY(-1px);
+	box-shadow: var(--pop-shadow);
 }
 button[style*='background: #0969da']:active,
 a[style*='background: #0969da']:active {
-	transform: translate(2px, 2px);
+	transform: translateY(0);
 	box-shadow: none;
 }
 
-/* Secondary / pill (light-gray fill) → surface with a bold outline. Surface + line
-   + shadow all come from tokens, so dark mode is automatic. */
+/* Secondary / pill (light-gray fill) → surface with a hairline outline. Surface +
+   line + shadow all come from tokens, so dark mode is automatic. */
 button[style*='background: #f6f8fa'],
 a[style*='background: #f6f8fa'] {
 	background: var(--surface) !important;
 	color: var(--ink) !important;
-	border: 2px solid var(--pop-line) !important;
-	font-weight: 700 !important;
+	border: 1px solid var(--pop-line) !important;
+	font-weight: 600 !important;
 	box-shadow: var(--pop-shadow-sm);
 }
 
 /* Outline / ghost buttons that only borrow the blue for their border+text */
 button[style*='border: 1px solid #0969da'],
 a[style*='border: 1px solid #0969da'] {
-	border: 2px solid var(--pop-line) !important;
+	border: 1px solid var(--pop-line) !important;
 }
 
 /* ------------------------------------------------------------ Icon buttons */
@@ -355,14 +356,14 @@ a[style*='border: 1px solid #0969da'] {
 
 article[style*='#d0d7de'],
 section[style*='#d0d7de'] {
-	border: 3px solid var(--pop-line) !important;
-	box-shadow: var(--pop-shadow);
+	border: 1px solid var(--line) !important;
+	box-shadow: var(--card-shadow);
 	background: var(--surface);
 }
 
-/* Any remaining hairline-gray bordered block gets the bold outline */
+/* Any remaining hairline-gray bordered block keeps a clean hairline. */
 div[style*='border: 1px solid #d0d7de'] {
-	border: 2px solid var(--pop-line) !important;
+	border: 1px solid var(--pop-line) !important;
 }
 
 /* ------------------------------------------------------------ Inputs */
@@ -370,16 +371,29 @@ div[style*='border: 1px solid #d0d7de'] {
 input[style*='#d0d7de'],
 select[style*='#d0d7de'],
 textarea[style*='#d0d7de'] {
-	border: 2px solid var(--pop-line) !important;
+	border: 1px solid var(--field-border) !important;
 	background: var(--field-bg) !important;
 	color: var(--fg);
-	font-weight: 600;
 }
+/* Base polish for every text field: smooth focus transitions everywhere, without
+   touching per-component sizing or radius. */
+input,
+select,
+textarea {
+	transition:
+		border-color 0.15s ease,
+		box-shadow 0.15s ease,
+		background 0.15s ease;
+}
+/* The app-wide focus treatment: the brand yellow as a soft ring + a live border,
+   replacing the hard outline. Element-level (0,1,1), so any component rule keyed
+   on a class still wins — those are being aligned to the same recipe. */
 input:focus,
 select:focus,
 textarea:focus {
-	outline: 3px solid var(--yellow);
-	outline-offset: 1px;
+	outline: none;
+	border-color: var(--yellow-deep);
+	box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
 }
 
 /* ------------------------------------------------------------ Links & chips */
@@ -389,29 +403,29 @@ a[style*='color: #0969da']:not([style*='background']) {
 	color: var(--ink) !important;
 	text-decoration: underline;
 	text-decoration-color: var(--yellow-deep);
-	text-decoration-thickness: 3px;
-	text-underline-offset: 2px;
-	font-weight: 800;
+	text-decoration-thickness: 2px;
+	text-underline-offset: 3px;
+	font-weight: 700;
 }
 
-/* Tag chips (light-blue) → yellow. Text pinned dark (yellow is light in both themes). */
+/* Tag chips (light-blue) → yellow. Text pinned dark (yellow is light in both
+   themes); no border — the fill carries it. */
 span[style*='background: #ddf4ff'] {
 	background: var(--yellow) !important;
 	color: #14171c !important;
-	border: 1.5px solid #14171c;
+	border: none;
 	font-weight: 700;
 }
 
 /* ------------------------------------------------------------ Dialogs */
 
 dialog {
-	border: 3px solid var(--pop-line) !important;
-	box-shadow: 10px 10px 0 var(--pop-line) !important;
+	border: 1px solid var(--line) !important;
+	box-shadow: 0 18px 50px rgba(27, 31, 36, 0.22) !important;
 	background: var(--surface);
 	color: var(--fg);
 }
 :root[data-theme='dark'] dialog {
-	/* The hard offset shadow reads as a grey block in dark — soften it. */
 	box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65) !important;
 }
 dialog::backdrop {
@@ -438,8 +452,10 @@ dialog::backdrop {
 	right: 0;
 	top: calc(100% + 8px);
 	z-index: 100;
-	width: 300px;
-	max-width: 82vw;
+	/* Wide enough for the composer's normalized pane — 300px squeezed the subject
+	   line and made the body feel like a chat input rather than an email. */
+	width: 360px;
+	max-width: 86vw;
 	background: #f6f4fc;
 	border: 1px solid #cdbff0;
 	border-radius: 12px;
@@ -509,17 +525,18 @@ dialog::backdrop {
 	text-overflow: ellipsis;
 }
 
-/* ------------------------------------------------------------ Hazard stripe */
-
+/* ------------------------------------------------------ Brand accent line
+   Formerly the yellow/black hazard stripe (10px of repeating diagonals framed in
+   black). Now a slim yellow rule — the brand color as an accent, not a costume.
+   The class name stays so the layout needs no edits. */
 .hazard {
-	height: 10px;
-	background: repeating-linear-gradient(
-		-45deg,
-		var(--yellow) 0,
-		var(--yellow) 16px,
-		var(--ink) 16px,
-		var(--ink) 32px
+	height: 3px;
+	background: linear-gradient(
+		90deg,
+		var(--yellow-deep),
+		var(--yellow) 25%,
+		var(--yellow) 75%,
+		var(--yellow-deep)
 	);
-	border-top: 2px solid var(--ink);
-	border-bottom: 2px solid var(--ink);
+	border: none;
 }

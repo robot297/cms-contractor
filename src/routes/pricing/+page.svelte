@@ -170,7 +170,7 @@
 		justify-items: center;
 		text-align: center;
 		padding: 2rem 1.6rem;
-		border: 2.5px solid var(--pop-line);
+		border: 1px solid var(--line);
 		border-radius: 18px;
 		background: var(--surface);
 		box-shadow: var(--pop-shadow);
@@ -265,25 +265,25 @@
 		padding: 0.85rem;
 		text-align: center;
 		text-decoration: none;
-		border: 2.5px solid #14171c;
+		border: none;
 		border-radius: 10px;
 		background: #14171c;
 		color: #fff;
-		font-weight: 800;
+		font-weight: 700;
 		font-size: 0.9rem;
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
-		box-shadow: 4px 4px 0 var(--yellow);
+		box-shadow: var(--pop-shadow);
 		transition:
-			transform 0.06s ease,
-			box-shadow 0.06s ease;
+			transform 0.12s ease,
+			box-shadow 0.12s ease;
 	}
 	.btn:hover {
-		transform: translate(-1px, -1px);
-		box-shadow: 6px 6px 0 var(--yellow);
+		transform: translateY(-1px);
+		box-shadow: var(--pop-shadow-lg);
 	}
 	.btn:active {
-		transform: translate(2px, 2px);
+		transform: translateY(0);
 		box-shadow: none;
 	}
 	.fine {
@@ -296,7 +296,7 @@
 		max-width: 34rem;
 		margin: 2.5rem auto 0;
 		padding: 1.5rem 1.4rem;
-		border: 2px solid var(--line);
+		border: 1px solid var(--line);
 		border-radius: 16px;
 		background: var(--surface);
 	}

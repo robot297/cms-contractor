@@ -142,13 +142,99 @@ export type CoercedEnvSchema = {
    */
   BILLING_DEV_TOOLS?: string;
   
+  /**
+   * **RESEND_API_KEY** 🔐 _sensitive_  
+   * Email — Resend  
+   * Contractor messages to their customers are sent by the app, as branded HTML with  
+   * a plain-text alternative, rather than handed to the contractor's mail client  
+   * (docs/adr/0007-the-app-sends-email-mailto-is-the-fallback.md).  
+   *   
+   * Leave RESEND_API_KEY blank in development: the composer falls back to the  
+   * `mailto:` handoff it used before, every surface still works, and nothing reports  
+   * an error. Both variables must be set for sending to switch on — a key without a  
+   * verified from-address only produces a provider rejection on every send.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  RESEND_API_KEY?: string;
+  
+  /**
+   * **EMAIL_FROM**  
+   * The verified sending address, e.g. "hello@mail.example.com". Mail goes out from  
+   * this one address for every contractor, with the display name set to their  
+   * business name and Reply-To set to their own email, so a customer hitting reply  
+   * reaches the contractor. Its domain needs SPF/DKIM at the provider.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  EMAIL_FROM?: string;
+  
+  /**
+   * **EMAIL_DEV_TOOLS**  
+   * Send-outcome simulator. When "true", the contact composer grows a small panel  
+   * that forces the next send to succeed or fail without calling the provider, so  
+   * the confirmation and failure states can be checked without spending a real  
+   * email (or waiting on a real bounce).  
+   *   
+   * While this is on the server sends NO real email: the composer's Send button is  
+   * disabled and the send action refuses anything that isn't a simulation. Turn it  
+   * off (and restart) to send for real again.  
+   *   
+   * Only the provider call is skipped — the billing guard, the order-ownership  
+   * check and the timeline write all still run, so what you see is the real path.  
+   *   
+   * MUST stay off in production — it disables sending and lets any signed-in  
+   * contractor fake a send.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  EMAIL_DEV_TOOLS?: string;
+  
+  /**
+   * **SEED_DEV_LOGIN**  
+   * Set to "true" to provision a pre-verified contractor login at boot, so local  
+   * development doesn't require completing a real email-verification loop against  
+   * a fresh database. Credentials live in src/lib/server/dev-login.server.ts.  
+   *   
+   * MUST stay off on any reachable deployment — the credentials are public.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SEED_DEV_LOGIN?: string;
+  
+  /**
+   * **ANTHROPIC_API_KEY** 🔐 _sensitive_  
+   * ID Scan — reading a subcontractor's ID off the card  
+   * A contractor photographs a subcontractor's ID and the Add/Edit form is  
+   * prefilled from it. The primary path decodes the PDF417 barcode on the back of  
+   * a US/CA licence entirely in the browser: exact fields, no image leaves the  
+   * device, no key needed, and it works offline.  
+   *   
+   * This key powers only the FALLBACK — reading a card that has no barcode (a  
+   * trade licence, a foreign ID) by sending the photo to the model. Leave it blank  
+   * and the scanner offers the barcode path alone and says so; nothing errors, and  
+   * no image is ever transmitted. The photo is never written to disk, stored, or  
+   * logged on either path.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  ANTHROPIC_API_KEY?: string;
+  
+  /**
+   * **ID_SCAN_DEV_TOOLS**  
+   * Scan simulator. When "true", the scanner grows a panel that runs a bundled  
+   * fixture payload through the real confirm-and-prefill path, and returns a  
+   * canned vision result without calling the provider — so the whole feature can  
+   * be exercised with no camera, no card, and no API key.  
+   *   
+   * MUST stay off in production — it lets any signed-in contractor fabricate a  
+   * scan result.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  ID_SCAN_DEV_TOOLS?: string;
+  
 };
 
-type _CoercedEnvSchema_131ff688 = CoercedEnvSchema;
+type _CoercedEnvSchema_717152d9 = CoercedEnvSchema;
 
 declare module 'varlock/env' {
-  export interface TypedEnvSchema extends Readonly<_CoercedEnvSchema_131ff688> {}
-  export interface PublicTypedEnvSchema extends Readonly<Pick<_CoercedEnvSchema_131ff688, 'MIGRATIONS_FOLDER' | 'ORIGIN' | 'GITHUB_REPO' | 'GITHUB_LABEL_BUG' | 'GITHUB_LABEL_FEATURE' | 'TURNSTILE_SITE_KEY' | 'STRIPE_PRICE_MONTHLY' | 'STRIPE_PRICE_ANNUAL' | 'BILLING_DEV_TOOLS'>> {}
+  export interface TypedEnvSchema extends Readonly<_CoercedEnvSchema_717152d9> {}
+  export interface PublicTypedEnvSchema extends Readonly<Pick<_CoercedEnvSchema_717152d9, 'MIGRATIONS_FOLDER' | 'ORIGIN' | 'GITHUB_REPO' | 'GITHUB_LABEL_BUG' | 'GITHUB_LABEL_FEATURE' | 'TURNSTILE_SITE_KEY' | 'STRIPE_PRICE_MONTHLY' | 'STRIPE_PRICE_ANNUAL' | 'BILLING_DEV_TOOLS' | 'EMAIL_FROM' | 'EMAIL_DEV_TOOLS' | 'SEED_DEV_LOGIN' | 'ID_SCAN_DEV_TOOLS'>> {}
 }
 
 
@@ -158,17 +244,17 @@ export type EnvSchemaAsStrings = {
       : (CoercedEnvSchema[Property] extends boolean ? ('true' | 'false') : string)
 };
 
-type _EnvSchemaAsStrings_131ff688 = EnvSchemaAsStrings;
+type _EnvSchemaAsStrings_717152d9 = EnvSchemaAsStrings;
 declare global {
 
   // add types for global import.meta.env
-  interface ImportMetaEnv extends _EnvSchemaAsStrings_131ff688 {}
+  interface ImportMetaEnv extends _EnvSchemaAsStrings_717152d9 {}
   interface ImportMeta {
     readonly env: ImportMetaEnv;
   }
 
   // add types for global process.env
   namespace NodeJS {
-    interface ProcessEnv extends _EnvSchemaAsStrings_131ff688 {}
+    interface ProcessEnv extends _EnvSchemaAsStrings_717152d9 {}
   }
 }

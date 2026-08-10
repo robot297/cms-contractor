@@ -247,6 +247,7 @@ export type SubcontractorContact = {
 	trade: string | null;
 	tier: SubcontractorTier;
 	licenseNumber: string | null;
+	licenseExpiresAt: Date | null;
 	insuranceCarrier: string | null;
 	insuranceExpiresAt: Date | null;
 	notes: string | null;
@@ -298,6 +299,10 @@ export const subcontractorContactSchema = z.object({
 		.string()
 		.optional()
 		.transform((v) => blankToNull(v)),
+	licenseExpiresAt: z
+		.string()
+		.optional()
+		.transform((v) => parseDateInput(v)),
 	insuranceCarrier: z
 		.string()
 		.optional()
@@ -330,6 +335,7 @@ export function validateSubcontractorContact(input: {
 	trade?: string;
 	tier?: string;
 	licenseNumber?: string;
+	licenseExpiresAt?: string;
 	insuranceCarrier?: string;
 	insuranceExpiresAt?: string;
 	notes?: string;
@@ -619,13 +625,19 @@ export function validateFeedback(input: {
  */
 export function buildFeedbackIssue(
 	feedback: Feedback,
-	submittedBy?: { name?: string | null; email?: string | null }
+	submittedBy?: { name?: string | null; email?: string | null },
+	screenshot?: { imageUrl: string; linkUrl: string } | null
 ): { title: string; body: string } {
 	const prefix = feedback.type === 'bug' ? '[Bug]' : '[Feature]';
 	const who = submittedBy?.name || submittedBy?.email || 'a contractor';
 	const contact = submittedBy?.email ? ` (${submittedBy.email})` : '';
 	const body = [
 		feedback.detail,
+		// The inline embed renders on public repos; the blob link keeps working for
+		// anyone with repo access even where the raw URL won't render (private repos).
+		...(screenshot
+			? ['', `![Screenshot](${screenshot.imageUrl})`, `*[View screenshot](${screenshot.linkUrl})*`]
+			: []),
 		'',
 		'---',
 		`*Filed from the in-app support form by ${who}${contact}.*`,

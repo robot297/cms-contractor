@@ -10,6 +10,44 @@
 	// Cleared to true after a successful submit so the "thanks" panel shows.
 	let sent = $derived(form?.success === true);
 
+	// Send only arms once there's actually something to send.
+	let title = $state('');
+	let detail = $state('');
+	const canSend = $derived(title.trim() !== '' && detail.trim() !== '');
+
+	// Optional screenshot: pre-checked here (type + size) so a doomed upload never
+	// leaves the browser; the server re-checks and parks it in the support repo.
+	const SHOT_LIMIT = 5 * 1024 * 1024; // matches MAX_SCREENSHOT_BYTES server-side
+	const SHOT_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+	let shotInput: HTMLInputElement | undefined = $state();
+	let shotName = $state('');
+	let shotPreview = $state<string | null>(null);
+	let shotError = $state('');
+	function pickShot() {
+		const file = shotInput?.files?.[0] ?? null;
+		shotError = '';
+		if (shotPreview) URL.revokeObjectURL(shotPreview);
+		shotPreview = null;
+		shotName = '';
+		if (!file) return;
+		if (!SHOT_TYPES.includes(file.type)) {
+			shotError = 'Screenshots must be a PNG, JPEG, WebP or GIF image.';
+			if (shotInput) shotInput.value = '';
+			return;
+		}
+		if (file.size > SHOT_LIMIT) {
+			shotError = 'Keep screenshots under 5 MB.';
+			if (shotInput) shotInput.value = '';
+			return;
+		}
+		shotName = file.name;
+		shotPreview = URL.createObjectURL(file);
+	}
+	function clearShot() {
+		if (shotInput) shotInput.value = '';
+		pickShot();
+	}
+
 	const fieldErr = (name: string) =>
 		form && 'field' in form && form.field === name ? form.message : null;
 
@@ -64,7 +102,7 @@
 <div class="wrap">
 	<header>
 		<h1 class="page-title">Support</h1>
-		<p class="sub">Report a bug or ask for a feature. It goes straight to our team.</p>
+		<p class="sub">Report issues or request new features</p>
 	</header>
 
 	{#if !data.configured}
@@ -90,6 +128,7 @@
 		<form
 			method="POST"
 			action="?/submit"
+			enctype="multipart/form-data"
 			use:enhance={() =>
 				async ({ update }) =>
 					update({ reset: false })}
@@ -110,15 +149,52 @@
 
 			<label class="field">
 				Summary
-				<input name="title" maxlength="140" placeholder="Short summary" required />
+				<input
+					name="title"
+					maxlength="140"
+					placeholder="Short summary"
+					required
+					bind:value={title}
+				/>
 				{#if fieldErr('title')}<span class="err">{fieldErr('title')}</span>{/if}
 			</label>
 
 			<label class="field">
 				Details
-				<textarea name="detail" rows="6" required></textarea>
+				<textarea name="detail" rows="6" required bind:value={detail}></textarea>
 				{#if fieldErr('detail')}<span class="err">{fieldErr('detail')}</span>{/if}
 			</label>
+
+			<!-- Optional screenshot. Ends up committed to the support repo and linked
+			     from the issue — the Issues API has no native attachment upload. -->
+			<div class="shot">
+				<span class="shot-label">Screenshot <span class="opt">optional</span></span>
+				{#if shotPreview}
+					<div class="shot-preview">
+						<img src={shotPreview} alt="Screenshot to attach" />
+						<div class="shot-meta">
+							<span class="shot-name">{shotName}</span>
+							<button type="button" class="shot-remove" onclick={clearShot}>Remove</button>
+						</div>
+					</div>
+				{/if}
+				<label class="shot-pick">
+					<span aria-hidden="true">📎</span>
+					{shotPreview ? 'Replace screenshot' : 'Attach a screenshot'}
+					<input
+						bind:this={shotInput}
+						type="file"
+						name="screenshot"
+						accept="image/png,image/jpeg,image/webp,image/gif"
+						onchange={pickShot}
+					/>
+				</label>
+				{#if shotError}
+					<span class="err">{shotError}</span>
+				{:else if fieldErr('screenshot')}
+					<span class="err">{fieldErr('screenshot')}</span>
+				{/if}
+			</div>
 
 			<!-- Honeypot ("bot candy"): hidden from humans; bots that fill it are rejected. -->
 			<div class="hp" aria-hidden="true">
@@ -137,8 +213,12 @@
 			{/if}
 
 			<div class="actions">
-				<button class="btn primary" type="submit">Send</button>
-				<span class="hint">Goes to our team as a tracked issue.</span>
+				<button
+					class="btn primary"
+					type="submit"
+					disabled={!canSend}
+					title={canSend ? 'Send' : 'Fill in the summary and details first'}>Send</button
+				>
 			</div>
 		</form>
 	{/if}
@@ -195,16 +275,22 @@
 		justify-content: center;
 		gap: 0.4rem;
 		padding: 0.7rem;
-		border: 2px solid #111;
+		border: 1px solid var(--line-strong);
 		border-radius: 10px;
 		font-weight: 700;
 		cursor: pointer;
-		background: #fff;
+		background: var(--surface);
 		user-select: none;
+		transition:
+			background 0.12s ease,
+			border-color 0.12s ease,
+			box-shadow 0.12s ease;
 	}
 	.segmented label.selected {
-		background: #ffcc00;
-		box-shadow: 2px 2px 0 #111;
+		background: var(--yellow);
+		border-color: transparent;
+		color: #14171c;
+		box-shadow: var(--pop-shadow-sm);
 	}
 	.segmented input {
 		position: absolute;
@@ -224,43 +310,138 @@
 		letter-spacing: 0.02em;
 		color: #444;
 	}
+	/* App-wide field recipe: hairline border, sunken well, yellow focus ring (the
+	   focus treatment comes from the global input rules). */
 	.field input,
 	.field textarea {
 		padding: 0.6rem;
-		border: 2px solid #111;
-		border-radius: 8px;
+		border: 1px solid var(--field-border);
+		border-radius: 10px;
 		font-size: 1rem;
 		font-weight: 500;
 		text-transform: none;
 		letter-spacing: normal;
 		color: #111;
+		background: var(--field-bg);
 	}
 	.field textarea {
 		resize: vertical;
 	}
+	/* Send sits at the end of the form, on the right — where every other modal
+	   and card in the app puts its commit. */
 	.actions {
 		display: flex;
 		align-items: center;
+		justify-content: flex-end;
 		gap: 0.8rem;
 		flex-wrap: wrap;
 	}
-	.hint {
-		font-size: 0.8rem;
-		color: #777;
+
+	/* Screenshot picker: a dashed attach chip; preview swaps in beside it. */
+	.shot {
+		display: grid;
+		gap: 0.4rem;
+	}
+	.shot-label {
+		font-size: 0.78rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
+		color: #444;
+	}
+	.opt {
 		font-weight: 600;
+		text-transform: none;
+		letter-spacing: normal;
+		color: #8b949e;
+	}
+	.shot-pick {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		justify-self: start;
+		padding: 0.45rem 0.8rem;
+		border: 1px dashed var(--line-strong);
+		border-radius: 10px;
+		background: var(--field-bg);
+		color: var(--fg-muted);
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition:
+			color 0.12s ease,
+			border-color 0.12s ease;
+	}
+	.shot-pick:hover {
+		color: var(--fg);
+		border-color: var(--fg-muted);
+	}
+	/* Hidden but still a live form control — display:none inputs submit fine. */
+	.shot-pick input {
+		display: none;
+	}
+	.shot-preview {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+	.shot-preview img {
+		width: 5.5rem;
+		height: 5.5rem;
+		object-fit: cover;
+		border-radius: 10px;
+		border: 1px solid var(--line-strong);
+	}
+	.shot-meta {
+		display: grid;
+		gap: 0.2rem;
+		min-width: 0;
+	}
+	.shot-name {
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: var(--fg);
+		overflow-wrap: anywhere;
+	}
+	.shot-remove {
+		justify-self: start;
+		border: none;
+		background: none;
+		padding: 0.1rem 0;
+		color: #cf222e;
+		font-family: inherit;
+		font-size: 0.8rem;
+		font-weight: 700;
+		cursor: pointer;
 	}
 	.btn {
 		padding: 0.6rem 1.1rem;
-		border: 2px solid #111;
-		border-radius: 8px;
-		background: #fff;
-		font-weight: 800;
+		border: 1px solid var(--line-strong);
+		border-radius: 10px;
+		background: var(--surface);
+		color: var(--fg);
+		font-weight: 700;
 		cursor: pointer;
 		font-size: 0.95rem;
+		box-shadow: var(--pop-shadow-sm);
 	}
+	/* The app's yellow primary, replacing this page's leftover brand-blue. */
 	.btn.primary {
-		background: #0969da;
-		color: #fff;
+		background: var(--yellow);
+		color: #14171c;
+		border-color: transparent;
+	}
+	.btn.primary:hover:not(:disabled) {
+		background: var(--yellow-deep);
+	}
+	/* Nothing to send yet → the accent drains and the button goes flat and
+	   dashed, the app-wide "inert" treatment. */
+	.btn.primary:disabled {
+		background: transparent;
+		color: var(--fg-muted);
+		border: 1px dashed var(--line-strong);
+		cursor: not-allowed;
+		box-shadow: none;
 	}
 	.err {
 		color: #cf222e;
@@ -273,7 +454,7 @@
 		margin: 0;
 	}
 	.notice {
-		border: 2px solid #111;
+		border: 1px solid var(--line-strong);
 		border-radius: 12px;
 		padding: 1rem 1.1rem;
 		background: #fffbe6;
@@ -304,37 +485,24 @@
 	:global(:root[data-theme='dark']) .type legend {
 		color: var(--fg-muted);
 	}
-	:global(:root[data-theme='dark']) .segmented label {
-		background: var(--field-bg);
-		border-color: var(--field-border);
+	/* Segments and buttons are token-driven above, so dark needs no override for
+	   them — and a bare dark rule here would outrank the .selected / .primary
+	   states on specificity. Only non-token text colors are mapped. */
+	:global(:root[data-theme='dark']) .segmented label:not(.selected) {
 		color: var(--fg);
-	}
-	/* Keep the brand-yellow selected state; pin dark text for contrast on yellow. */
-	:global(:root[data-theme='dark']) .segmented label.selected {
-		background: #ffcc00;
-		color: #14171c;
 	}
 	:global(:root[data-theme='dark']) .field {
 		color: var(--fg-muted);
 	}
 	:global(:root[data-theme='dark']) .field input,
 	:global(:root[data-theme='dark']) .field textarea {
-		background: var(--field-bg);
-		border-color: var(--field-border);
 		color: var(--fg);
 	}
-	:global(:root[data-theme='dark']) .hint {
+	:global(:root[data-theme='dark']) .shot-label {
 		color: var(--fg-muted);
 	}
-	/* Secondary button surface (incl. "Send more feedback" white card in the success panel). */
-	:global(:root[data-theme='dark']) .btn {
-		background: var(--surface);
-		color: var(--fg);
-	}
-	/* Primary keeps its semantic brand blue (not a #1f2328-dark button). */
-	:global(:root[data-theme='dark']) .btn.primary {
-		background: #0969da;
-		color: #fff;
+	:global(:root[data-theme='dark']) .shot-remove {
+		color: #ff8f8a;
 	}
 	/* Notice panels keep their semantic warning/success hues; pin dark text so the
 	   pale panels stay readable against the dark page. */

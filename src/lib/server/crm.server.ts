@@ -656,6 +656,40 @@ export async function deleteAttachment(id: string, contractorId: string): Promis
 	});
 }
 
+/**
+ * Record that a message was emailed to this order's customer.
+ *
+ * Only ever called after the provider has accepted the message, so the timeline
+ * says "we sent this" and means it — the ordering matters, because a false record
+ * of contact is worse than a missing one (a contractor acts on it). The `mailto:`
+ * fallback writes nothing at all: the app can't know whether the contractor
+ * actually pressed send in their own mail client.
+ *
+ * Not internal. The customer receiving the mail already knows it was sent, so
+ * hiding it from their portal would make their history disagree with their inbox.
+ *
+ * Returns false when the order isn't this contractor's — the caller has already
+ * sent the mail by then, so an unknown `orderId` costs the record, not the message.
+ */
+export async function recordEmailSent(
+	orderId: string,
+	contractorId: string,
+	message: { customerName: string; subject: string }
+): Promise<boolean> {
+	await assertCanWrite(contractorId);
+	const owned = await contractorOrder(orderId, contractorId);
+	if (!owned) return false;
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'message',
+		title: `Emailed ${message.customerName}`.trim(),
+		detail: message.subject.trim(),
+		authorRole: 'contractor',
+		internal: false
+	});
+	return true;
+}
+
 /** Append an internal, contractor-only note to an order's timeline. */
 export async function addOrderNote(
 	orderId: string,

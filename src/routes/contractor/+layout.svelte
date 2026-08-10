@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { theme } from '$lib/theme.svelte';
+	import Toaster from '$lib/Toaster.svelte';
 	import type { LayoutData } from './$types';
 	import type { Snippet } from 'svelte';
 
@@ -20,7 +21,9 @@
 	const onOrders = $derived(path.startsWith('/contractor/orders'));
 	const onCustomers = $derived(path.startsWith('/contractor/customers'));
 	const onSubcontractors = $derived(path.startsWith('/contractor/subcontractors'));
-	const onTemplates = $derived(path.startsWith('/contractor/settings/templates'));
+	// One entry now: email templates live on the account page rather than at their
+	// own route, which still exists only to redirect.
+	const onAccount = $derived(path.startsWith('/contractor/settings'));
 	const onSupport = $derived(path.startsWith('/contractor/support'));
 	const onBilling = $derived(path.startsWith('/contractor/billing'));
 
@@ -40,13 +43,11 @@
 			: null
 	);
 
-	// A persistent trial marker in the nav. This replaces the old last-week strip
-	// banner: the dashboard now carries the welcome and the detail, so a third copy
-	// of "you're on a trial" across the top of every page was just noise. The badge
-	// stays for the whole trial and tightens up in the last few days.
+	// Trial state feeds the account menu's sub-line; the full detail (end date,
+	// days left, capacity) lives on the settings page's Account tab. The old bar
+	// badge is gone — its slot now holds the settings gear.
 	const onTrial = $derived(billing.canWrite && billing.status === 'trialing');
 	const trialDays = $derived(billing.trialDaysRemaining);
-	const trialUrgent = $derived(onTrial && trialDays !== null && trialDays <= 3);
 
 	const year = new Date().getFullYear();
 
@@ -118,7 +119,10 @@
 <div class="shell" style="min-height: 100dvh; display: flex; flex-direction: column;">
 	<div class="bar">
 		<nav class="nav">
-			<a href={resolve('/')} class="brand">🛠 Contractor&nbsp;CRM</a>
+			<a href={resolve('/')} class="brand">
+				<span class="brand-mark" aria-hidden="true">🛠</span>
+				<span class="brand-word">Contractor&nbsp;CRM</span>
+			</a>
 
 			<button
 				type="button"
@@ -219,20 +223,6 @@
 						onclick={closeMenus}>Subcontractors</a
 					>
 					<a
-						href={resolve('/contractor/settings/templates')}
-						class="navlink"
-						class:is-active={onTemplates}
-						onclick={closeMenus}>Templates</a
-					>
-					<!-- Only in the collapsed menu. On the bar it lives in the account menu
-					     behind the avatar, which the collapsed menu doesn't use. -->
-					<a
-						href={resolve('/contractor/billing')}
-						class="navlink collapse-only"
-						class:is-active={onBilling}
-						onclick={closeMenus}>Billing</a
-					>
-					<a
 						href={resolve('/contractor/support')}
 						class="navlink"
 						class:is-active={onSupport}
@@ -240,19 +230,36 @@
 					>
 				</div>
 				<div class="nav-right">
-					{#if onTrial}
-						<a
-							class="trial-badge"
-							class:urgent={trialUrgent}
-							href={resolve('/contractor/billing')}
-							title={trialDays !== null
-								? `Free trial — ${trialDays} ${trialDays === 1 ? 'day' : 'days'} left`
-								: 'Free trial'}
+					<!-- Settings, in the slot the trial badge used to hold: it's admin,
+					     not a work surface, so it sits with the account cluster. In the
+					     collapsed menu the same control drops to the bottom-left of the
+					     utility row (also the badge's old seat) and gains its label. -->
+					<a
+						class="settings-gear"
+						class:on={onAccount}
+						href={resolve('/contractor/settings')}
+						title="Settings"
+						aria-label="Settings"
+						onclick={closeMenus}
+					>
+						<svg
+							width="20"
+							height="20"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
 						>
-							<span class="dot" aria-hidden="true"></span>
-							Trial{#if trialDays !== null}<span class="trial-days">· {trialDays}d</span>{/if}
-						</a>
-					{/if}
+							<circle cx="12" cy="12" r="3.2" />
+							<path
+								d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+							/>
+						</svg>
+						<span class="gear-label">Settings</span>
+					</a>
 					<!-- Mobile/tablet home for the theme toggle: the bar's icon button is
 					     hidden at this width. Icon-only, with the label carried by aria so it
 					     costs a square instead of a row. Same shared store as the bar's. -->
@@ -323,6 +330,13 @@
 								</div>
 								<a
 									class="user-menu-item"
+									class:is-active={onAccount}
+									role="menuitem"
+									href={resolve('/contractor/settings')}
+									onclick={closeMenus}>Account</a
+								>
+								<a
+									class="user-menu-item"
 									class:is-active={onBilling}
 									role="menuitem"
 									href={resolve('/contractor/billing')}
@@ -372,6 +386,10 @@
 		{@render children()}
 	</main>
 
+	<!-- Mounted once for the whole section so a confirmation outlives the card that
+	     raised it — the contact composer closes on send and the toast reports it. -->
+	<Toaster />
+
 	<footer>
 		<div class="hazard"></div>
 		<div class="bar">
@@ -392,7 +410,9 @@
 	   the theme: ink-on-light in light, light-on-dark in dark. The yellow active pill
 	   and the red sign-out are the exceptions; both already read on either bar. */
 	.shell {
-		--bar-bg: var(--surface);
+		/* Not flat white: a faint top-lit gradient so the bar reads as its own
+		   surface — chrome, not just page background that happens to hold links. */
+		--bar-bg: linear-gradient(180deg, #ffffff, #f6f6f1);
 		--bar-line: var(--line);
 		--bar-fg: var(--fg);
 		--bar-fg-dim: rgba(31, 35, 40, 0.66);
@@ -402,15 +422,15 @@
 		--bar-rail-bg: linear-gradient(180deg, rgba(17, 17, 17, 0.06), rgba(17, 17, 17, 0.02));
 		/* The inset top highlight only reads on a dark bar. */
 		--bar-inset-hi: transparent;
-		/* Pop-art wordmark, inverted per theme: ink on yellow in light, yellow on ink
-		   in dark. Yellow type on a white bar would be unreadable. */
-		--brand-fg: #14171c;
-		--brand-shadow: 2px 2px 0 var(--yellow);
-		--brand-fg-hover: #000000;
 	}
 	.bar {
 		background: var(--bar-bg);
 		border-block: 1px solid var(--bar-line);
+	}
+	/* Header only (the footer's bar is nested in <footer>): a soft cast below the
+	   bar + accent line so the chrome sits above the page instead of on it. */
+	.shell > .bar {
+		box-shadow: 0 4px 16px rgba(27, 31, 36, 0.06);
 	}
 	.foot-text {
 		font-size: 0.75rem;
@@ -420,6 +440,7 @@
 		letter-spacing: 0.03em;
 	}
 	:global(:root[data-theme='dark']) .shell {
+		--bar-bg: linear-gradient(180deg, #20252d, #181c22);
 		--bar-fg: #ffffff;
 		--bar-fg-dim: rgba(255, 255, 255, 0.72);
 		--bar-edge: rgba(255, 255, 255, 0.14);
@@ -427,9 +448,9 @@
 		--bar-wash-strong: rgba(255, 255, 255, 0.14);
 		--bar-rail-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
 		--bar-inset-hi: rgba(255, 255, 255, 0.07);
-		--brand-fg: var(--yellow);
-		--brand-shadow: 2px 2px 0 #000;
-		--brand-fg-hover: #ffffff;
+	}
+	:global(:root[data-theme='dark']) .shell > .bar {
+		box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
 	}
 
 	.nav {
@@ -445,17 +466,39 @@
 		gap: 1rem;
 		flex-wrap: wrap;
 	}
+	/* Wordmark: a small yellow tile carrying the glyph, plain strong type beside
+	   it. Replaces the hard yellow text-shadow treatment, which read as clip-art.
+	   Colors ride --bar-fg, so both themes come out right with no brand tokens. */
 	.brand {
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.02em;
-		color: var(--brand-fg);
-		text-shadow: var(--brand-shadow);
+		display: inline-flex;
+		align-items: center;
+		gap: 0.55rem;
+		color: var(--bar-fg);
 		text-decoration: none;
 		flex-shrink: 0;
 	}
-	.brand:hover {
-		color: var(--brand-fg-hover);
+	.brand-mark {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
+		border-radius: 10px;
+		background: linear-gradient(180deg, var(--yellow), var(--yellow-deep));
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.5),
+			0 2px 8px rgba(230, 184, 0, 0.35);
+		font-size: 1.05rem;
+		transition: filter 0.15s ease;
+	}
+	.brand-word {
+		font-weight: 900;
+		font-size: 0.92rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+	.brand:hover .brand-mark {
+		filter: brightness(1.06);
 	}
 	/* Desktop: links sit next to the brand, user/sign-out pushed to the right. */
 	.nav-collapse {
@@ -583,54 +626,48 @@
 		}
 	}
 
-	/* Trial marker. Sits with the user chrome so it rides the bar in both themes and
-	   drops into the collapsed menu at narrow widths without extra work. Yellow reads
-	   on either bar, and the label is dark-pinned because yellow stays light in dark. */
-	.trial-badge {
+	/* The settings gear. Same quiet icon-only chrome as the theme toggle, except
+	   when you're on the settings section: then it takes the yellow active pill so
+	   the bar still answers "where am I" with the rail link gone. The label only
+	   appears in the collapsed menu (see the 1024px block). */
+	.settings-gear {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.35rem;
+		justify-content: center;
+		gap: 0.45rem;
+		width: 2.4rem;
+		height: 2.4rem;
 		flex-shrink: 0;
-		padding: 0.3rem 0.7rem;
 		border-radius: 999px;
-		border: 1.5px solid #14171c;
-		background: var(--yellow);
-		color: #14171c;
+		color: var(--bar-fg-dim);
 		text-decoration: none;
-		font-size: 0.7rem;
-		font-weight: 800;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		transition:
+			color 0.16s ease,
+			background 0.16s ease;
+	}
+	.gear-label {
+		display: none;
+		font-size: 0.9rem;
+		font-weight: 700;
 		white-space: nowrap;
 	}
-	.trial-badge:hover {
-		background: var(--yellow-deep);
+	.settings-gear:hover {
+		color: var(--bar-fg);
+		background: var(--bar-wash-strong);
 	}
-	.trial-badge:focus-visible {
+	/* Pinned dark on yellow, like every active pill. */
+	.settings-gear.on,
+	.settings-gear.on:hover {
+		background: var(--yellow);
+		color: #14171c;
+	}
+	.settings-gear:focus-visible {
 		outline: 2px solid var(--yellow);
 		outline-offset: 2px;
 	}
-	.trial-days {
-		font-variant-numeric: tabular-nums;
-		opacity: 0.75;
-	}
-	.dot {
-		width: 0.4rem;
-		height: 0.4rem;
-		border-radius: 50%;
-		background: #14171c;
-	}
-	/* Last few days: amber with light type, so it stops reading as a welcome. */
-	.trial-badge.urgent {
-		background: #bf8700;
-		border-color: #8a6200;
-		color: #fff;
-	}
-	.trial-badge.urgent:hover {
-		background: #a67400;
-	}
-	.trial-badge.urgent .dot {
-		background: #fff;
+	.settings-gear svg {
+		display: block;
+		flex: none;
 	}
 
 	/* Account. One square in the bar; the name, billing and sign-out all live in the
@@ -742,7 +779,6 @@
 	}
 	/* Collapsed-menu-only pieces. Hidden on the bar, where the account menu behind
 	   the avatar covers the same ground. Turned on in the 1024px block below. */
-	.collapse-only,
 	.signout-form {
 		display: none;
 	}
@@ -936,12 +972,9 @@
 			color: #14171c;
 			box-shadow: none;
 		}
-		/* Billing joins the links, and sign-out becomes a row of its own — the avatar
-		   and its popover are dropped entirely here. A menu that opens a second menu
-		   is a poor trade on a screen this size. */
-		.collapse-only {
-			display: block;
-		}
+		/* Sign-out becomes a row of its own — the avatar and its popover are dropped
+		   entirely here. A menu that opens a second menu is a poor trade on a screen
+		   this size. */
 		.signout-form {
 			display: block;
 			margin-top: 0.15rem;
@@ -953,8 +986,8 @@
 		.user {
 			display: none;
 		}
-		/* One compact line rather than a stack of full-width blocks: trial badge on
-		   the left, theme icon on the right. */
+		/* One compact line rather than a stack of full-width blocks: Settings on the
+		   left (the trial badge's old seat), theme icon on the right. */
 		.nav-right {
 			flex-direction: row;
 			align-items: center;
@@ -964,10 +997,19 @@
 			padding-top: 0.7rem;
 			border-top: 1px solid var(--bar-edge);
 		}
-		/* The badge leads the row in the menu. */
-		.trial-badge {
+		/* The gear leads the row and gains its label — an icon-only square tucked in
+		   a corner is too easy to read as decoration. */
+		.settings-gear {
 			order: -1;
 			margin-right: auto;
+			width: auto;
+			height: auto;
+			padding: 0.45rem 0.8rem;
+			background: var(--bar-wash);
+			color: var(--bar-fg);
+		}
+		.gear-label {
+			display: inline;
 		}
 		.theme-row {
 			display: inline-flex;

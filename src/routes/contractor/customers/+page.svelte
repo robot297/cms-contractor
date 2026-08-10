@@ -10,6 +10,7 @@
 		preferredContactLabel,
 		US_STATES
 	} from '$lib/crm';
+	import AlphaRail from '$lib/AlphaRail.svelte';
 	import ContactComposer from '$lib/ContactComposer.svelte';
 	import type { PageData, ActionData } from './$types';
 
@@ -253,8 +254,7 @@
 		return out.filter((n) => n.toLowerCase() !== raw);
 	});
 
-	// --- Alphabetical grouping + A–Z jump rail ----------------------------
-	const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
+	// --- Alphabetical grouping + A–Z jump rail (rail itself is AlphaRail) ---
 	function letterOf(name: string): string {
 		const ch = name.trim().charAt(0).toUpperCase();
 		return /[A-Z]/.test(ch) ? ch : '#';
@@ -272,39 +272,6 @@
 	const presentLetters = $derived(new Set(groups.map((g) => g.letter)));
 	function jumpTo(letter: string, behavior: ScrollBehavior = 'smooth') {
 		document.getElementById(`sec-${letter}`)?.scrollIntoView({ behavior, block: 'start' });
-	}
-	// Dock-style magnification: the hovered letter is largest, neighbours taper off.
-	let railHover: number | null = $state(null);
-	// The rail element, so touch/mouse position can be mapped to a letter index.
-	let railNav: HTMLElement | undefined = $state();
-	// Map a pointer's Y onto a letter and magnify it. Child transforms don't
-	// reflow, so the nav's own box stays stable — no feedback loop as letters
-	// grow. `jump` is true while actively scrubbing (touch drag / mouse-down).
-	function railAt(clientY: number, jump: boolean) {
-		if (!railNav) return;
-		const r = railNav.getBoundingClientRect();
-		const frac = (clientY - r.top) / r.height;
-		const i = Math.max(0, Math.min(ALPHABET.length - 1, Math.round(frac * (ALPHABET.length - 1))));
-		railHover = i;
-		if (jump && presentLetters.has(ALPHABET[i])) jumpTo(ALPHABET[i], 'auto');
-	}
-	function railScale(i: number): number {
-		if (railHover === null) return 1;
-		const d = Math.abs(i - railHover);
-		if (d === 0) return 2;
-		if (d === 1) return 1.6;
-		if (d === 2) return 1.3;
-		if (d === 3) return 1.12;
-		return 1;
-	}
-	// Push neighbours away from the hovered letter so the enlarged glyphs don't
-	// collide — the dock "spread" that makes the magnified letter easy to hit.
-	function railShift(i: number): number {
-		if (railHover === null) return 0;
-		const d = Math.abs(i - railHover);
-		if (d === 0) return 0;
-		const push = d === 1 ? 9 : d === 2 ? 15 : d === 3 ? 18 : 19;
-		return Math.sign(i - railHover) * push;
 	}
 
 	function liveFormatPhone(e: Event & { currentTarget: HTMLInputElement }) {
@@ -356,8 +323,13 @@
 			: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 	}
 
+	// `width: 100%; box-sizing: border-box` is load-bearing, not decoration: an
+	// <input> carries an intrinsic default width of roughly 20 characters, so
+	// without these it refuses to shrink below ~180px and pushes its container
+	// wider than the phone. That is what put a horizontal scrollbar on the
+	// city/state/ZIP row. Every control below wants to fill its cell anyway.
 	const fieldStyle =
-		'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
+		'width: 100%; box-sizing: border-box; padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 	const menuItem =
 		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
 </script>
@@ -570,7 +542,7 @@
 													required
 													placeholder="Name"
 													aria-label="Name"
-													style="width: 100%; box-sizing: border-box; {fieldStyle}"
+													style={fieldStyle}
 												/>
 												<!-- Email gets its own row rather than sharing one with the name:
 												     addresses are long, and half a row truncated them. It carries the
@@ -585,7 +557,7 @@
 													placeholder="Email"
 													aria-label="Email"
 													title={isLinked(c) ? 'Email is locked once the customer has joined' : ''}
-													style="width: 100%; box-sizing: border-box; {fieldStyle}"
+													style={fieldStyle}
 												/>
 												{#if isLinked(c)}
 													<p style="margin: -0.2rem 0 0; font-size: 0.78rem; color: #8c959f;">
@@ -608,18 +580,21 @@
 														style="flex: 2; min-width: 160px; {fieldStyle}"
 													/>
 												</div>
+												<!-- Minimums sized so city + state + ZIP still share one line on a
+												     360px phone (110 + 72 + 78 + two 8px gaps = 276). The old values
+												     totalled 296 before padding and forced the row off-screen. -->
 												<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
 													<input
 														name="city"
 														value={c.city ?? ''}
 														placeholder="City"
-														style="flex: 2; min-width: 120px; {fieldStyle}"
+														style="flex: 2; min-width: 110px; {fieldStyle}"
 													/>
 													<select
 														name="state"
 														value={c.state ?? ''}
 														aria-label="State"
-														style="flex: 1; min-width: 80px; {fieldStyle}"
+														style="flex: 1; min-width: 72px; {fieldStyle}"
 													>
 														<option value="">State</option>
 														{#each US_STATES as s (s.code)}
@@ -631,7 +606,7 @@
 														value={c.postalCode ?? ''}
 														inputmode="numeric"
 														placeholder="ZIP"
-														style="flex: 1; min-width: 80px; {fieldStyle}"
+														style="flex: 1; min-width: 78px; {fieldStyle}"
 													/>
 												</div>
 												<label
@@ -775,7 +750,6 @@
 															<div class="contact-pop">
 																<ContactComposer
 																	customer={c}
-																	rows={2}
 																	onsent={() => (contactOpenId = null)}
 																	onclose={() => (contactOpenId = null)}
 																/>
@@ -942,38 +916,10 @@
 				{/each}
 			</section>
 
-			<!-- A–Z jump rail with dock-style magnification -->
+			<!-- A–Z jump rail with dock-style magnification (shared with the
+			     subcontractor directory). -->
 			{#if data.customers.length > 0}
-				<nav
-					aria-label="Jump to letter"
-					bind:this={railNav}
-					onpointerdown={(e) => {
-						railNav?.setPointerCapture?.(e.pointerId);
-						railAt(e.clientY, true);
-					}}
-					onpointermove={(e) => railAt(e.clientY, e.pointerType !== 'mouse' || e.buttons > 0)}
-					onpointerup={() => (railHover = null)}
-					onpointercancel={() => (railHover = null)}
-					onpointerleave={() => (railHover = null)}
-					style="position: sticky; top: 84px; display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; padding: 0.25rem 0.35rem; touch-action: none;"
-				>
-					{#each ALPHABET as letter, i (letter)}
-						{@const present = presentLetters.has(letter)}
-						<button
-							type="button"
-							tabindex="-1"
-							aria-hidden="true"
-							style="border: none; background: none; font-size: 0.72rem; font-weight: 700; line-height: 1.05; padding: 0.1rem 0.35rem; border-radius: 4px; pointer-events: none; cursor: {present
-								? 'pointer'
-								: 'default'}; color: {present
-								? '#0969da'
-								: '#c9d1d9'}; transform: translateY({railShift(i)}px) scale({railScale(
-								i
-							)}); transform-origin: center center; transition: transform 0.12s ease-out; will-change: transform;"
-							>{letter}</button
-						>
-					{/each}
-				</nav>
+				<AlphaRail present={presentLetters} onjump={(letter) => jumpTo(letter, 'auto')} />
 			{/if}
 		</div>
 	</div>
@@ -1137,16 +1083,18 @@
 			<input name="address" autocomplete="street-address" style={fieldStyle} />
 		</label>
 		<!-- City / state / ZIP on one row: three short fields that read as one
-		     address, rather than three full-width rows pretending to be separate. -->
+		     address, rather than three full-width rows pretending to be separate.
+		     Minimums sized so all three still share that row on a 360px phone
+		     (110 + 72 + 78 + two 8px gaps = 276) rather than overflowing it. -->
 		<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
 			<label
-				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 2; min-width: 130px;"
+				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 2; min-width: 110px;"
 			>
 				City
 				<input name="city" autocomplete="address-level2" style={fieldStyle} />
 			</label>
 			<label
-				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 1; min-width: 90px;"
+				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 1; min-width: 72px;"
 			>
 				State
 				<select name="state" autocomplete="address-level1" style={fieldStyle}>
@@ -1157,7 +1105,7 @@
 				</select>
 			</label>
 			<label
-				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 1; min-width: 90px;"
+				style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a; flex: 1; min-width: 78px;"
 			>
 				ZIP
 				<input
@@ -1192,15 +1140,19 @@
 		{#if addError || (form?.action === 'add' && form?.message)}
 			<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">{addError || form?.message}</p>
 		{/if}
-		<!-- Two ways out. Most customers are added because there's work to book, so
-		     "Add & create order" saves finding them again on the orders screen; the
-		     `next` value is what the action keys the redirect off. -->
+		<!-- One save, two exits, presented as a single split control. Most customers
+		     are added because there's work to book, so "Add & create order" wears the
+		     yellow and the arrow — the plain add is the quieter half of the pair. The
+		     `next` value is what the action keys the redirect off. Plain add stays
+		     first in the DOM, so Enter still does the unsurprising thing. -->
 		<div class="add-actions">
 			<button type="button" onclick={() => addDialog?.close()} class="add-cancel">Cancel</button>
-			<button type="submit" name="next" value="order" class="add-secondary"
-				>Add &amp; create order</button
-			>
-			<button type="submit" class="add-primary">Add customer</button>
+			<div class="add-group" role="group" aria-label="Save customer">
+				<button type="submit" class="add-plain">Add customer</button>
+				<button type="submit" name="next" value="order" class="add-go"
+					>Add &amp; create order <span class="go-arrow" aria-hidden="true">→</span></button
+				>
+			</div>
 		</div>
 	</form>
 </dialog>
@@ -1320,6 +1272,29 @@
 </dialog>
 
 <style>
+	/* Directory cards: not plain white — a faint top-lit wash over the shared
+	   .card and a soft raise on hover, matching the subcontractor roster so both
+	   directories read as one system. */
+	article.card {
+		background: linear-gradient(
+			180deg,
+			var(--surface) 55%,
+			color-mix(in srgb, var(--surface-sunken) 60%, var(--surface))
+		);
+		transition:
+			border-color 0.15s ease,
+			box-shadow 0.15s ease;
+	}
+	article.card:hover {
+		border-color: var(--line-strong);
+		box-shadow:
+			0 1px 2px rgba(27, 31, 36, 0.05),
+			0 8px 22px rgba(27, 31, 36, 0.1);
+	}
+	:global(:root[data-theme='dark']) article.card:hover {
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+	}
+
 	/* ------------------------------------------------------- Expanded profile
 	   Same treatment as the subcontractor profile pane, deliberately: both are
 	   "open a contact and read their facts", and they were drifting into two
@@ -1581,44 +1556,73 @@
 	.add-cancel:hover {
 		color: var(--fg);
 	}
-	/* Same weight as the primary, different fill: this is an equally valid finish,
-	   not a lesser one. Both are drawn from the theme tokens — they used to be a
-	   blue pair that matched nothing else in the app. */
-	.add-secondary {
-		border: 2px solid var(--pop-line);
+	/* The split save: two joined segments of one control. The promoted half —
+	   "Add & create order" — carries the yellow and the arrow; the plain add sits
+	   beside it as the quieter outlined segment. Scoped as .add-actions .x so
+	   these outrank the `.add-actions button` base rule above. */
+	.add-group {
+		display: inline-flex;
+		align-items: stretch;
+		border-radius: 999px;
+		box-shadow: var(--pop-shadow-sm);
+	}
+	.add-actions .add-plain {
+		border: 1px solid var(--line-strong);
+		border-right: none;
+		border-radius: 999px 0 0 999px;
 		background: var(--surface);
 		color: var(--fg);
 		font-weight: 700;
-		box-shadow: var(--pop-shadow-sm);
 	}
-	.add-secondary:hover {
+	.add-actions .add-plain:hover {
 		background: var(--surface-sunken);
 	}
-	/* The safety-yellow sticker button. Text and border pinned dark rather than
-	   tokenised: yellow stays light in both themes, so its text must stay dark. */
-	.add-primary {
-		border: 2px solid #14171c;
+	/* Pinned dark on yellow: yellow stays light in both themes. */
+	.add-actions .add-go {
+		border: 1px solid transparent;
+		border-radius: 0 999px 999px 0;
 		background: var(--yellow);
 		color: #14171c;
 		font-weight: 700;
-		box-shadow: var(--pop-shadow-sm);
 	}
-	.add-primary:hover {
+	.add-actions .add-go:hover {
 		background: var(--yellow-deep);
 	}
-	/* Outlined in the foreground colour, not yellow: the primary is yellow now, and
-	   a yellow ring on a yellow button is no ring at all. */
+	.go-arrow {
+		display: inline-block;
+		margin-left: 0.15rem;
+		transition: transform 0.15s ease;
+	}
+	.add-actions .add-go:hover .go-arrow {
+		transform: translateX(2px);
+	}
+	/* Outlined in the foreground colour, not yellow: the promoted segment is
+	   yellow, and a yellow ring on a yellow button is no ring at all. z-index so
+	   the ring isn't sliced by the sibling segment. */
 	.add-actions button:focus-visible {
 		outline: 2px solid var(--fg);
 		outline-offset: 2px;
+		position: relative;
+		z-index: 1;
 	}
 	@media (max-width: 420px) {
-		/* The two submits stack full-width; Cancel drops below them as a compact text
-		   link rather than a third slab. Selectors are (0,2,0) so they can't be
-		   outranked by the base rules — media queries add no specificity. */
-		.add-actions .add-secondary,
-		.add-actions .add-primary {
+		/* The group goes full-width and stacks its segments, promoted half at the
+		   bottom where the thumb is; Cancel drops below as a compact text link.
+		   Selectors are (0,2,0) so they can't be outranked by the base rules —
+		   media queries add no specificity. */
+		.add-actions .add-group {
 			flex: 1 1 100%;
+			flex-direction: column;
+			align-items: stretch;
+			border-radius: 14px;
+		}
+		.add-actions .add-plain {
+			border-right: 1px solid var(--line-strong);
+			border-bottom: none;
+			border-radius: 14px 14px 0 0;
+		}
+		.add-actions .add-go {
+			border-radius: 0 0 14px 14px;
 		}
 		.add-actions .add-cancel {
 			order: 1;

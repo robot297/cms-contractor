@@ -2,10 +2,13 @@ import { fail, redirect } from '@sveltejs/kit';
 import { validateFeedback } from '$lib/crm';
 import {
 	captchaSiteKey,
+	isAllowedScreenshotType,
 	isSupportConfigured,
+	MAX_SCREENSHOT_BYTES,
 	submitFeedback,
 	SupportError,
-	verifyCaptcha
+	verifyCaptcha,
+	type SupportScreenshot
 } from '$lib/server/support.server';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -50,8 +53,31 @@ export const actions: Actions = {
 		});
 		if (!parsed.ok) return fail(400, { field: parsed.field, message: parsed.message });
 
+		// Optional screenshot. The client pre-checks type and size; this is the half
+		// that holds when the request is stale or hand-rolled.
+		let screenshot: SupportScreenshot | null = null;
+		const shot = form.get('screenshot');
+		if (shot instanceof File && shot.size > 0) {
+			if (!isAllowedScreenshotType(shot.type))
+				return fail(400, {
+					field: 'screenshot',
+					message: 'Screenshots must be a PNG, JPEG, WebP or GIF image.'
+				});
+			if (shot.size > MAX_SCREENSHOT_BYTES)
+				return fail(400, { field: 'screenshot', message: 'Keep screenshots under 5 MB.' });
+			screenshot = {
+				name: shot.name,
+				type: shot.type,
+				bytes: new Uint8Array(await shot.arrayBuffer())
+			};
+		}
+
 		try {
-			const issue = await submitFeedback(parsed.value, { name: user.name, email: user.email });
+			const issue = await submitFeedback(
+				parsed.value,
+				{ name: user.name, email: user.email },
+				screenshot
+			);
 			return {
 				success: true,
 				issueUrl: issue.url,
