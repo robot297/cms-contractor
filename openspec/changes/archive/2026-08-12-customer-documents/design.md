@@ -5,6 +5,7 @@ The `contractor-customer-directory` change established a first-class, contractor
 ## Goals / Non-Goals
 
 **Goals:**
+
 - A `document` entity owned by a contractor, attached to a customer (and optionally an order).
 - Upload with validation (size + mime allowlist), bytes on local disk, metadata in Postgres.
 - Tags on documents; a shared flag controlling portal visibility.
@@ -12,6 +13,7 @@ The `contractor-customer-directory` change established a first-class, contractor
 - A lightweight "request a response" on a shared document, with customer acknowledge/reply and contractor notification.
 
 **Non-Goals:**
+
 - Object storage / S3 (local disk first; storage is abstracted for a later swap).
 - Virus scanning, versioning, e-signatures, thumbnailing.
 - Templates (separate change).
@@ -19,27 +21,32 @@ The `contractor-customer-directory` change established a first-class, contractor
 ## Decisions
 
 ### Decision 1: Local disk for bytes, Postgres for metadata
+
 Store file bytes under a configured `UPLOADS_DIR`, keyed by a generated `storageKey` (e.g. `<documentId>` or `<customerId>/<uuid>`). A `document` table holds `id`, `contractorId`, `customerId`, nullable `orderId`, `name`, `mimeType`, `sizeBytes`, `storageKey`, `tags` (text[]), `shared` (bool), `responseRequested` (bool), `responseText`/`respondedAt` (nullable), timestamps.
 
 - **Why:** Fastest path at the pre-launch stage; works with adapter-node; no new infra/credentials. Metadata in Postgres keeps listing/scoping/joins simple.
 - **Alternative considered:** S3-compatible object storage (scalable, but needs a bucket + creds + SDK now) and Postgres `bytea` (no infra, but bloats the DB and streams poorly). Rejected for now; the storage module is abstracted so S3 can replace disk later.
 
 ### Decision 2: Storage module abstracts the filesystem
+
 A `src/lib/server/storage.ts` exposes `putObject(key, bytes)`, `getObjectStream(key)`, and `deleteObject(key)` over `UPLOADS_DIR`. Server code never touches `fs` paths directly.
 
 - **Why:** Confines the disk dependency to one seam so a future object-storage swap is a single-file change.
 
 ### Decision 3: Downloads via a guarded `+server.ts` endpoint
+
 A route like `src/routes/documents/[id]/+server.ts` (GET) resolves the document, checks that the requester is the owning contractor or the linked customer with `shared = true`, then streams from the storage module. Uploads happen through form actions on the contractor customer view using multipart form data.
 
 - **Why:** File responses need a raw endpoint, not a page load. Centralizing the access check in one handler keeps the rule enforceable and testable.
 
 ### Decision 4: Sharing is a boolean flag on the document; portal reads shared docs by customer
+
 The customer portal lists documents where `document.customerId` belongs to a customer whose `userId` is the current user and `shared = true`. "Request a response" sets `responseRequested = true`; the customer's acknowledge/reply writes `responseText`/`respondedAt` and notifies the contractor via the existing notification system.
 
 - **Why:** Reuses the customer↔user link and the notification pathway already built; avoids a separate ACL table for the MVP.
 
 ### Decision 5: Validation shared via Zod
+
 Mime allowlist and max size live in a Zod schema in `src/lib/documents.ts` (pure), used by the upload action server-side and available to the client for pre-submit checks — mirroring the customer-contact validation approach.
 
 ## Risks / Trade-offs

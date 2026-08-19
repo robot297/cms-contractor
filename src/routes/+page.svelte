@@ -343,7 +343,7 @@
 	}
 	.btn.primary {
 		background: #ffcc00;
-		color: #1a1a1a;
+		color: var(--on-yellow);
 		box-shadow: 0 8px 24px rgba(255, 204, 0, 0.28);
 	}
 	.btn.primary:hover:not(:disabled) {

@@ -19,6 +19,72 @@ The system SHALL represent a message as a record attached to exactly one Order, 
 - **WHEN** a send is submitted with an empty or whitespace-only body
 - **THEN** the send is refused and no message is stored
 
+### Requirement: Messages carry a topic
+
+A message SHALL record what it is about — a question, a payment matter, scheduling, a reported problem, or general. The topic SHALL be chosen by the Customer through a quick action rather than typed, SHALL default to general for a message written straight into the composer, and SHALL always be general on a Contractor's reply. An unrecognized topic SHALL be recorded as general rather than refusing the message.
+
+#### Scenario: Quick action sets the topic
+
+- **WHEN** a Customer sends a message through the "Ask a question" action
+- **THEN** the stored message carries the question topic
+
+#### Scenario: Plain composer files as general
+
+- **WHEN** a Customer sends a message without choosing a quick action
+- **THEN** the stored message carries the general topic
+
+#### Scenario: A reply carries no topic of its own
+
+- **WHEN** a Contractor replies to a message about a payment
+- **THEN** the reply is stored as general, so the topic is not counted twice
+
+#### Scenario: Unknown topic degrades to general
+
+- **WHEN** a send arrives naming a topic the system does not recognize
+- **THEN** the message is stored with the general topic and the send succeeds
+
+### Requirement: The portal offers quick actions rather than a bare composer
+
+The portal SHALL present a Customer with a set of labelled actions covering the common reasons to make contact, each of which opens the composer with its topic set and a prompt describing what it is for. The prompt SHALL live in the composer rather than as standing explanatory text around the actions. An action that names something the system does not do SHALL say so where the Customer will read it before writing.
+
+#### Scenario: Contact is one control, not a panel
+
+- **WHEN** a Customer opens one of their projects
+- **THEN** the contact surface is reachable from a single persistent control rather than occupying a section of the page
+
+#### Scenario: Actions are the entry point to the composer
+
+- **WHEN** a Customer opens the contact control
+- **THEN** labelled actions for asking a question, payment, scheduling and reporting a problem are shown above the composer, with no explanatory paragraph between the heading and the actions
+
+#### Scenario: Choosing an action sets the prompt
+
+- **WHEN** a Customer chooses a quick action
+- **THEN** the composer's placeholder describes what to write for that topic
+
+#### Scenario: Payment action states that the app takes no payment
+
+- **WHEN** a Customer chooses the payment action
+- **THEN** the portal states that payment is handled directly by their contractor and not through the application
+
+### Requirement: A reported problem is raised at higher priority
+
+A message a Customer files as a reported problem SHALL notify the Contractor at high priority; every other topic SHALL notify at standard priority.
+
+#### Scenario: Problem outranks a question
+
+- **WHEN** a Customer reports a problem
+- **THEN** the Contractor's notification is created at high priority
+
+### Requirement: The contractor sees what a message is about
+
+The Contractor's view of a thread SHALL show each Customer message's topic where it is not general, so a thread can be triaged without reading every message.
+
+#### Scenario: Topic is visible on the contractor's side
+
+- **WHEN** a Contractor opens a thread containing a payment message
+- **THEN** that message is labelled with its topic
+
 ### Requirement: Customer sends a message on their order
 
 A Customer SHALL be able to send a message on any Order linked to their own Customer record. The message SHALL be attached to that Order with an author role of customer.

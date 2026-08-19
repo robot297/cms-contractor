@@ -86,10 +86,16 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			visionConfigured: isIdScanVisionConfigured(),
 			devTools: isIdScanDevToolsEnabled()
 		},
-		// Open the add form on arrival when there is nothing else to do here: an
-		// empty roster, or a deliberate `?new` from the getting-started guide. The
-		// search-miss case is excluded — that page isn't empty, it's filtered.
-		openAdd: url.searchParams.has('new') || (roster.length === 0 && search === '')
+		// Open the add form on arrival ONLY when explicitly asked to — the `?new`
+		// the getting-started guide links with.
+		//
+		// It used to open on an empty roster too, on the reasoning that there was
+		// nothing else to do here. That is wrong: someone opening Subcontractors is
+		// not necessarily trying to add one, and landing in a form nobody asked for
+		// means the first thing you do on the page is dismiss it. The empty state
+		// offers the button instead, which is the same journey with the decision
+		// left where it belongs.
+		openAdd: url.searchParams.has('new')
 	};
 };
 

@@ -1,7 +1,6 @@
 import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { db } from './db';
 import {
-	attachment,
 	customer,
 	order,
 	orderSubcontractor,
@@ -15,14 +14,13 @@ import {
 	isSubcontractorLinked,
 	isValidAvatarDataUrl,
 	normalizeEmail,
-	redactCustomerForGuest,
 	type ContractorOrderState,
 	type SubcontractorTier
 } from '$lib/crm';
 import { InvalidAvatarError } from './crm.server';
 // Billing gate for contractor-initiated writes only. The subcontractor PORTAL
 // functions further down this file (`subcontractorOrderView`, `addSubcontractorNote`,
-// `addSubcontractorAttachment`, the invite-binding pair) are deliberately left
+// the invite-binding pair) are deliberately left
 // unguarded: a lapsed contractor's subs keep working exactly as before. See
 // docs/adr/0005-lapsing-never-reaches-customers.md.
 import { assertCanCreate, assertCanWrite } from './billing.server';
@@ -718,9 +716,16 @@ export async function subcontractorOrderView(
 		.where(and(eq(timelineEntry.orderId, orderId), eq(timelineEntry.internal, false)))
 		.orderBy(desc(timelineEntry.createdAt));
 
-	let customerBlock: SubOrderView['customer'] = null;
-	if (tier === 'trusted') {
-		customerBlock = row.customer
+	// Customer contact details reach a Trusted subcontractor and nobody else. A
+	// Guest gets null, assembled here on the server, so the PII is never in the
+	// payload rather than merely unrendered by the client.
+	//
+	// The guest branch used to call `redactCustomerForGuest()` and throw the result
+	// away before assigning null separately, which read as though the call were
+	// doing the redacting. It takes no arguments and returns a fixed all-null stub,
+	// so it was a no-op — the `null` below was always what dropped the PII.
+	const customerBlock: SubOrderView['customer'] =
+		tier === 'trusted' && row.customer
 			? {
 					name: row.customer.name,
 					email: row.customer.email,
@@ -728,11 +733,6 @@ export async function subcontractorOrderView(
 					address: row.customer.address
 				}
 			: null;
-	} else {
-		// Guest: assemble from the redacted projection — PII is dropped server-side.
-		redactCustomerForGuest();
-		customerBlock = null;
-	}
 
 	return {
 		id: row.order.id,
@@ -777,27 +777,10 @@ export async function addSubcontractorNote(
 	});
 }
 
-/** Upload a job photo to an assigned order as the subcontractor (Trusted only). */
-export async function addSubcontractorAttachment(
-	userId: string,
-	orderId: string,
-	file: { filename: string; mimeType: string; size: number; data: Buffer }
-): Promise<void> {
-	const sub = await assignedSubForUserOrder(userId, orderId);
-	if (!sub) throw new Error('Order not found');
-	if ((sub.tier as SubcontractorTier) !== 'trusted') throw new GuestWriteForbiddenError();
-	const [ord] = await db
-		.select({ contractorId: order.contractorId })
-		.from(order)
-		.where(and(eq(order.id, orderId), isNull(order.deletedAt)))
-		.limit(1);
-	if (!ord) throw new Error('Order not found');
-	await db.insert(attachment).values({
-		orderId,
-		contractorId: ord.contractorId,
-		filename: file.filename,
-		mimeType: file.mimeType,
-		size: file.size,
-		data: file.data
-	});
-}
+/**
+ * A subcontractor's job photos are Documents, uploaded through
+ * `documents.server.ts` like everyone else's. Tier is still what decides whether
+ * they may write one — `orderAccess` reads it from this module's `subcontractor`
+ * row and reports `canWrite: false` for a Guest, which is the same rule this
+ * function used to apply on its own.
+ */

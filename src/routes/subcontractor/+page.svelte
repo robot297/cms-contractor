@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { tierLabel, type SubcontractorTier } from '$lib/crm';
 	import type { PageData } from './$types';
 
@@ -49,7 +50,7 @@
 	{:else}
 		<div class="grid">
 			{#each data.orders as o (o.id)}
-				<a class="card" href="/subcontractor/{o.id}">
+				<a class="card" href={resolve(`/subcontractor/${o.id}`)}>
 					<div class="card-top">
 						<strong>{o.projectName ?? 'Untitled job'}</strong>
 						<span class="state">{o.customerVisibleState}</span>
@@ -162,7 +163,10 @@
 		font-size: 0.72rem;
 		font-weight: 800;
 		text-transform: uppercase;
-		background: #ffcc00;
+		background: var(--yellow);
+		/* Stated, not inherited: the pill's fill is light in both themes, so it must
+		   not pick up the shell's text colour, which flips to near-white in dark. */
+		color: var(--on-yellow);
 		border: none;
 		border-radius: 999px;
 		padding: 0.12rem 0.55rem;

@@ -17,15 +17,18 @@ import {
  * turns into is a pure function of its payload, so it can be pinned down here
  * exactly — no camera, no network, no real driver's licence, and no flake.
  *
- * The fixtures are real AAMVA payload shapes, control characters and all. The
- * compliance indicator (`@`), record separator (0x1e) and segment terminator
- * (0x0d) are written literally so the parser is fed what a scanner actually
- * hands it.
+ * The fixtures are real AAMVA payload shapes, control characters and all — the
+ * compliance indicator (`@`), the record separator and the segment terminator —
+ * so the parser is fed what a scanner actually hands it.
+ *
+ * The separators are written as escape sequences rather than as raw bytes. Same
+ * string either way, but a raw one would make this file read as binary to grep
+ * and vanish from review. See src/lib/source-hygiene.test.ts.
  */
 
 /** A well-formed Virginia licence, AAMVA version 02. */
 const US_LICENCE = [
-	'@\n\r',
+	'@\n\u001e\r',
 	'ANSI 636000100002DL00410279ZV03190008DLDAQT64235789\n',
 	'DCSSAMPLE\n',
 	'DDEN\n',
@@ -56,7 +59,7 @@ const US_LICENCE = [
 
 /** An Ontario licence: CCYYMMDD dates and a Canadian postal code. */
 const CA_LICENCE = [
-	'@\n\r',
+	'@\n\u001e\r',
 	'ANSI 636012080102DL00410278ZO03190008DLDAQD12345678901234\n',
 	'DCSTREMBLAY\n',
 	'DACMARIE\n',

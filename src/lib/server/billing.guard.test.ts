@@ -42,8 +42,6 @@ describe('contractor writes are billing-guarded', () => {
 		'setOrderIcon',
 		'setOrderTags',
 		'updateOrderState',
-		'addAttachment',
-		'deleteAttachment',
 		'addOrderNote',
 		'recordEmailSent',
 		'deleteOrder',
@@ -98,8 +96,8 @@ describe('portal paths are never billing-guarded', () => {
 	// ADR-0005: a lapsed contractor's customers and subcontractors are unaffected.
 	// A guard appearing here is a regression, not a tidy-up.
 	it.each([
-		'getCustomerPortal',
-		'addCustomerRequest',
+		'listPortalOrders',
+		'getPortalOrder',
 		'bindInviteToken',
 		'bindCustomerByEmail',
 		'markNotificationRead'
@@ -107,10 +105,65 @@ describe('portal paths are never billing-guarded', () => {
 		expect(guarded(functionBody(crm, fn))).toBe(false);
 	});
 
+	// Messaging is the one module both sides share, so it cannot be judged by
+	// "does it import billing" — it must, for the contractor's reply. What matters
+	// is that the guard is reached only on the contractor branch; the customer's
+	// send never consults a subscription. Asserted in detail in
+	// messaging.server.test.ts, and pinned here so this file lists every path.
+	it('messaging.server.ts guards the contractor side only', () => {
+		const messaging = read('messaging.server.ts');
+		expect(functionBody(messaging, 'sendMessage')).toContain(
+			"if (viewer.role === 'contractor') await assertCanWrite("
+		);
+		for (const fn of [
+			'getThread',
+			'markThreadRead',
+			// Reads, both of them. A lapsed contractor keeps full read access to
+			// everything they built (ADR-0005), so the dashboard must still be able
+			// to tell them a customer is waiting — refusing to show that would be
+			// taking the customer hostage, which is the thing the ADR forbids.
+			'awaitingReplyForContractor',
+			'awaitingReplyForCustomer'
+		]) {
+			expect(guarded(functionBody(messaging, fn))).toBe(false);
+		}
+	});
+
+	// Documents are the other module both sides share. Like messaging, it must
+	// import billing — the contractor's own upload is guarded — so what matters is
+	// that the guard is reached on that branch and on no other. Every other
+	// document operation, including a customer's write, stays clear of it.
+	it('documents.server.ts guards the contractor branch only', () => {
+		const documents = read('documents.server.ts');
+		for (const fn of ['uploadDocuments', 'updateDocument', 'renameDocument']) {
+			expect(functionBody(documents, fn)).toContain(
+				"if (viewer.role === 'contractor') await assertCanWrite("
+			);
+		}
+		for (const fn of [
+			'listDocuments',
+			'getDocument',
+			'getDocumentBytes',
+			'orderAccess',
+			'markDocumentsRead',
+			// A customer taking back something they sent is a customer write: it
+			// must not consult the contractor's subscription (ADR-0005).
+			'withdrawDocument',
+			'unreadDocumentOrders'
+		]) {
+			expect(guarded(functionBody(documents, fn))).toBe(false);
+		}
+	});
+
+	// The contractor-only writes in the same module are guarded outright rather
+	// than on a branch, because no other role reaches them at all.
+	it.each(['deleteDocument'])('documents.server.ts %s calls a billing guard', (fn) => {
+		expect(guarded(functionBody(read('documents.server.ts'), fn))).toBe(true);
+	});
+
 	it.each([
 		'subcontractorOrderView',
 		'addSubcontractorNote',
-		'addSubcontractorAttachment',
 		'bindSubcontractorInviteToken',
 		'bindSubcontractorByEmail',
 		'listAssignedOrdersForUser'

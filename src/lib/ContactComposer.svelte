@@ -11,7 +11,8 @@
 		orderId,
 		rows = 6,
 		onsent,
-		onclose
+		onclose,
+		channel = null
 	}: {
 		customer: { name: string; email: string; phone: string | null; preferredContact: string };
 		/** Order project name, used to resolve `{{project}}`. Omitted off order surfaces. */
@@ -26,6 +27,15 @@
 		onsent?: () => void;
 		/** When provided, the composer shows a header with a cancel (✕) button. */
 		onclose?: () => void;
+		/**
+		 * Force the channel and hide the picker.
+		 *
+		 * For surfaces that already offer the choice themselves — the dashboard
+		 * puts chat, email, text and call on one tab strip, and a second selector
+		 * inside the pane it opens would be the same question asked twice. Left
+		 * null (the default) the composer owns the choice as it always has.
+		 */
+		channel?: 'email' | 'text' | 'call' | null;
 	} = $props();
 
 	// Templates + branding are loaded once in contractor/+layout.server.ts, so they
@@ -57,6 +67,8 @@
 	// message to compose — its action is just a tel: link — but it lives in the same
 	// picker so there's a single, non-redundant set of contact controls.
 	let method = $state<'email' | 'text' | 'call'>('email');
+	/** What is actually showing: the host's choice when it made one, else ours. */
+	const active = $derived(channel ?? method);
 	const tel = $derived((customer.phone ?? '').replace(/[^\d+]/g, ''));
 
 	// Email channel: a chosen template fills subject + body, both still editable.
@@ -83,8 +95,10 @@
 	$effect(() => {
 		void customer.email; // track the customer identity so the reset re-runs on change
 		untrack(() => {
-			// Default to the customer's preferred channel when it's reachable.
-			method = preferred !== 'email' && customer.phone ? preferred : 'email';
+			// Default to the customer's preferred channel when it's reachable. Skipped
+			// when the host is driving the channel — it would be overwriting a choice
+			// that isn't ours to make.
+			if (!channel) method = preferred !== 'email' && customer.phone ? preferred : 'email';
 			templateId = '';
 			subject = '';
 			body = '';
@@ -148,7 +162,7 @@
 	let failedBody = $state('');
 
 	// The message channels have a compose step to guard; Call is a direct link.
-	const canSend = $derived(method === 'text' ? !!text.trim() : !!body.trim());
+	const canSend = $derived(active === 'text' ? !!text.trim() : !!body.trim());
 </script>
 
 <div class="composer">
@@ -162,36 +176,38 @@
 	<!-- Channel selector first: the customer's preferred channel is pre-selected.
 	     A segmented control — equal-width segments on one row — rather than a
 	     label + loose chips, which wrapped to two ragged rows on phones. -->
-	<div class="methods" role="group" aria-label="Contact method">
-		<button
-			type="button"
-			class="chip"
-			class:sel={method === 'email'}
-			onclick={() => (method = 'email')}
-		>
-			✉️ Email{#if preferred === 'email'}<span class="star" title="Preferred">★</span>{/if}
-		</button>
-		{#if customer.phone}
+	{#if !channel}
+		<div class="methods" role="group" aria-label="Contact method">
 			<button
 				type="button"
 				class="chip"
-				class:sel={method === 'text'}
-				onclick={() => (method = 'text')}
+				class:sel={method === 'email'}
+				onclick={() => (method = 'email')}
 			>
-				💬 Text{#if preferred === 'text'}<span class="star" title="Preferred">★</span>{/if}
+				✉️ Email{#if preferred === 'email'}<span class="star" title="Preferred">★</span>{/if}
 			</button>
-			<button
-				type="button"
-				class="chip"
-				class:sel={method === 'call'}
-				onclick={() => (method = 'call')}
-			>
-				📞 Call{#if preferred === 'call'}<span class="star" title="Preferred">★</span>{/if}
-			</button>
-		{/if}
-	</div>
+			{#if customer.phone}
+				<button
+					type="button"
+					class="chip"
+					class:sel={method === 'text'}
+					onclick={() => (method = 'text')}
+				>
+					💬 Text{#if preferred === 'text'}<span class="star" title="Preferred">★</span>{/if}
+				</button>
+				<button
+					type="button"
+					class="chip"
+					class:sel={method === 'call'}
+					onclick={() => (method = 'call')}
+				>
+					📞 Call{#if preferred === 'call'}<span class="star" title="Preferred">★</span>{/if}
+				</button>
+			{/if}
+		</div>
+	{/if}
 
-	{#if method === 'call'}
+	{#if active === 'call'}
 		<!-- Call has nothing to compose, but the pane keeps the composer's footprint
 		     so switching channels doesn't bounce the card's size around. -->
 		<div class="compose-box call-pane">
@@ -212,7 +228,7 @@
 				// The demo never posts to the send action — real or simulated. The
 				// server refuses it anyway; this just spares the round-trip when a
 				// stale page still has a submit path.
-				if (demoAccount && method === 'email') {
+				if (demoAccount && active === 'email') {
 					cancel();
 					sendError = 'Email sending is disabled in the demo';
 					return;
@@ -230,7 +246,12 @@
 				else formData.delete('simulate');
 				// Text is handled client-side, and an unconfigured install has nothing
 				// to post to — both take the handoff instead of a round-trip.
-				if (method !== 'email') {
+				//
+				// `active`, NOT `method`: when the host drives the channel, `method` is
+				// still whatever this component last defaulted to, so reading it here
+				// sent a text down the email path — a real POST to ?/sendEmail instead
+				// of the sms: handoff.
+				if (active !== 'email') {
 					cancel();
 					sendText();
 					return;
@@ -272,7 +293,7 @@
 				};
 			}}
 		>
-			{#if method === 'email'}
+			{#if active === 'email'}
 				<input type="hidden" name="customerEmail" value={customer.email} />
 				<input type="hidden" name="customerName" value={customer.name} />
 				<input type="hidden" name="project" value={project ?? ''} />
@@ -330,11 +351,11 @@
 				<span class="sig-note">Opens in your messaging app and sends as a normal text.</span>
 			{/if}
 			<div class="foot">
-				{#if method === 'email' && demoAccount}
+				{#if active === 'email' && demoAccount}
 					<!-- The demo showcases the composer, not the send pipeline: only real,
 					     verified accounts send mail from the app. -->
 					<span class="demo-note">Email sending is off in the demo</span>
-				{:else if method === 'email' && devTools}
+				{:else if active === 'email' && devTools}
 					<!-- EMAIL_DEV_TOOLS only. Simulation and real sending are mutually
 					     exclusive — a server in this mode refuses real sends outright —
 					     so the mock pair stands where the real Send would be, instead of
@@ -357,7 +378,7 @@
 					</div>
 				{:else}
 					<button type="submit" class="send" disabled={!canSend || sending}>
-						{#if sending}Sending…{:else}Send {method === 'text' ? 'text' : 'email'}{/if}
+						{#if sending}Sending…{:else}Send {active === 'text' ? 'text' : 'email'}{/if}
 					</button>
 				{/if}
 			</div>
@@ -519,7 +540,7 @@
 	}
 	.devsend.ok {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.devsend.ok:hover:not(:disabled) {
@@ -638,7 +659,7 @@
 	.chip.sel,
 	.chip.sel:hover {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		box-shadow: 0 1px 3px rgba(27, 31, 36, 0.18);
 	}
 	.star {
@@ -666,7 +687,7 @@
 		border: none;
 		border-radius: 10px;
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		font-weight: 700;
 		font-size: 0.88rem;
 		cursor: pointer;
@@ -688,6 +709,18 @@
 	}
 	.call-btn:hover {
 		background: #1a7f37;
+	}
+
+	/* On the phone modal there's a lot more height than the popover's fixed 19rem
+	   footprint used. Let the compose area and its message box grow into it so the
+	   card fills tastefully instead of stranding empty space below the Send button. */
+	@media (max-width: 480px) {
+		.compose-box {
+			min-height: 44vh;
+		}
+		.composer-text {
+			min-height: 30vh;
+		}
 	}
 
 	/* Dark theme */

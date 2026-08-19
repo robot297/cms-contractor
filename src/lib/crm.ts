@@ -254,14 +254,6 @@ export type SubcontractorContact = {
 	tags: string[];
 };
 
-/** Parse a YYYY-MM-DD date input into a Date, or null when blank/invalid. */
-function parseDateInput(value?: string): Date | null {
-	const t = (value ?? '').trim();
-	if (t === '') return null;
-	const d = new Date(t);
-	return Number.isNaN(d.getTime()) ? null : d;
-}
-
 /** The single source of truth for subcontractor-profile validation (client + server). */
 export const subcontractorContactSchema = z.object({
 	name: z.string().trim().min(1, 'Name is required'),
@@ -442,7 +434,17 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * three days usually hasn't gone quiet at all, and a dashboard full of
  * not-yet-real follow-ups is one contractors learn to ignore.
  */
-export const DEFAULT_FOLLOWUP_DAYS = 7;
+/**
+ * The house cadence: how long after speaking to a customer the contractor should
+ * be reminded to speak to them again.
+ *
+ * Two weeks rather than one. A week was chosen when the follow-up was purely
+ * manual; now that sending a message pushes the date out by this amount, a
+ * seven-day cadence means a contractor who answers a question on Monday is being
+ * chased about the same job the following Monday, which teaches them to ignore
+ * the list.
+ */
+export const DEFAULT_FOLLOWUP_DAYS = 14;
 
 /**
  * What a contractor may set their default to. A short list rather than a free
@@ -475,10 +477,13 @@ export function defaultFollowUp(
 	return new Date(from.getTime() + days * DAY_MS);
 }
 
-export type SnoozePreset = '1d' | '3d' | '1w';
+export type SnoozePreset = '1d' | '3d' | '1w' | '1m';
+
+/** Days each preset pushes the follow-up out by. A month is taken as 30 days. */
+const SNOOZE_DAYS: Record<SnoozePreset, number> = { '1d': 1, '3d': 3, '1w': 7, '1m': 30 };
 
 export function isSnoozePreset(value: string): value is SnoozePreset {
-	return value === '1d' || value === '3d' || value === '1w';
+	return Object.hasOwn(SNOOZE_DAYS, value);
 }
 
 /** A follow-up is "due" when it is set and on or before now. */
@@ -488,17 +493,119 @@ export function isFollowUpDue(date: Date | null, now: Date = new Date()): boolea
 
 /** Compute a snoozed follow-up date from a preset. */
 export function snoozeDate(preset: SnoozePreset, from: Date = new Date()): Date {
-	const days = preset === '1d' ? 1 : preset === '3d' ? 3 : 7;
-	return new Date(from.getTime() + days * DAY_MS);
+	return new Date(from.getTime() + SNOOZE_DAYS[preset] * DAY_MS);
 }
 
-// -------------------------------------------------------------- Attachments
+/**
+ * `<input type="date">` ↔ Date, as a LOCAL calendar day.
+ *
+ * `new Date('2026-08-14')` is UTC midnight, which is the evening of the 13th
+ * everywhere west of Greenwich. Feeding a date picker's value straight into it
+ * therefore stores the day BEFORE the one the contractor clicked, for every user
+ * in the Americas — so a follow-up set for today was born a day overdue.
+ *
+ * It went unnoticed while the dashboard only said "Needs update". It stopped
+ * being invisible the moment that badge started counting days.
+ *
+ * `toISOString().slice(0, 10)` is the same mistake in reverse and is why these
+ * come as a pair: only used together do they round-trip the day the user meant.
+ *
+ * Every date the app takes from a picker comes through here — follow-ups and a
+ * subcontractor's licence and insurance expiry — because they all had their own
+ * copy of the same one-line mistake.
+ */
+export function parseDateInput(value?: string): Date | null {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec((value ?? '').trim());
+	if (!match) return null;
+	const [, y, m, d] = match.map(Number) as unknown as [string, number, number, number];
+	const date = new Date(y, m - 1, d);
+	// Rejects the impossible (2026-02-31 rolls into March) rather than silently
+	// accepting whatever the constructor decided it meant.
+	if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return null;
+	return date;
+}
 
-/** Cap on a single order attachment. Blobs live in Postgres, so keep it modest. */
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB
+/** The inverse: a Date as the `yyyy-mm-dd` its own local calendar day. */
+export function toDateInput(date: Date | string | null): string {
+	if (date == null) return '';
+	const at = typeof date === 'string' ? new Date(date) : date;
+	if (Number.isNaN(at.getTime())) return '';
+	const pad = (n: number) => String(n).padStart(2, '0');
+	return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
 
-/** File types a contractor may attach to an order. */
-export const ALLOWED_ATTACHMENT_TYPES = [
+/**
+ * How badly a follow-up wants attention.
+ *
+ * Separate from `isFollowUpDue`, which decides whether an order appears at all.
+ * This decides how it should *look* once it does, and the difference is the
+ * point: a job you meant to chase last Tuesday and one you planned to call about
+ * this morning are not the same situation, and a dashboard that renders them
+ * identically makes the contractor re-derive that from a date every time.
+ *
+ * Compared by calendar day rather than by elapsed hours. "Due today" has to mean
+ * the day on the wall, so a follow-up set for this morning still reads as
+ * today's work at 4pm rather than as nine hours overdue.
+ */
+export type FollowUpUrgency = 'overdue' | 'today' | 'upcoming' | 'none';
+
+/** Midnight at the start of `date`'s local calendar day. */
+function startOfDay(date: Date): number {
+	return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+export function followUpUrgency(
+	date: Date | string | null,
+	now: Date = new Date()
+): FollowUpUrgency {
+	if (date == null) return 'none';
+	const at = typeof date === 'string' ? new Date(date) : date;
+	if (Number.isNaN(at.getTime())) return 'none';
+	const diffDays = Math.round((startOfDay(at) - startOfDay(now)) / DAY_MS);
+	if (diffDays < 0) return 'overdue';
+	if (diffDays === 0) return 'today';
+	return 'upcoming';
+}
+
+/** Whole calendar days a follow-up is past due; 0 when it is not overdue. */
+export function followUpDaysOverdue(date: Date | string | null, now: Date = new Date()): number {
+	if (date == null) return 0;
+	const at = typeof date === 'string' ? new Date(date) : date;
+	if (Number.isNaN(at.getTime())) return 0;
+	return Math.max(0, Math.round((startOfDay(now) - startOfDay(at)) / DAY_MS));
+}
+
+/**
+ * What the badge on a due order says. Counts the days rather than saying only
+ * "overdue": three days late and three weeks late are different conversations,
+ * and the number is the whole reason to sort the list the way it is sorted.
+ */
+export function followUpLabel(date: Date | string | null, now: Date = new Date()): string {
+	const urgency = followUpUrgency(date, now);
+	if (urgency === 'today') return 'Due today';
+	if (urgency === 'overdue') {
+		const days = followUpDaysOverdue(date, now);
+		return days === 1 ? '1 day overdue' : `${days} days overdue`;
+	}
+	if (urgency === 'upcoming') return `Due in ${followUpDaysLabel(daysUntil(date, now))}`;
+	return 'No follow-up set';
+}
+
+/** Whole calendar days from now until `date`; 0 when it is today or past. */
+function daysUntil(date: Date | string | null, now: Date): number {
+	if (date == null) return 0;
+	const at = typeof date === 'string' ? new Date(date) : date;
+	if (Number.isNaN(at.getTime())) return 0;
+	return Math.max(0, Math.round((startOfDay(at) - startOfDay(now)) / DAY_MS));
+}
+
+// ---------------------------------------------------------------- Documents
+
+/** Cap on a single Document. Blobs live in Postgres, so keep it modest. */
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/** File types any role may put on an Order. */
+export const ALLOWED_DOCUMENT_TYPES = [
 	'image/png',
 	'image/jpeg',
 	'image/webp',
@@ -506,8 +613,132 @@ export const ALLOWED_ATTACHMENT_TYPES = [
 	'application/pdf'
 ] as const;
 
-export function isAllowedAttachmentType(mime: string): boolean {
-	return (ALLOWED_ATTACHMENT_TYPES as readonly string[]).includes(mime);
+export function isAllowedDocumentType(mime: string): boolean {
+	return (ALLOWED_DOCUMENT_TYPES as readonly string[]).includes(mime);
+}
+
+/** The minimum a surface needs to hand a Document to the shared viewer. */
+export type DocumentRef = { id: string; filename: string; mimeType: string };
+
+/**
+ * Where a Document's bytes are served from — one path for every role and every
+ * surface. Built here rather than at each call site so no list has to know the
+ * shape of it, and so `?dl` is spelled the same way everywhere.
+ */
+export function documentHref(id: string, download = false): string {
+	return `/documents/${id}${download ? '?dl' : ''}`;
+}
+
+/** How the shared viewer should try to render a document. */
+export function documentKind(mimeType: string): 'image' | 'pdf' | 'other' {
+	if (mimeType.startsWith('image/')) return 'image';
+	if (mimeType === 'application/pdf') return 'pdf';
+	return 'other';
+}
+
+/** A short type badge for a document tile — "PDF", "JPG", or the extension. */
+export function documentExtLabel(filename: string, mimeType: string): string {
+	const { ext } = splitFilename(filename);
+	if (ext) return ext.slice(1).toUpperCase().slice(0, 4);
+	return mimeType === 'application/pdf' ? 'PDF' : 'FILE';
+}
+
+/**
+ * What the bytes actually are, regardless of what the upload claimed.
+ *
+ * The MIME type on an upload is supplied by the browser and is trivially
+ * spoofed — a shell script renamed `receipt.pdf` and posted with
+ * `Content-Type: application/pdf` passes an allowlist check on its own. So the
+ * content is read too, and the two have to agree.
+ *
+ * Returns a recognized type, one of the deliberately-named dangerous families,
+ * or null when the signature matches nothing we know.
+ */
+export function sniffFileType(bytes: Uint8Array): string | null {
+	const at = (offset: number, sig: number[]) => sig.every((byte, i) => bytes[offset + i] === byte);
+
+	// --- Accepted ---
+	if (at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png';
+	if (at(0, [0xff, 0xd8, 0xff])) return 'image/jpeg';
+	if (at(0, [0x47, 0x49, 0x46, 0x38])) return 'image/gif';
+	// RIFF....WEBP
+	if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) return 'image/webp';
+	if (at(0, [0x25, 0x50, 0x44, 0x46])) return 'application/pdf';
+
+	// --- Named so the refusal can say what it actually found ---
+	// PK.. — every zip, and therefore also .docx/.xlsx/.pptx, which are zip
+	// containers. Accepting Office formats would contradict "no compressed
+	// content"; that is a decision to take deliberately, not by accident.
+	if (at(0, [0x50, 0x4b, 0x03, 0x04]) || at(0, [0x50, 0x4b, 0x05, 0x06])) return 'archive';
+	if (at(0, [0x1f, 0x8b])) return 'archive'; // gzip
+	if (at(0, [0x37, 0x7a, 0xbc, 0xaf])) return 'archive'; // 7z
+	if (at(0, [0x52, 0x61, 0x72, 0x21])) return 'archive'; // rar
+	if (at(0, [0x7f, 0x45, 0x4c, 0x46])) return 'executable'; // ELF
+	if (at(0, [0x4d, 0x5a])) return 'executable'; // DOS/PE
+	if (at(0, [0xcf, 0xfa, 0xed, 0xfe]) || at(0, [0xfe, 0xed, 0xfa, 0xcf])) return 'executable'; // Mach-O
+	if (at(0, [0x23, 0x21])) return 'script'; // #!
+
+	return null;
+}
+
+/** Why an upload was refused, phrased for the person who chose the file. */
+export type UploadRefusal =
+	| 'unsupported type'
+	| 'compressed archives are not accepted'
+	| 'programs are not accepted'
+	| 'scripts are not accepted'
+	| 'file content does not match its type';
+
+/**
+ * Decide whether bytes may be stored, from the claimed type AND the content.
+ *
+ * Both must pass: the claimed type must be on the allowlist, and the signature
+ * must agree with it. Disagreement is refused even when the sniffed type is
+ * itself allowed — a PNG posted as a PDF is either a broken client or someone
+ * probing, and neither is worth storing.
+ */
+export function checkUploadContent(claimedMime: string, bytes: Uint8Array): UploadRefusal | null {
+	const actual = sniffFileType(bytes);
+	if (actual === 'archive') return 'compressed archives are not accepted';
+	if (actual === 'executable') return 'programs are not accepted';
+	if (actual === 'script') return 'scripts are not accepted';
+	if (!isAllowedDocumentType(claimedMime)) return 'unsupported type';
+	if (actual === null) return 'file content does not match its type';
+	if (actual !== claimedMime) return 'file content does not match its type';
+	return null;
+}
+
+/**
+ * Split a filename into the part worth editing and the extension.
+ *
+ * The extension is kept OUT of the editable field: a customer renaming
+ * "IMG_4821.jpg" to "Kitchen before" should not have to remember to type ".jpg",
+ * and a file that loses its extension stops opening.
+ */
+export function splitFilename(name: string): { stem: string; ext: string } {
+	const dot = name.lastIndexOf('.');
+	if (dot <= 0 || dot === name.length - 1) return { stem: name, ext: '' };
+	return { stem: name.slice(0, dot), ext: name.slice(dot) };
+}
+
+/**
+ * Rebuild a filename from a user-supplied stem and a trusted extension.
+ *
+ * The stem came from a text input, so it is stripped of path separators and
+ * control characters and capped — this value ends up in a Content-Disposition
+ * header and on disk. The extension is never taken from the input; it comes from
+ * the uploaded file itself.
+ */
+export function safeFilename(stem: string, ext: string, fallback = 'document'): string {
+	const cleaned = stem
+		// eslint-disable-next-line no-control-regex -- stripping control chars is the point
+		.replace(/[/\\:*?"<>|\u0000-\u001f\u007f]/g, '')
+		// A leading dot would hide the file, or read as an extension.
+		.replace(/^\.+/, '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.slice(0, 80);
+	return (cleaned || fallback) + ext;
 }
 
 /** Human-readable byte size, e.g. "2.4 MB". */
@@ -540,6 +771,21 @@ export function isActiveState(state: ContractorOrderState): boolean {
 export type CustomerVisibleState =
 	'Pending' | 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled' | 'On Hold';
 
+/**
+ * Which stage of the customer's four-step rail an Order sits in.
+ *
+ * This is the COARSE reading, and it is coarse on purpose: a rail with ten dots
+ * is unreadable on a phone. What the customer is actually waiting on is said in
+ * words by `customerStateLabel` beside it, so nothing is hidden by the grouping —
+ * the rail answers "how far along", the label answers "what now".
+ *
+ * NOTE the switch is exhaustive and has NO `default`. That is load-bearing: a
+ * `default` clause here previously swallowed `Final Payment Pending`, which had
+ * never been added, and reported it to the customer as `Pending` — sending the
+ * rail backwards from In Progress to the first step on a job whose work was
+ * finished. Without a default, adding an eleventh contractor state is a type
+ * error rather than a silent wrong answer.
+ */
 export function getVisibleCustomerState(state: ContractorOrderState): CustomerVisibleState {
 	switch (state) {
 		case 'Inquiry':
@@ -549,7 +795,10 @@ export function getVisibleCustomerState(state: ContractorOrderState): CustomerVi
 			return 'Pending';
 		case 'Work Scheduled':
 			return 'Scheduled';
+		// `Final Payment Pending` sits here rather than in Completed: the work is
+		// done but the job is not closed until it has been paid for.
 		case 'In Progress':
+		case 'Final Payment Pending':
 			return 'In Progress';
 		case 'Work Complete':
 			return 'Completed';
@@ -557,14 +806,188 @@ export function getVisibleCustomerState(state: ContractorOrderState): CustomerVi
 			return 'Cancelled';
 		case 'On Hold / Archived':
 			return 'On Hold';
-		default:
-			return 'Pending';
 	}
+}
+
+/**
+ * What the customer is actually waiting on, in their own words.
+ *
+ * One label per contractor state, so the portal's headline tracks the workflow
+ * one-for-one even though the rail beneath it groups. "Pending" covered four
+ * genuinely different situations — two of which are waiting on the CUSTOMER, not
+ * on the contractor — and a customer who owes a deposit should be told that
+ * rather than shown a word that sounds like the contractor is busy.
+ *
+ * The contractor's own vocabulary is not reused verbatim: "Deposit Pending" is
+ * bookkeeping, "Deposit due" is a thing to act on. Exhaustive for the same reason
+ * as above.
+ */
+export function customerStateLabel(state: ContractorOrderState): string {
+	switch (state) {
+		case 'Inquiry':
+			return 'Received';
+		case 'Quote Sent':
+			return 'Quote sent';
+		case 'Deposit Pending':
+			return 'Deposit due';
+		case 'Parts Ordered':
+			return 'Parts ordered';
+		case 'Work Scheduled':
+			return 'Scheduled';
+		case 'In Progress':
+			return 'In progress';
+		case 'Final Payment Pending':
+			return 'Final payment due';
+		case 'Work Complete':
+			return 'Completed';
+		case 'Work Cancelled':
+			return 'Cancelled';
+		case 'On Hold / Archived':
+			return 'On hold';
+	}
+}
+
+/**
+ * Whether this state is one the CUSTOMER has to act on. Drives the emphasis on
+ * the portal's headline: "we're working on it" and "you owe us money" should not
+ * look the same.
+ */
+export function isCustomerActionState(state: ContractorOrderState): boolean {
+	return state === 'Deposit Pending' || state === 'Final Payment Pending';
 }
 
 // ------------------------------------------------------------ Support feedback
 
 /** The kind of feedback a contractor can file from the support page. */
+/**
+ * The customer-facing states an Order passes through, in order. This is the
+ * progress a Customer is shown — "where is my job" — rather than the
+ * contractor's ten-state workflow.
+ *
+ * Cancelled and On Hold are deliberately absent: they are not points on the path,
+ * they are departures from it, so `customerProgress` reports them separately
+ * rather than pretending they sit between two steps.
+ */
+export const CUSTOMER_PROGRESS_STEPS = [
+	'Pending',
+	'Scheduled',
+	'In Progress',
+	'Completed'
+] as const satisfies readonly CustomerVisibleState[];
+
+export type CustomerProgress =
+	| { onPath: true; steps: readonly string[]; currentIndex: number }
+	| { onPath: false; label: CustomerVisibleState };
+
+/** Where an Order sits on the customer-visible path, or why it is off it. */
+export function customerProgress(state: CustomerVisibleState): CustomerProgress {
+	const index = (CUSTOMER_PROGRESS_STEPS as readonly string[]).indexOf(state);
+	if (index === -1) return { onPath: false, label: state };
+	return { onPath: true, steps: CUSTOMER_PROGRESS_STEPS, currentIndex: index };
+}
+
+/**
+ * A glyph per timeline entry kind, so a list of updates reads as a shape before
+ * it reads as text. Falls back to a neutral dot for a kind added later.
+ */
+export function timelineKindIcon(kind: string): string {
+	switch (kind) {
+		case 'milestone':
+			return '◆';
+		case 'issue':
+			return '!';
+		case 'invoice':
+			return '$';
+		case 'message':
+			return '✉';
+		default:
+			return '●';
+	}
+}
+
+// ------------------------------------------------------------ Order messages
+
+/**
+ * What a customer's message is about, chosen by which quick action they tapped.
+ *
+ * The point is the contractor's inbox: "payment" and "question" want different
+ * response times, and a wall of untyped messages makes that invisible. `general`
+ * is the fallback for a message typed straight into the composer, and the only
+ * topic a contractor's own reply ever carries.
+ *
+ * Note `payment` does NOT move money. This product tracks payment as an order
+ * status and never processes it (see CONTEXT.md, "Payments") — the topic asks the
+ * contractor to arrange it, exactly as a phone call would.
+ */
+export const MESSAGE_TOPICS = ['general', 'question', 'payment', 'schedule', 'issue'] as const;
+export type MessageTopic = (typeof MESSAGE_TOPICS)[number];
+
+export function isMessageTopic(value: string): value is MessageTopic {
+	return (MESSAGE_TOPICS as readonly string[]).includes(value);
+}
+
+/** Falls back to `general` rather than throwing — an unknown topic is not an error. */
+export function normalizeMessageTopic(value: string | null | undefined): MessageTopic {
+	return value && isMessageTopic(value) ? value : 'general';
+}
+
+export function messageTopicLabel(topic: MessageTopic): string {
+	switch (topic) {
+		case 'question':
+			return 'Question';
+		case 'payment':
+			return 'Payment';
+		case 'schedule':
+			return 'Scheduling';
+		case 'issue':
+			return 'Problem';
+		default:
+			return 'Message';
+	}
+}
+
+/**
+ * The quick actions the portal used to offer, each opening the composer with its
+ * topic set.
+ *
+ * NOT CURRENTLY RENDERED. The portal's composer is now a plain box: four buttons
+ * above it asked the customer to categorise a message before writing it, which is
+ * work for them and not much use to the contractor. Kept, with its tests, because
+ * Messages sent while they existed still carry a Topic and still display it — and
+ * because the labels are the record of what those Topics meant. See CONTEXT.md
+ * under Topic before wiring any of this back up.
+ */
+export const CUSTOMER_QUICK_ACTIONS = [
+	{
+		topic: 'question' as const,
+		label: 'Ask a question',
+		placeholder: 'What would you like to know about your project?'
+	},
+	{
+		topic: 'payment' as const,
+		label: 'Make a payment',
+		// Deliberately explicit: the app never takes a payment, so the button must
+		// not imply a checkout that does not exist.
+		placeholder: 'Ask about paying — your contractor will send you the details.',
+		note: 'Payments are handled directly by your contractor, not through this app.'
+	},
+	{
+		topic: 'schedule' as const,
+		label: 'Scheduling',
+		placeholder: 'Need to change a date, or want to know when work happens next?'
+	},
+	{
+		topic: 'issue' as const,
+		label: 'Report a problem',
+		placeholder: 'What went wrong? Include where and when if you can.'
+	}
+] satisfies readonly {
+	topic: MessageTopic;
+	label: string;
+	placeholder: string;
+	note?: string;
+}[];
+
 export const FEEDBACK_TYPES = ['bug', 'feature'] as const;
 export type FeedbackType = (typeof FEEDBACK_TYPES)[number];
 
@@ -577,10 +1000,24 @@ export function feedbackTypeLabel(type: FeedbackType): string {
 	return type === 'bug' ? 'Bug report' : 'Feature request';
 }
 
+/**
+ * Which pane a piece of feedback was filed from. Carried through to the issue so
+ * a report can be read without guessing whose experience broke — "the order page
+ * is blank" means something different from a contractor than from a customer.
+ */
+export const FEEDBACK_SURFACES = ['contractor', 'customer'] as const;
+export type FeedbackSurface = (typeof FEEDBACK_SURFACES)[number];
+
+export function feedbackSurfaceLabel(surface: FeedbackSurface): string {
+	return surface === 'customer' ? 'Customer portal' : 'Contractor app';
+}
+
 export type Feedback = {
 	type: FeedbackType;
 	title: string;
 	detail: string;
+	/** Set by the route, never by the form — a browser cannot claim to be elsewhere. */
+	surface: FeedbackSurface;
 };
 
 /** Shared validation for the support form (client pre-check + server). */
@@ -602,13 +1039,20 @@ export type FeedbackValidation =
 	| { ok: true; value: Feedback }
 	| { ok: false; field: 'type' | 'title' | 'detail'; message: string };
 
-export function validateFeedback(input: {
-	type?: string;
-	title?: string;
-	detail?: string;
-}): FeedbackValidation {
+/**
+ * `surface` is a required argument rather than a form field: it says where the
+ * report came from, and a value the browser supplies could say anything.
+ */
+export function validateFeedback(
+	input: {
+		type?: string;
+		title?: string;
+		detail?: string;
+	},
+	surface: FeedbackSurface
+): FeedbackValidation {
 	const result = feedbackSchema.safeParse(input);
-	if (result.success) return { ok: true, value: result.data };
+	if (result.success) return { ok: true, value: { ...result.data, surface } };
 	const issue = result.error.issues[0];
 	const field = issue.path[0];
 	return {
@@ -629,7 +1073,10 @@ export function buildFeedbackIssue(
 	screenshot?: { imageUrl: string; linkUrl: string } | null
 ): { title: string; body: string } {
 	const prefix = feedback.type === 'bug' ? '[Bug]' : '[Feature]';
-	const who = submittedBy?.name || submittedBy?.email || 'a contractor';
+	// The surface leads the title: triage reads a list, and "is this a customer
+	// hitting this or a contractor" is the first thing worth knowing about a report.
+	const from = feedback.surface === 'customer' ? '[Customer]' : '[Contractor]';
+	const who = submittedBy?.name || submittedBy?.email || 'someone';
 	const contact = submittedBy?.email ? ` (${submittedBy.email})` : '';
 	const body = [
 		feedback.detail,
@@ -641,9 +1088,10 @@ export function buildFeedbackIssue(
 		'',
 		'---',
 		`*Filed from the in-app support form by ${who}${contact}.*`,
+		`*Surface: ${feedbackSurfaceLabel(feedback.surface)}*`,
 		`*Type: ${feedbackTypeLabel(feedback.type)}*`
 	].join('\n');
-	return { title: `${prefix} ${feedback.title}`, body };
+	return { title: `${prefix}${from} ${feedback.title}`, body };
 }
 
 // -------------------------------------------------------------- Subscriptions
@@ -957,3 +1405,91 @@ export const STARTER_EMAIL_TEMPLATES = [
 		body: 'Hi {{customer}},\n\nThank you for choosing us for your {{project}} project — it was a pleasure working with you. If anything comes up down the road, don’t hesitate to reach out.'
 	}
 ] as const;
+
+/**
+ * Where a customer stands with the portal — the same four states the server's
+ * `portalStanding` draws, computed on the client from the contractor's invite list
+ * so a surface that already has that list needn't make another round trip.
+ */
+export type PortalInfo = {
+	state: 'linked' | 'none' | 'pending' | 'expired';
+	sentAt?: Date | string;
+	expiresAt?: Date | string;
+	inviteId?: string;
+};
+
+type InviteLike = {
+	id: string;
+	customerId: string | null;
+	status: string;
+	createdAt: Date | string;
+	expiresAt: Date | string;
+};
+
+/**
+ * Resolve a customer's {@link PortalInfo} from the invite list. `linked` short-
+ * circuits to 'linked'; otherwise the newest pending invite for the customer decides
+ * 'pending' vs 'expired' (a pending invite that has lapsed reads as expired, since
+ * "invite sent" is not useful to read about a link that no longer opens). `invites`
+ * is expected newest-first, matching `listInvites`.
+ */
+export function portalInfoFor(args: {
+	linked: boolean;
+	customerId: string | null;
+	invites: InviteLike[];
+	now?: number;
+}): PortalInfo {
+	if (args.linked) return { state: 'linked' };
+	if (!args.customerId) return { state: 'none' };
+	const now = args.now ?? Date.now();
+	const pending = args.invites.find(
+		(i) => i.customerId === args.customerId && i.status === 'pending'
+	);
+	if (!pending) return { state: 'none' };
+	const base = { sentAt: pending.createdAt, expiresAt: pending.expiresAt, inviteId: pending.id };
+	return new Date(pending.expiresAt).getTime() > now
+		? { state: 'pending', ...base }
+		: { state: 'expired', ...base };
+}
+
+/**
+ * How a recorded final payment was taken. The app RECORDS money at close-out but
+ * never processes it (ADR-0010), so this is bookkeeping, not a payment rail.
+ */
+export const PAYMENT_METHODS = ['cash', 'check', 'card', 'other'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+export function paymentMethodLabel(m: string | null | undefined): string {
+	switch (m) {
+		case 'cash':
+			return 'Cash';
+		case 'check':
+			return 'Check';
+		case 'card':
+			return 'Card';
+		case 'other':
+			return 'Other';
+		default:
+			return '';
+	}
+}
+
+/** Whole cents → "$1,234.56". Empty string for null/undefined. */
+export function formatCents(cents: number | null | undefined): string {
+	if (cents == null) return '';
+	return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
+}
+
+/**
+ * Parse a typed dollar amount ("1,234.56", "$1234", "  3000 ") to whole cents.
+ * Returns null for blank/invalid/negative — the caller decides whether that's an
+ * error or simply "no amount given".
+ */
+export function parseDollarsToCents(input: string | null | undefined): number | null {
+	if (!input) return null;
+	const cleaned = input.replace(/[$,\s]/g, '');
+	if (!cleaned) return null;
+	const n = Number(cleaned);
+	if (!Number.isFinite(n) || n < 0) return null;
+	return Math.round(n * 100);
+}

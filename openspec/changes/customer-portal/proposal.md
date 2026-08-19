@@ -9,18 +9,20 @@ We also have no way to look at the portal while building it. Every other role's 
 - **Portal shell**: the Customer portal gets a real layout — header, order navigation, the app's design tokens, dark mode, and the shared `Toaster` — matching the standard set by the Contractor and Subcontractor surfaces. It replaces the current single-page inline-styled placeholder.
 - **Order navigation**: a Customer with more than one Order can move between them. Each Order gets its own addressable route (`/customer/orders/[id]`) instead of only the most-recently-updated one being viewable.
 - **Project detail**: an Order's page leads with its project name (customer-visible status secondary), and shows the customer-visible timeline for that Order — never internal notes.
-- **Two-way messaging** *(new capability)*: a per-Order message thread. The Customer writes a message; the Contractor replies from the Order workspace; both see the same thread in order. Each side is notified of the other's messages, and unread counts surface on the Contractor's Order list. This **replaces** today's one-shot question/service/issue request form.
-- **Dev-only "view as customer"**: behind a new `CUSTOMER_PORTAL_DEV_TOOLS` flag (off by default, mirroring `EMAIL_DEV_TOOLS` / `ID_SCAN_DEV_TOOLS`), a Contractor can open any of *their own* Customers' portals as that Customer would see it, without changing session. A persistent banner marks the impersonated view and offers an exit. Every write made while viewing-as is refused.
+- **Two-way messaging** _(new capability)_: a per-Order message thread. The Customer writes a message; the Contractor replies from the Order workspace; both see the same thread in order. Each side is notified of the other's messages, and unread counts surface on the Contractor's Order list. This **replaces** today's one-shot question/service/issue request form.
+- **Dev-only "view as customer"**: behind a new `CUSTOMER_PORTAL_DEV_TOOLS` flag (off by default, mirroring `EMAIL_DEV_TOOLS` / `ID_SCAN_DEV_TOOLS`), a Contractor can open any of _their own_ Customers' portals as that Customer would see it, without changing session. A persistent banner marks the impersonated view and offers an exit. Every write made while viewing-as is refused.
 
 Out of scope (deferred): shared documents and downloads in the portal (owned by the `customer-documents` change), a contractor contact card, the invite-acceptance landing experience, email delivery of message notifications (in-app notification only; `email-delivery` can carry it later), and message attachments.
 
 ## Capabilities
 
 ### New Capabilities
+
 - `customer-portal`: The Customer-facing surface — portal shell, navigation across a Customer's own Orders, per-Order project detail and customer-visible timeline, and the dev-only view-as switch that makes the surface reachable during local development.
 - `order-messaging`: A two-way message thread on an Order, shared by the Customer portal and the Contractor's Order workspace, including authorship, ordering, unread state, and notification on both sides.
 
 ### Modified Capabilities
+
 - `customer-relations`: Four requirements are **removed** as superseded, so each behavior has exactly one spec that owns it — **Two-Way Messaging** and **Customer Requests and Issue Reporting** move to `order-messaging`; **Customer Order Visibility** and **Customer Order History** move to `customer-portal`. The billing-independence guarantees the in-flight `contractor-billing` change attaches to those requirements are carried across intact rather than dropped.
 
 ## Impact

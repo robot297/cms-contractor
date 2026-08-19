@@ -5,6 +5,7 @@ import { db } from './db';
 import { user, account } from './db/schema';
 import { auth } from './auth';
 import { compSubscription } from './billing.server';
+import { ensureDevWorkspace } from './dev-fixtures.server';
 
 /**
  * A pre-verified contractor login for local development, provisioned at boot
@@ -25,50 +26,74 @@ export const DEV_LOGIN = {
 } as const;
 
 /**
+ * Its counterpart on the other side of the product: a customer login already
+ * linked to a real customer record belonging to the dev contractor, with a job
+ * to look at.
+ *
+ * The customer portal is otherwise the one surface you cannot reach from a dev
+ * login — seeing it means a customer-role User bound by `userId` to a customer
+ * row, which is several minutes of setup per look. Seeded, it is reachable two
+ * ways: sign in as this account directly (real auth end to end), or use the
+ * contractor nav's "View as" switch to jump there without changing session.
+ */
+export const DEV_CUSTOMER_LOGIN = {
+	email: 'customer@upliftcollective.dev',
+	password: 'testerooni#123',
+	name: 'Dev Customer'
+} as const;
+
+/**
  * Read through varlock's typed ENV like the other dev flags (EMAIL_DEV_TOOLS
  * and friends). The flag must be declared in .env.schema: varlock treats
  * undeclared vars as sensitive, and its leak scanner then flags the value
  * "true" wherever it appears in a response — which is everywhere.
+ *
+ * Stringified before comparing: varlock coerces an unquoted `FLAG=true` in a
+ * .env file to a real boolean and keeps `FLAG="true"` a string, so a bare
+ * `=== 'true'` silently ignores half the ways you'd write it.
  */
 export function isDevLoginEnabled(): boolean {
-	return ENV.SEED_DEV_LOGIN === 'true';
+	return String(ENV.SEED_DEV_LOGIN) === 'true';
 }
 
-/** Provision (or repair) the dev login. Called from the server init hook. */
-export async function ensureDevLogin(): Promise<void> {
-	if (!isDevLoginEnabled()) return;
-
-	// Rows are written directly rather than through auth.api.signUpEmail: the
-	// sign-up path fires a verification email (sendOnSignUp), and a seeder that
-	// emails a dummy address on every fresh database is exactly the kind of
-	// surprise this account exists to avoid. Only the password hash comes from
-	// Better Auth, so sign-in verifies it exactly like any real account's.
+/**
+ * Provision (or repair) one pre-verified login and return its user id.
+ *
+ * Rows are written directly rather than through auth.api.signUpEmail: the
+ * sign-up path fires a verification email (sendOnSignUp), and a seeder that
+ * emails a dummy address on every fresh database is exactly the kind of surprise
+ * these accounts exist to avoid. Only the password hash comes from Better Auth,
+ * so sign-in verifies it exactly like any real account's.
+ */
+async function ensureLogin(login: {
+	email: string;
+	password: string;
+	name: string;
+	role: 'contractor' | 'customer';
+}): Promise<string> {
 	const ctx = await auth.$context;
 
 	let row = await db.query.user.findFirst({
-		where: eq(user.email, DEV_LOGIN.email),
+		where: eq(user.email, login.email),
 		columns: { id: true }
 	});
 	if (row) {
 		// Re-assert the properties that make the login useful — a database that
 		// predates verification enforcement would otherwise bounce off the gate.
-		await db
-			.update(user)
-			.set({ emailVerified: true, role: 'contractor' })
-			.where(eq(user.id, row.id));
+		await db.update(user).set({ emailVerified: true, role: login.role }).where(eq(user.id, row.id));
 	} else {
 		const id = randomUUID();
 		await db.insert(user).values({
 			id,
-			name: DEV_LOGIN.name,
-			email: DEV_LOGIN.email,
+			name: login.name,
+			email: login.email,
 			emailVerified: true,
-			role: 'contractor'
+			role: login.role
 		});
 		row = { id };
 	}
 
-	const password = await ctx.password.hash(DEV_LOGIN.password);
+	const password = await ctx.password.hash(login.password);
 	const credential = await db.query.account.findFirst({
 		where: and(eq(account.userId, row.id), eq(account.providerId, 'credential')),
 		columns: { id: true }
@@ -91,10 +116,35 @@ export async function ensureDevLogin(): Promise<void> {
 		});
 	}
 
+	return row.id;
+}
+
+/** Provision (or repair) the dev logins. Called from the server init hook. */
+export async function ensureDevLogin(): Promise<void> {
+	if (!isDevLoginEnabled()) return;
+
+	const contractorId = await ensureLogin({ ...DEV_LOGIN, role: 'contractor' });
+
 	// Comped, not trialing: a long-lived local database would lapse after 14 days
 	// and start refusing writes — the next footgun after the one this account
 	// bypasses. Billing flows are better exercised on a throwaway account anyway.
-	await compSubscription(row.id);
+	await compSubscription(contractorId);
 
-	console.info(`[dev-login] ${DEV_LOGIN.email} ready (password: ${DEV_LOGIN.password})`);
+	// The customer side. No subscription: customers arrive by invite and are
+	// never billed.
+	const customerUserId = await ensureLogin({ ...DEV_CUSTOMER_LOGIN, role: 'customer' });
+	// The sample workspace: several customers, a spread of orders across every
+	// follow-up state, and two live conversations. Lives in its own module — this
+	// file is about logins, that one is about what they can see.
+	await ensureDevWorkspace(contractorId, customerUserId);
+
+	// The password is deliberately NOT printed. It is a hardcoded constant in this
+	// file rather than anybody's secret, but stdout is not a private channel: this
+	// line lands in terminal scrollback, CI job output, `docker logs`, and whatever
+	// log aggregator a deployment ships to. A password-shaped string sitting in any
+	// of those is a habit worth not having, and it trains readers to skim past
+	// credentials in logs. Anyone who needs these can read the constants above.
+	console.info(
+		`[dev-login] ${DEV_LOGIN.email} (contractor) and ${DEV_CUSTOMER_LOGIN.email} (customer) ready — credentials in src/lib/server/dev-login.server.ts`
+	);
 }

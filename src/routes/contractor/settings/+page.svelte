@@ -249,9 +249,10 @@
 			<section class="card">
 				<h2>Follow-up reminders</h2>
 				<p class="hint">
-					Every new order schedules a reminder this far out. When one comes due it appears at the
-					top of your dashboard. You can always snooze or re-date a single order from the order
-					itself.
+					Your follow-up cadence. A new order schedules a reminder this far out, and
+					<strong>getting in touch resets it</strong> — send an update, an email or a reply and that job
+					drops off your list for another interval. When one comes due it appears at the top of your dashboard,
+					and you can always snooze or re-date a single order from the order itself.
 				</p>
 				<form method="POST" action="?/saveFollowUpDays" use:enhance={keepFields} class="grid">
 					<label class="field">
@@ -430,7 +431,7 @@
 	.tab.on,
 	.tab.on:hover {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 	}
 	.tab:focus-visible {
@@ -707,7 +708,7 @@
 	}
 	.btn.primary {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		border-color: transparent;
 	}
 	.btn.primary:hover:not(:disabled) {

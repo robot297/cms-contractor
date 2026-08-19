@@ -12,7 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { user } from './auth.schema';
 
-// Postgres `bytea` for storing attachment bytes directly in the database.
+// Postgres `bytea` for storing document bytes directly in the database.
 const bytea = customType<{ data: Buffer; default: false }>({
 	dataType() {
 		return 'bytea';
@@ -146,8 +146,18 @@ export const order = pgTable(
 		// without opening anything. Same shape as customer/subcontractor tags.
 		tags: text('tags').array().notNull().default([]),
 		// Contractor-set date for the next follow-up. On create it lands at their
-		// `contractorSettings.followUpDays` interval — a week unless they changed it.
+		// `contractorSettings.followUpDays` interval — a fortnight unless changed.
 		nextFollowUpAt: timestamp('next_follow_up_at'),
+		// Close-out record, written when an order is completed (see ADR-0010). The app
+		// RECORDS money here but never processes it — the contractor keys in the final
+		// invoice total and marks how the customer paid. Amount is in whole cents.
+		finalAmountCents: integer('final_amount_cents'),
+		// Free-form invoice details / completion notes, customer-visible on the portal.
+		finalNotes: text('final_notes'),
+		// How the recorded final payment was taken: 'cash' | 'check' | 'card' | 'other'.
+		paymentMethod: text('payment_method'),
+		// Set when the contractor marks the final payment received. Null = unpaid.
+		paidAt: timestamp('paid_at'),
 		// Soft-delete: "Delete order" sets this timestamp; rows with it set are
 		// treated as gone everywhere in the app and never shown.
 		deletedAt: timestamp('deleted_at'),
@@ -176,11 +186,52 @@ export const timelineEntry = pgTable(
 		title: text('title').notNull(),
 		detail: text('detail').notNull().default(''),
 		authorRole: text('author_role').notNull(), // contractor | customer
+		// When the contractor expects this to be resolved. DORMANT: nothing writes or
+		// reads it any more — the follow-up/snooze on the order is how a wait is
+		// tracked. Kept (rather than dropped) because rows written before the status
+		// form lost its date picker still carry one, and the idea may come back.
+		expectedAt: timestamp('expected_at'),
 		// Internal entries (contractor notes) are never shown in the customer portal.
 		internal: boolean('internal').notNull().default(false),
 		createdAt: timestamp('created_at').defaultNow().notNull()
 	},
 	(table) => [index('timeline_orderId_idx').on(table.orderId)]
+);
+
+// The conversation on an order — what the contractor and the customer said to
+// each other, as opposed to `timeline_entry`, which records what happened to the
+// job. Kept apart deliberately: a thread reads oldest-first and carries per-side
+// unread state, neither of which belongs on every status change ever written.
+//
+// Read state is two nullable timestamps rather than one `unread` flag because
+// "unread" is asymmetric — the same row is read by its author the instant it is
+// written and unread by the other side. A message is stamped for its own author
+// on insert, so it is never unread to the person who sent it.
+export const orderMessage = pgTable(
+	'order_message',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		orderId: text('order_id')
+			.notNull()
+			.references(() => order.id, { onDelete: 'cascade' }),
+		// Denormalized so rendering ("You" vs the contractor's business name) needs
+		// no join and stays correct regardless of what happens to the user row.
+		authorRole: text('author_role').notNull(), // contractor | customer
+		authorUserId: text('author_user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		// What the customer's quick action said this is about — question, payment,
+		// scheduling, problem — so the contractor can triage without reading every
+		// thread. `general` for a message typed straight in, and for every reply.
+		topic: text('topic').notNull().default('general'),
+		body: text('body').notNull(),
+		readByContractorAt: timestamp('read_by_contractor_at'),
+		readByCustomerAt: timestamp('read_by_customer_at'),
+		createdAt: timestamp('created_at').defaultNow().notNull()
+	},
+	(table) => [index('order_message_orderId_createdAt_idx').on(table.orderId, table.createdAt)]
 );
 
 export const notification = pgTable(
@@ -275,10 +326,15 @@ export const orderSubcontractor = pgTable(
 	]
 );
 
-// Files (photos, quotes, invoices) attached to an order. Bytes live in `data`;
-// size is stored separately so listings don't have to read the blob.
-export const attachment = pgTable(
-	'attachment',
+// A Document: one file on one Order. Bytes live in `data`; size is stored
+// separately so listings don't have to read the blob.
+//
+// Called `attachment` until the `order-documents` change. The word was half the
+// problem — the UI said "Documents" on one surface and "Files" on another while
+// the storage layer said "attachment", which is how the next person kept picking
+// a third noun. See CONTEXT.md's Language section.
+export const document = pgTable(
+	'document',
 	{
 		id: text('id')
 			.primaryKey()
@@ -294,9 +350,29 @@ export const attachment = pgTable(
 		mimeType: text('mime_type').notNull(),
 		size: integer('size').notNull(),
 		data: bytea('data').notNull(),
+		// Who put it here — contractor | customer | subcontractor. Defaults to
+		// contractor so rows that predate customer uploads keep their meaning.
+		// The contractor's file list leads with this: a document the customer sent
+		// is a different thing from one the contractor filed.
+		uploadedByRole: text('uploaded_by_role').notNull().default('contractor'),
+		// Who specifically, not merely what kind of person. Nullable because rows
+		// that predate this cannot always be attributed — null means "unknown",
+		// never "nobody".
+		uploadedByUserId: text('uploaded_by_user_id').references(() => user.id, {
+			onDelete: 'set null'
+		}),
+		// When the contractor first opened this order's documents. Gates a
+		// customer's withdrawal: a document that has been seen is a record of what
+		// was exchanged, not a draft. Same shape as order_message's read state.
+		readByContractorAt: timestamp('read_by_contractor_at'),
+		// What this document is, in the uploader's words — "receipt for the tile",
+		// "permit as approved". A filename rarely carries that on its own.
+		note: text('note'),
+		// Free-form labels, same shape as the tags on orders and subcontractors.
+		tags: text('tags').array().notNull().default([]),
 		createdAt: timestamp('created_at').defaultNow().notNull()
 	},
-	(table) => [index('attachment_orderId_idx').on(table.orderId)]
+	(table) => [index('document_orderId_idx').on(table.orderId)]
 );
 
 // Contractor-owned, reusable email templates (name, subject, body) offered in the
@@ -337,7 +413,7 @@ export const contractorSettings = pgTable('contractor_settings', {
 	// contractor because the right interval is a trade, not a product decision — a
 	// remodeller chasing a quote weekly and a roofer working a month out both
 	// need the dashboard to stay believable. See DEFAULT_FOLLOWUP_DAYS.
-	followUpDays: integer('follow_up_days').notNull().default(7),
+	followUpDays: integer('follow_up_days').notNull().default(14),
 	// Getting-started Guide. Only the contractor's own choice is stored — whether a
 	// step is done is always derived from their real Customers / Orders / Invites /
 	// Assignments. See docs/adr/0004-derive-guide-progress-from-domain-data.md.
@@ -422,9 +498,15 @@ export const orderRelations = relations(order, ({ one, many }) => ({
 	contractor: one(user, { fields: [order.contractorId], references: [user.id] }),
 	customer: one(customer, { fields: [order.customerId], references: [customer.id] }),
 	timeline: many(timelineEntry),
+	messages: many(orderMessage),
 	invites: many(customerInvite),
-	attachments: many(attachment),
+	documents: many(document),
 	assignments: many(orderSubcontractor)
+}));
+
+export const orderMessageRelations = relations(orderMessage, ({ one }) => ({
+	order: one(order, { fields: [orderMessage.orderId], references: [order.id] }),
+	author: one(user, { fields: [orderMessage.authorUserId], references: [user.id] })
 }));
 
 export const subcontractorRelations = relations(subcontractor, ({ one, many }) => ({
@@ -449,8 +531,8 @@ export const orderSubcontractorRelations = relations(orderSubcontractor, ({ one 
 	})
 }));
 
-export const attachmentRelations = relations(attachment, ({ one }) => ({
-	order: one(order, { fields: [attachment.orderId], references: [order.id] })
+export const documentRelations = relations(document, ({ one }) => ({
+	order: one(order, { fields: [document.orderId], references: [order.id] })
 }));
 
 export const timelineEntryRelations = relations(timelineEntry, ({ one }) => ({

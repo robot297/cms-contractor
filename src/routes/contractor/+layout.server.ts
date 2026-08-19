@@ -8,6 +8,9 @@ import { getLimitStatus, getSubscriptionView } from '$lib/server/billing.server'
 import { isEmailConfigured, isEmailDevToolsEnabled } from '$lib/server/email.server';
 import { isDemoUser } from '$lib/server/demo.server';
 import { listContractorTags } from '$lib/server/tags.server';
+import { findDevCustomer, isViewAsEnabled } from '$lib/server/view-as.server';
+import { isDevLoginEnabled } from '$lib/server/dev-login.server';
+import { awaitingReplyForContractor } from '$lib/server/messaging.server';
 import type { LayoutServerLoad } from './$types';
 
 /**
@@ -45,9 +48,25 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 	// Only meaningful while a trial is live; skip the three counts otherwise.
 	const limits = subscription.access.limitsApply ? await getLimitStatus(contractorId) : null;
 
+	// Development-only view-as, pointed at the seeded dev customer. Resolved here
+	// so that with the flag off NOTHING about the feature reaches the browser, and
+	// null when SEED_DEV_LOGIN never ran — no target, no button.
+	const viewAsEnabled = isViewAsEnabled();
+	const viewAsCustomer = viewAsEnabled ? ((await findDevCustomer(contractorId)) ?? null) : null;
+
+	// How many customers are waiting on an answer, on every contractor page — the
+	// dashboard is not where you are when a message lands.
+	const awaitingReply = (await awaitingReplyForContractor(contractorId)).length;
+
 	return {
 		userName: locals.user.name,
+		awaitingReply,
 		contractorTags,
+		viewAsEnabled,
+		viewAsCustomer,
+		// The real-session swap needs the seeded accounts as well as the dev-tools
+		// flag — without SEED_DEV_LOGIN there is nothing to sign in as.
+		devSignInEnabled: viewAsEnabled && isDevLoginEnabled(),
 		billing: {
 			status: subscription.status,
 			canWrite: subscription.access.canWrite,

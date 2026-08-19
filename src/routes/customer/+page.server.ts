@@ -1,59 +1,32 @@
-import { fail, redirect } from '@sveltejs/kit';
-import { auth } from '$lib/server/auth';
-import {
-	addCustomerRequest,
-	bindCustomerByEmail,
-	bindInviteToken,
-	CustomerAlreadyLinkedError,
-	getCustomerPortal
-} from '$lib/server/crm.server';
-import type { Actions, PageServerLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
+import { awaitingReplyForCustomer } from '$lib/server/messaging.server';
+import type { PageServerLoad } from './$types';
 
-function requireCustomer(locals: App.Locals) {
-	if (!locals.user) redirect(302, '/login');
-	if (locals.user.role !== 'customer') redirect(302, '/');
-	return locals.user;
-}
+/**
+ * The portal root is a signpost, not a page. Everything it needs — the subject,
+ * the order list, invite binding — was resolved by the layout, so this only picks
+ * where to land.
+ *
+ * A project with an unanswered reply wins: the customer opened the portal
+ * because someone got back to them, and landing on a different job means finding
+ * the message themselves. Otherwise it is the most recently updated order,
+ * preferring active work, and when there are none it falls through to the empty
+ * state.
+ *
+ * Deliberately still a redirect rather than an inbox. A customer typically has
+ * one live job; a list of one is a page that exists to be clicked through.
+ */
+export const load: PageServerLoad = async ({ parent, locals }) => {
+	const { active, past, viewAs } = await parent();
 
-export const load: PageServerLoad = async ({ locals, url }) => {
-	const user = requireCustomer(locals);
-	// Prefer token binding (honors the contractor's explicit invite over a coincidental
-	// email match); fall back to linking any customer records that match this email.
-	const token = url.searchParams.get('token');
-	if (token) {
-		try {
-			await bindInviteToken(user.id, token);
-		} catch (error) {
-			if (!(error instanceof CustomerAlreadyLinkedError)) throw error;
-		}
+	// Skipped under view-as: the developer looking is not the person who owes an
+	// answer, and routing them by a real customer's obligations is misleading.
+	if (!viewAs && locals.user) {
+		const waiting = await awaitingReplyForCustomer(locals.user.id);
+		if (waiting.length > 0) redirect(302, `/customer/orders/${waiting[0].orderId}`);
 	}
-	await bindCustomerByEmail(user.id, user.email);
-	const portal = await getCustomerPortal(user.id);
-	return { ...portal, userName: user.name };
-};
 
-const REQUEST_TYPES = new Set(['question', 'service', 'issue']);
-
-export const actions: Actions = {
-	request: async ({ request, locals }) => {
-		const user = requireCustomer(locals);
-		const form = await request.formData();
-		const orderId = form.get('orderId')?.toString() ?? '';
-		const type = form.get('type')?.toString() ?? '';
-		const detail = form.get('detail')?.toString().trim() ?? '';
-		if (!orderId || !REQUEST_TYPES.has(type)) return fail(400, { message: 'Invalid request' });
-		if (!detail) return fail(400, { message: 'Please add a short message' });
-		await addCustomerRequest(
-			orderId,
-			{ id: user.id },
-			type as 'question' | 'service' | 'issue',
-			detail
-		);
-		return { success: true };
-	},
-
-	signOut: async (event) => {
-		await auth.api.signOut({ headers: event.request.headers });
-		redirect(302, '/login');
-	}
+	const landing = active[0] ?? past[0];
+	if (landing) redirect(302, `/customer/orders/${landing.id}`);
+	return {};
 };

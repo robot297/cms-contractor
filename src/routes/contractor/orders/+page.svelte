@@ -3,9 +3,9 @@
 	import { slide } from 'svelte/transition';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
-	import { customerLocation, PROJECT_TYPES } from '$lib/crm';
+	import { customerLocation, portalInfoFor, PROJECT_TYPES, type PortalInfo } from '$lib/crm';
 	import TagPicker from '$lib/TagPicker.svelte';
-	import ContactComposer from '$lib/ContactComposer.svelte';
+	import ContactPanel from '$lib/ContactPanel.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -15,7 +15,6 @@
 	const atOrderLimit = $derived(data.billing.limits?.order.atLimit ?? false);
 
 	type OrderView = (typeof data.orders)[number];
-	type NoteView = (typeof data.notesByOrder)[string][number];
 
 	// Which lifecycle bucket is shown. Active is the working list; completed and
 	// cancelled orders move out of the way into their own views.
@@ -46,19 +45,8 @@
 	});
 	const visibleOrders = $derived(buckets[view]);
 
-	let confirmingDeleteOrderId: string | null = $state(null);
-	// Which order's overflow (⋯) menu is open, and which has its note field open.
-	let menuOpenId: string | null = $state(null);
-	let noteOpenId: string | null = $state(null);
 	// The lifecycle filter is a single button that opens a small menu.
 	let viewMenuOpen = $state(false);
-	// Close & reset the note field after it's submitted.
-	const noteThenClose =
-		() =>
-		async ({ update }: { update: () => Promise<void> }) => {
-			noteOpenId = null;
-			await update();
-		};
 
 	// Contact dialog, driven off the already-loaded customer directory. The body
 	// is the shared ContactComposer (message + channel picker).
@@ -69,17 +57,28 @@
 	let contactProject = $state<string | null>(null);
 	// And the order itself, so a successful send is recorded on its timeline.
 	let contactOrderId = $state<string | null>(null);
+	// Whether this order's customer has a portal — the Chat tab only works when a
+	// reply has somewhere to land, exactly as on the dashboard and order workspace.
+	let contactCanChat = $state(false);
+	// The customer being contacted, and where they stand with the portal — so the
+	// Chat tab can offer (or report) an invite when they aren't linked yet.
+	let contactCustomerId = $state<string | null>(null);
+	let contactPortal = $state<PortalInfo | null>(null);
 	// The customer's contact details (email/phone/address/notes), folded behind the
 	// ⓘ next to their name — composing is the dialog's job; the details are lookup.
 	let contactInfoOpen = $state(false);
 	function openContact(
 		id: string | null,
 		project: string | null = null,
-		orderId: string | null = null
+		orderId: string | null = null,
+		linked = false
 	) {
 		customerDetail = id ? (data.customers.find((c) => c.id === id) ?? null) : null;
 		contactProject = project;
 		contactOrderId = orderId;
+		contactCanChat = linked;
+		contactCustomerId = id;
+		contactPortal = portalInfoFor({ linked, customerId: id, invites: data.invites });
 		contactInfoOpen = false;
 		if (customerDetail) customerDialog?.showModal();
 	}
@@ -98,10 +97,6 @@
 		const where = customerLocation(c);
 		return where ? `${c.name} — ${where}` : c.name;
 	}
-
-	// Still used by the inline "add note" input on each order card; the new-order
-	// modal now uses the token-driven `.field` class instead.
-	const field = 'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 
 	function openNewOrder() {
 		projectType = '';
@@ -128,53 +123,35 @@
 		return type;
 	}
 
-	// Status badge colour by health: green = on track / done, amber = waiting or
-	// stuck, red = cancelled.
-	const STATUS_GO = { bg: '#e6f4ea', border: '#4ea866', fg: '#1a7f37' };
-	const STATUS_WAIT = { bg: '#fff4d6', border: '#d4a72c', fg: '#8a5a00' };
-	const STATUS_STOP = { bg: '#ffebe9', border: '#e5534b', fg: '#cf222e' };
-	function statusBadge(state: string) {
+	// Which tone the shared `.status-pill` (app.css) wears for a given state:
+	// on track, waiting on somebody, or stopped. This used to be three literal
+	// colour triples built into an inline style here — the colours now live with
+	// every other status pill in the app, and this function is only the mapping.
+	function statusTone(state: string): 'ok' | 'wait' | 'stop' {
 		switch (state) {
 			case 'In Progress':
 			case 'Work Scheduled':
 			case 'Parts Ordered':
 			case 'Work Complete':
-				return STATUS_GO;
+				return 'ok';
 			case 'Work Cancelled':
-				return STATUS_STOP;
+				return 'stop';
 			default:
 				// Inquiry, Quote Sent, Deposit/Final Payment Pending, On Hold / Archived
-				return STATUS_WAIT;
+				return 'wait';
 		}
 	}
 
-	const iconBtn = 'width: 2.5rem; height: 2.5rem; font-size: 1.7rem;';
-	const menuItem =
-		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
+	// Sizing shared with the dashboard cards, so the action buttons match across
+	// both surfaces. The gold look comes from the shared `.icon-btn` class.
+	const iconBtn = 'width: 2.3rem; height: 2.3rem; font-size: 1.55rem;';
 </script>
 
 <svelte:head>
 	<title>Orders</title>
 </svelte:head>
 
-<!-- Shared renderer for an order's internal-note history (used by the desktop
-     disclosure and the mobile add-note panel). -->
-{#snippet notesList(notes: NoteView[])}
-	<div style="display: grid; gap: 0.4rem;">
-		{#each notes as note (note.id)}
-			<div
-				style="padding: 0.5rem 0.6rem; border-radius: 8px; background: #f6f8fa; border: 1px solid #eaeef2;"
-			>
-				<div style="white-space: pre-wrap;">{note.detail}</div>
-				<div style="font-size: 0.75rem; color: #8c959f; margin-top: 0.2rem;">
-					{new Date(note.createdAt).toLocaleString()} · internal
-				</div>
-			</div>
-		{/each}
-	</div>
-{/snippet}
-
-<div style="max-width: 860px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem;">
+<div class="orders-page">
 	<header style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
 		<h1 class="page-title" style="margin: 0;">Orders</h1>
 		<button
@@ -239,7 +216,7 @@
 		{/if}
 
 		{#each visibleOrders as order (order.id)}
-			{@const badge = statusBadge(order.state)}
+			{@const tone = statusTone(order.state)}
 			{@const where = customerLocation({
 				city: order.customerCity,
 				state: order.customerState,
@@ -261,173 +238,50 @@
 							{order.customerName}{#if where}
 								· {where}{/if}
 						</div>
-						{#if order.tags.length > 0}
-							<div class="tag-chips" style="margin-top: 0.15rem;">
-								{#each order.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
-							</div>
-						{/if}
+						<!-- Tags are deliberately NOT here. They are working notes a
+						     contractor writes for one job ("awaiting deposit", "cedar"), and
+						     a list is for finding the job — a run of chips under every row
+						     made the list longer and told you nothing that helped you pick.
+						     They live on the order itself, where the job is the subject. -->
 					</div>
 
 					<div style="display: flex; gap: 0.4rem; align-items: center; flex-shrink: 0;">
-						<span
-							style="font-size: 0.78rem; font-weight: 700; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1.5px solid {badge.border}; border-radius: 999px; padding: 0.15rem 0.65rem;"
-							>{order.state}</span
-						>
+						<!-- A waiting conversation is signalled by the count on the 💬 button in
+						     the action row, the same as the dashboard — not a second badge here. -->
+						<span class="status-pill {tone}">{order.state}</span>
 					</div>
 				</div>
-
-				{#if confirmingDeleteOrderId === order.id}
-					<div
-						style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; background: #fff8f8; border: 1px solid #ffd7d5; border-radius: 10px; padding: 0.5rem 0.7rem;"
-					>
-						<span style="font-size: 0.85rem; color: #57606a; flex: 1; min-width: 160px;"
-							>Delete this order? Its timeline is removed and can’t be undone.</span
-						>
-						<form
-							method="POST"
-							action="?/deleteOrder"
-							use:enhance={() =>
-								async ({ update }) => {
-									confirmingDeleteOrderId = null;
-									await update();
-								}}
-						>
-							<input type="hidden" name="orderId" value={order.id} />
-							<button
-								type="submit"
-								style="padding: 0.35rem 0.75rem; border-radius: 999px; border: 1px solid #cf222e; background: #cf222e; color: #fff; cursor: pointer;"
-								>Yes, delete</button
-							>
-						</form>
-						<button
-							type="button"
-							onclick={() => (confirmingDeleteOrderId = null)}
-							style="padding: 0.35rem 0.75rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-							>Cancel</button
-						>
-					</div>
-				{/if}
 
 				<!-- Follow-up dates are deliberately absent here: due ones surface on the
-				     dashboard, which is where a contractor acts on them. -->
-				<div style="display: grid; gap: 0.5rem;">
-					{#if noteOpenId === order.id}
-						<div class="note-panel" transition:slide={{ duration: 220 }}>
-							<!-- Mobile: the disclosure below is hidden, so the note history lives
-							     here alongside the add field once "Add note" is pressed. -->
-							{#if (data.notesByOrder[order.id] ?? []).length > 0}
-								<div class="notes-history-mobile">
-									{@render notesList(data.notesByOrder[order.id])}
-								</div>
-							{/if}
-							<form
-								method="POST"
-								action="?/addNote"
-								use:enhance={noteThenClose}
-								style="display: flex; gap: 0.5rem; align-items: center;"
-							>
-								<input type="hidden" name="orderId" value={order.id} />
-								<input
-									name="note"
-									placeholder="Add an internal note…"
-									required
-									style="flex: 1; min-width: 140px; {field}"
-								/>
-								<button type="submit" class="primary-btn">Add</button>
-							</form>
-						</div>
-					{/if}
-				</div>
+				     dashboard, which is where a contractor acts on them. Internal notes,
+				     snooze and delete live on the order detail page — this list stays a
+				     list, and its two actions (message, open) match the dashboard cards. -->
 
-				{#if (data.notesByOrder[order.id] ?? []).length > 0}
-					<details class="notes-disclosure" style="font-size: 0.85rem;">
-						<summary style="cursor: pointer; color: #57606a;"
-							>Internal notes ({data.notesByOrder[order.id].length})</summary
-						>
-						<div style="margin-top: 0.4rem;">
-							{@render notesList(data.notesByOrder[order.id])}
-						</div>
-					</details>
-				{/if}
-
-				<!-- Action bar: explicit details link on the left, icon buttons on the right -->
-				<div class="action-bar" style="display: flex; gap: 0.7rem; align-items: center;">
+				<!-- Action bar: the same two icon buttons as the dashboard, right-aligned —
+				     message the customer, and open the order. Invite, delete and notes are
+				     all on the order detail page now. -->
+				<div class="action-bar">
 					<a
 						href={resolve(`/contractor/orders/${order.id}`)}
-						class="view-details-link"
-						style="margin-right: auto; font-size: 0.9rem; font-weight: 600; color: #0969da; text-decoration: none; white-space: nowrap;"
-						>View order details →</a
+						title="View order details"
+						aria-label="View order details"
+						class="icon-btn"
+						style="{iconBtn} flex-shrink: 0; text-decoration: none;">📋</a
 					>
 					{#if order.customerId}
 						<button
 							type="button"
-							title="Contact customer"
-							aria-label="Contact customer"
-							onclick={() => openContact(order.customerId, order.projectName, order.id)}
+							title="Message {order.customerName}"
+							aria-label="Message {order.customerName}"
+							onclick={() =>
+								openContact(order.customerId, order.projectName, order.id, order.customerLinked)}
 							class="icon-btn"
-							style={iconBtn}>✉️</button
+							style={iconBtn}
+							>💬{#if (data.unread[order.id] ?? 0) > 0}<span class="btn-count" aria-hidden="true"
+									>{data.unread[order.id]}</span
+								>{/if}</button
 						>
 					{/if}
-					<button
-						type="button"
-						title="Add note"
-						aria-label="Add note"
-						aria-expanded={noteOpenId === order.id}
-						onclick={() => (noteOpenId = noteOpenId === order.id ? null : order.id)}
-						class="icon-btn {noteOpenId === order.id ? 'on' : ''}"
-						style={iconBtn}>📝</button
-					>
-					<div style="position: relative;">
-						<button
-							type="button"
-							title="More actions"
-							aria-label="More actions"
-							aria-expanded={menuOpenId === order.id}
-							onclick={() => (menuOpenId = menuOpenId === order.id ? null : order.id)}
-							class="icon-btn"
-							style={iconBtn}>⋯</button
-						>
-						{#if menuOpenId === order.id}
-							<!-- click-away backdrop -->
-							<button
-								type="button"
-								aria-label="Close menu"
-								onclick={() => (menuOpenId = null)}
-								style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
-							></button>
-							<!-- opens upward since the bar sits at the card bottom -->
-							<div
-								style="position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; min-width: 180px; background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); overflow: hidden; display: grid;"
-							>
-								<a
-									href={resolve(`/contractor/orders/${order.id}`)}
-									style="{menuItem} text-decoration: none;">View details</a
-								>
-								{#if order.customerId}
-									<form
-										method="POST"
-										action="?/sendInvite"
-										use:enhance={() => {
-											menuOpenId = null;
-											return async ({ update }) => await update();
-										}}
-									>
-										<input type="hidden" name="customerId" value={order.customerId} />
-										<button type="submit" style={menuItem}>Invite customer</button>
-									</form>
-								{/if}
-								<button
-									type="button"
-									onclick={() => {
-										confirmingDeleteOrderId = order.id;
-										menuOpenId = null;
-									}}
-									style="{menuItem} color: #cf222e; border-top: 1px solid #eaeef2;"
-									>Delete order</button
-								>
-							</div>
-						{/if}
-					</div>
 				</div>
 			</article>
 		{/each}
@@ -495,10 +349,22 @@
 					>
 				</div>
 			{/if}
-			<ContactComposer
-				customer={c}
+			<ContactPanel
+				contact={c}
 				project={contactProject}
 				orderId={contactOrderId}
+				conversations={contactCanChat && contactOrderId
+					? [
+							{
+								orderId: contactOrderId,
+								projectName: contactProject,
+								thread: data.threads[contactOrderId] ?? []
+							}
+						]
+					: []}
+				canChat={contactCanChat}
+				customerId={contactCustomerId}
+				portal={contactPortal}
 				onsent={() => customerDialog?.close()}
 			/>
 		</div>
@@ -687,7 +553,7 @@
 	   unlike the old light-blue wash. */
 	.view-option.selected {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		font-weight: 800;
 	}
 	.view-option.selected .view-count {
@@ -696,88 +562,55 @@
 		color: #14171c;
 	}
 
-	/* Active state for a toggle icon button (e.g. the note ✎ while its panel is
-	   open) — a filled accent so it's clearly "on". */
-	.icon-btn.on {
-		background: #ece7fb;
-		color: #4b2fa8;
+	/* Action row: the two icon buttons pinned right, matching the dashboard cards. */
+	.action-bar {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.85rem;
 	}
-	.icon-btn.on:hover {
-		background: #e2daf7;
+	/* The shared .icon-btn is not positioned, so the unread count needs an anchor.
+	   Scoped to the action bar — the same treatment the dashboard gives its 💬. */
+	.action-bar .icon-btn {
+		position: relative;
+		overflow: visible;
 	}
-	/* Submit inside the add-note panel. Was an inline blue fill that leaned on the
-	   `[style*='background: #0969da']` interception in app.css to become the theme
-	   button — which never fired here, leaving one stray blue button on the page.
-	   Drawn from the tokens directly instead, so it matches by construction. */
-	.primary-btn {
-		padding: 0.5rem 1rem;
-		border-radius: 999px;
-		border: none;
-		/* Pinned dark: yellow stays light in both themes. */
-		background: var(--yellow);
-		color: #14171c;
-		font-family: inherit;
-		font-size: 0.9rem;
-		font-weight: 700;
-		cursor: pointer;
-		box-shadow: var(--pop-shadow-sm);
-	}
-	.primary-btn:hover {
-		background: var(--yellow-deep);
-	}
-
-	/* The expanded add-note area, visually grouped so it reads as belonging to
-	   the note button that opened it. */
-	.note-panel {
+	/* How many messages are waiting, on the button that opens the conversation —
+	   the same badge the dashboard's 💬 carries, so the two surfaces read alike. */
+	.btn-count {
+		position: absolute;
+		top: -0.2rem;
+		right: -0.2rem;
+		min-width: 1.1rem;
+		height: 1.1rem;
+		padding: 0 0.22rem;
+		box-sizing: border-box;
 		display: grid;
-		gap: 0.5rem;
-		background: #faf9ff;
-		border: 1px solid #e4defb;
-		border-radius: 10px;
-		padding: 0.7rem;
-		box-shadow: 0 2px 10px rgba(75, 47, 168, 0.07);
-	}
-
-	/* The mobile-only note history inside the add-note panel is hidden on wider
-	   screens, where the disclosure below the card handles browsing instead. */
-	.notes-history-mobile {
-		display: none;
+		place-items: center;
+		border-radius: 999px;
+		border: 2px solid var(--surface);
+		background: var(--danger);
+		color: #fff;
+		font-size: 0.66rem;
+		font-weight: 800;
+		line-height: 1;
 	}
 
 	@media (max-width: 560px) {
-		/* Declutter the card on phones: the standalone "View order details" link
-		   is redundant (the customer name and the ⋯ menu both open the order),
-		   and the notes disclosure gives way to the add-note panel. */
-		.view-details-link {
-			display: none;
+		/* Reclaim the width the desktop chrome was spending. A 1rem page gutter plus
+		   1.2rem of card padding put 2.2rem between the screen edge and the project
+		   name; the cards then sat 1rem apart with 0.85rem between their own rows.
+		   None of that is legibility on a 360px screen — it is why four orders
+		   filled a phone. */
+		.orders-page {
+			padding: 0.75rem 0.6rem 2rem;
+			gap: 0.6rem;
 		}
-		/* With the details link gone, keep the icon buttons pinned to the right. */
-		.action-bar {
-			justify-content: flex-end;
+		.orders-page :global(.card) {
+			padding: 0.85rem;
+			border-radius: 14px;
+			gap: 0.55rem;
 		}
-		.notes-disclosure {
-			display: none;
-		}
-		.notes-history-mobile {
-			display: block;
-		}
-	}
-
-	/* Dark theme — override the hardcoded light surfaces above so they read
-	   correctly under [data-theme='dark']. Only touches color-bearing rules;
-	   layout/display rules above are theme-agnostic. */
-	:global(:root[data-theme='dark']) .icon-btn.on {
-		background: #2e2a44;
-		border-color: #4a3f6b;
-		color: #cabff5;
-	}
-	:global(:root[data-theme='dark']) .icon-btn.on:hover {
-		background: #373251;
-	}
-	:global(:root[data-theme='dark']) .note-panel {
-		background: var(--surface-sunken);
-		border-color: var(--line);
-		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 	}
 
 	/* ------------------------------------------------- Contact dialog details
@@ -809,7 +642,7 @@
 	.info-btn.on:hover {
 		background: var(--yellow);
 		border-color: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	.info-btn:focus-visible {
 		outline: 2px solid var(--yellow);
@@ -916,7 +749,7 @@
 	.no-submit {
 		border: none;
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		font-weight: 700;
 		box-shadow: var(--pop-shadow-sm);
 	}
@@ -927,6 +760,14 @@
 		outline: 2px solid var(--yellow);
 		outline-offset: 2px;
 	}
+	.orders-page {
+		max-width: 860px;
+		margin: 0 auto;
+		padding: 1rem;
+		display: grid;
+		gap: 1rem;
+	}
+
 	@media (max-width: 420px) {
 		/* (0,2,0) selectors — media queries add no specificity, so a bare `.no-submit`
 		   here would lose to the rules above. */
@@ -941,7 +782,10 @@
 	}
 
 	/* ---------------------------------------------------------- Order card head
-	   Project leads, customer + city underneath. */
+	   Project leads, customer + city underneath. Unread customer messages ride as a
+	   count on the 💬 button in the action row (see .btn-count above), the same as
+	   the dashboard cards. */
+
 	.card-title {
 		font-size: 1.25rem;
 		font-weight: 800;

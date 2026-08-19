@@ -1,16 +1,25 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { formatBytes, MAX_ATTACHMENT_BYTES } from '$lib/crm';
+	import { resolve } from '$app/paths';
+	import DocumentList from '$lib/DocumentList.svelte';
+	import DocumentViewer from '$lib/DocumentViewer.svelte';
+	import { formatBytes, MAX_DOCUMENT_BYTES, type DocumentRef } from '$lib/crm';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	const view = $derived(data.view);
+	/**
+	 * The document open in the shared viewer, or null. The same component the
+	 * customer portal and the contractor workspace use — a subcontractor opening a
+	 * site photo should not be a different experience from anyone else opening one.
+	 */
+	let preview = $state<DocumentRef | null>(null);
 </script>
 
 <svelte:head><title>{view.projectName ?? 'Job'} · Subcontractor</title></svelte:head>
 
 <div class="wrap">
-	<a class="back" href="/subcontractor">← My jobs</a>
+	<a class="back" href={resolve('/subcontractor')}>← My jobs</a>
 
 	<header class="head">
 		<div>
@@ -75,6 +84,16 @@
 		{/if}
 	</section>
 
+	<!-- Documents: both Tiers read. Only the upload control below is Tier-gated. -->
+	<section class="card">
+		<h2>Documents</h2>
+		<DocumentList
+			documents={data.documents}
+			empty="No documents on this job yet."
+			onopen={(d) => (preview = d)}
+		/>
+	</section>
+
 	<!-- Write paths: Trusted only. Guest portal offers no write affordances. -->
 	{#if view.canWrite}
 		<section class="card">
@@ -91,24 +110,35 @@
 				<button class="btn primary" type="submit">Add note</button>
 			</form>
 
-			<h2 style="margin-top:1rem;">Upload a job photo</h2>
+			<h2 style="margin-top:1rem;">Upload photos and files</h2>
 			<form
 				method="POST"
-				action="?/uploadPhoto"
+				action="?/uploadDocuments"
 				enctype="multipart/form-data"
 				use:enhance={() =>
 					async ({ update }) =>
 						update()}
 			>
-				<input type="file" name="file" accept="image/*,application/pdf" required />
+				<!-- Several at once, and one refusal never costs the rest of the batch. -->
+				<input
+					type="file"
+					name="file"
+					multiple
+					accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+					required
+				/>
 				<button class="btn" type="submit">Upload</button>
-				<span class="muted small">Max {formatBytes(MAX_ATTACHMENT_BYTES)}</span>
+				<span class="muted small"
+					>Images and PDFs, up to {formatBytes(MAX_DOCUMENT_BYTES)} each</span
+				>
 			</form>
 		</section>
 	{:else}
 		<p class="muted read-only">Read-only access — Guest Contractors can’t post updates.</p>
 	{/if}
 </div>
+
+<DocumentViewer bind:open={preview} />
 
 <style>
 	.wrap {
@@ -142,7 +172,10 @@
 		font-size: 0.72rem;
 		font-weight: 800;
 		text-transform: uppercase;
-		background: #ffcc00;
+		background: var(--yellow);
+		/* Stated, not inherited: the pill's fill is light in both themes, so it must
+		   not pick up the shell's text colour, which flips to near-white in dark. */
+		color: var(--on-yellow);
 		border: none;
 		border-radius: 999px;
 		padding: 0.15rem 0.6rem;

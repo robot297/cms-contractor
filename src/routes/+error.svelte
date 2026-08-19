@@ -130,7 +130,7 @@
 		min-width: 5.5rem;
 		padding: 0.35rem 1rem;
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		border: none;
 		border-radius: 999px;
 		box-shadow: var(--pop-shadow-sm);
@@ -202,7 +202,7 @@
 	}
 	.go {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		border-color: transparent;
 	}
 	.alt {

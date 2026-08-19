@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { theme } from '$lib/theme.svelte';
 	import Toaster from '$lib/Toaster.svelte';
+	import DevSwitcher from '$lib/DevSwitcher.svelte';
 	import type { LayoutData } from './$types';
 	import type { Snippet } from 'svelte';
 
@@ -120,10 +121,8 @@
 	<div class="bar">
 		<nav class="nav">
 			<a href={resolve('/')} class="brand">
-				<span class="brand-mark" aria-hidden="true">🛠</span>
 				<span class="brand-word">Contractor&nbsp;CRM</span>
 			</a>
-
 			<button
 				type="button"
 				class="theme-toggle"
@@ -194,6 +193,20 @@
 				{/if}
 			</button>
 
+			<!-- Click-away for the mobile menu. The account menu has had one of these
+			     since it was built; the hamburger overlay never did, so the only way out
+			     of it was the X — tapping the page behind it did nothing, which reads as
+			     a stuck menu rather than as a deliberate modal. Rendered only while
+			     open, and only a scrim on the widths where the menu is an overlay. -->
+			{#if menuOpen}
+				<button
+					type="button"
+					class="nav-scrim"
+					aria-label="Close menu"
+					onclick={() => (menuOpen = false)}
+				></button>
+			{/if}
+
 			<div class="nav-collapse" class:open={menuOpen}>
 				<div class="nav-links" class:ready={railReady} bind:this={railEl}>
 					<span class="rail-glide" style="--x: {railX}px; --w: {railW}px;" aria-hidden="true"
@@ -208,7 +221,11 @@
 						href={resolve('/contractor/orders')}
 						class="navlink"
 						class:is-active={onOrders}
-						onclick={closeMenus}>Orders</a
+						onclick={closeMenus}
+						>Orders{#if data.awaitingReply > 0}<span
+								class="count-badge nav-badge"
+								aria-label="{data.awaitingReply} awaiting a reply">{data.awaitingReply}</span
+							>{/if}</a
 					>
 					<a
 						href={resolve('/contractor/customers')}
@@ -299,6 +316,18 @@
 							</svg>
 						{/if}
 					</button>
+					<!-- Development-only: one button to the customer's side of the same
+					     job. Absent entirely unless CUSTOMER_PORTAL_DEV_TOOLS is set AND
+					     the seeder has run, so the server sends no target when either is
+					     missing and nothing about the feature reaches the browser. -->
+					{#if data.viewAsEnabled && (data.viewAsCustomer || data.devSignInEnabled)}
+						<DevSwitcher
+							side="contractor"
+							devCustomer={data.viewAsCustomer}
+							canSignInAs={data.devSignInEnabled}
+							orderId={page.params.id ?? null}
+						/>
+					{/if}
 					<!-- Account: avatar in the bar, everything else behind it. -->
 					<div class="user">
 						<button
@@ -477,28 +506,11 @@
 		text-decoration: none;
 		flex-shrink: 0;
 	}
-	.brand-mark {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 2rem;
-		height: 2rem;
-		border-radius: 10px;
-		background: linear-gradient(180deg, var(--yellow), var(--yellow-deep));
-		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.5),
-			0 2px 8px rgba(230, 184, 0, 0.35);
-		font-size: 1.05rem;
-		transition: filter 0.15s ease;
-	}
 	.brand-word {
 		font-weight: 900;
 		font-size: 0.92rem;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-	}
-	.brand:hover .brand-mark {
-		filter: brightness(1.06);
 	}
 	/* Desktop: links sit next to the brand, user/sign-out pushed to the right. */
 	.nav-collapse {
@@ -596,6 +608,13 @@
 			color 0.2s ease,
 			background 0.2s ease;
 	}
+	/* Customers waiting on an answer, carried on the nav so it is visible from
+	   wherever you are rather than only on the dashboard. The pill itself is the
+	   shared `.count-badge` in app.css — all that is local to the nav is the gap
+	   between the link's label and the count. */
+	.nav-badge {
+		margin-left: 0.35rem;
+	}
 	.navlink:hover {
 		color: var(--bar-fg);
 		background: var(--bar-wash-strong);
@@ -607,9 +626,12 @@
 		color: #14171c;
 		background: transparent;
 	}
-	/* No-JS / pre-measure fallback: without the pill, the active link paints its own. */
+	/* No-JS / pre-measure fallback: without the pill, the active link paints its own.
+	   Foreground restated rather than left to the `.is-active` rule above — a yellow
+	   fill has to carry its own dark text so the pairing can't be split apart. */
 	.nav-links:not(.ready) .navlink.is-active {
 		background: var(--yellow);
+		color: var(--on-yellow);
 	}
 	.navlink:focus-visible {
 		outline: 2px solid var(--yellow);
@@ -659,7 +681,7 @@
 	.settings-gear.on,
 	.settings-gear.on:hover {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	.settings-gear:focus-visible {
 		outline: 2px solid var(--yellow);
@@ -699,7 +721,7 @@
 	.avatar.on {
 		background: var(--yellow);
 		border-color: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	.avatar:focus-visible {
 		outline: 2px solid var(--yellow);
@@ -712,6 +734,23 @@
 		border: none;
 		background: transparent;
 		cursor: default;
+	}
+	/* Sits under the overlay (z-index 50) but over the page. Only exists at the
+	   widths where the nav actually collapses — above that the links are inline
+	   and a full-screen scrim would swallow every click on the page. */
+	.nav-scrim {
+		display: none;
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+		border: none;
+		background: transparent;
+		cursor: default;
+	}
+	@media (max-width: 1024px) {
+		.nav-scrim {
+			display: block;
+		}
 	}
 	.user-menu {
 		position: absolute;
@@ -839,6 +878,12 @@
 		height: 2.6rem;
 		padding: 0;
 		flex-shrink: 0;
+		/* Above the click-away scrim (40), below the menu it opens (50). Without
+		   this the scrim covers the button that closes the menu, so the X becomes
+		   unclickable the moment the menu is open — tapping it just dismisses via
+		   the scrim, and tapping it again reopens. */
+		position: relative;
+		z-index: 45;
 		border: 1.5px solid var(--bar-edge);
 		background: var(--bar-rail-bg);
 		color: var(--bar-fg);
@@ -969,7 +1014,7 @@
 		.navlink.is-active,
 		.navlink.is-active:hover {
 			background: var(--yellow);
-			color: #14171c;
+			color: var(--on-yellow);
 			box-shadow: none;
 		}
 		/* Sign-out becomes a row of its own — the avatar and its popover are dropped

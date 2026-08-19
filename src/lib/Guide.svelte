@@ -192,7 +192,7 @@
 	}
 	li.done .marker {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	li.current .marker {
 		background: #14171c;

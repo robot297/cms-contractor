@@ -46,11 +46,16 @@ export const actions: Actions = {
 			return fail(400, { message: 'Please complete the verification challenge and try again.' });
 		}
 
-		const parsed = validateFeedback({
-			type: form.get('type')?.toString(),
-			title: form.get('title')?.toString(),
-			detail: form.get('detail')?.toString()
-		});
+		const parsed = validateFeedback(
+			{
+				type: form.get('type')?.toString(),
+				title: form.get('title')?.toString(),
+				detail: form.get('detail')?.toString()
+			},
+			// Set here, not read from the form: which pane filed this is a fact about
+			// the route, and a browser-supplied value could claim anything.
+			'contractor'
+		);
 		if (!parsed.ok) return fail(400, { field: parsed.field, message: parsed.message });
 
 		// Optional screenshot. The client pre-checks type and size; this is the half

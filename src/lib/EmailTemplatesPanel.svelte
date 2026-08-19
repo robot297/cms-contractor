@@ -517,7 +517,7 @@
 	.preview-switch button.on {
 		background: var(--yellow);
 		/* Pinned dark: yellow stays light in both themes. */
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	/* The email renders in its own document, so app.css can't leak into it and the
 	   preview is the real thing rather than a styled approximation. */
@@ -656,7 +656,7 @@
 	   is light in either theme, so its text/border stay pinned dark. */
 	.btn.primary {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		/* Transparent, not none: keeps the box the same size as its siblings. */
 		border-color: transparent;
 		box-shadow: var(--pop-shadow-sm);

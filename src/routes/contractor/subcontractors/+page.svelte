@@ -5,7 +5,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { formatPhone, tierLabel, TRADES, type SubcontractorTier } from '$lib/crm';
 	import AlphaRail from '$lib/AlphaRail.svelte';
-	import ContactComposer from '$lib/ContactComposer.svelte';
+	import ContactPanel from '$lib/ContactPanel.svelte';
 	import IdScanner from '$lib/IdScanner.svelte';
 	import TagPicker from '$lib/TagPicker.svelte';
 	import type { SubcontractorScanFields } from '$lib/id-scan';
@@ -74,9 +74,10 @@
 			document.getElementById(`sub-sec-${target.key}`)?.scrollIntoView({ block: 'start' });
 	}
 
-	// Seeded once per page load (untrack: closing it must not spring back open
-	// while the roster is still empty). Never auto-opens at the trial limit —
-	// a form they can't submit is a worse greeting than the roster itself.
+	// Seeded once per page load (untrack: closing it must not spring back open).
+	// `data.openAdd` is now only ever true for an explicit `?new` — see the note in
+	// +page.server.ts. Still never auto-opens at the trial limit: a form they can't
+	// submit is a worse greeting than the roster itself.
 	let showAdd = $state(untrack(() => data.openAdd && !atSubLimit));
 	let editingId = $state<string | null>(null);
 	let expandedId = $state<string | null>(null);
@@ -439,10 +440,15 @@
 	<div class="wrap">
 		<header class="head">
 			<h1 class="page-title">Subcontractors</h1>
-			<span class="count"
-				>{data.subcontractors.length}
-				{data.subcontractors.length === 1 ? 'subcontractor' : 'subcontractors'}</span
-			>
+			<!-- Only once there is something to count. "0 subcontractors" beside the
+			     heading is a label restating the empty state below it, and it is the
+			     first thing a brand-new contractor reads on this page. -->
+			{#if data.subcontractors.length > 0}
+				<span class="count"
+					>{data.subcontractors.length}
+					{data.subcontractors.length === 1 ? 'subcontractor' : 'subcontractors'}</span
+				>
+			{/if}
 		</header>
 
 		<div class="search-row">
@@ -481,9 +487,16 @@
 		{#if filtered.length === 0}
 			<div class="empty">
 				{#if data.subcontractors.length === 0}
-					No subcontractors yet. Add your first trade partner to start assigning them to jobs.
+					<p class="empty-line">No subcontractors found</p>
+					<!-- The offer the auto-opening form used to make, as an offer. Hidden at
+					     the trial limit, where the form would refuse the submission anyway. -->
+					{#if !atSubLimit}
+						<button type="button" class="empty-cta" onclick={() => (showAdd = true)}>
+							Add one now
+						</button>
+					{/if}
 				{:else}
-					No subcontractors match “{q}”.
+					<p class="empty-line">No subcontractors match “{q}”.</p>
 				{/if}
 			</div>
 		{/if}
@@ -549,8 +562,8 @@
 														onclick={() => (contactOpenId = null)}
 													></button>
 													<div class="contact-pop">
-														<ContactComposer
-															customer={{
+														<ContactPanel
+															contact={{
 																name: s.name,
 																email: s.email,
 																phone: s.phone,
@@ -1567,9 +1580,9 @@
 		font-size: 0.62rem;
 	}
 	.chip-trusted {
-		background: #e6f4ea;
-		border-color: #4ea866;
-		color: #1a7f37;
+		background: var(--ok-bg);
+		border-color: var(--ok-line);
+		color: var(--ok-fg);
 	}
 	.chip-guest {
 		background: #f6f8fa;
@@ -1597,7 +1610,7 @@
 		border-radius: 6px;
 	}
 	.status-linked {
-		color: #1a7f37;
+		color: var(--ok-fg);
 	}
 	.status-invited {
 		color: #b5730a;
@@ -1606,9 +1619,10 @@
 		color: #97a0ab;
 	}
 	/* Trusted medal — same icon+tooltip mechanics as the link status beside it,
-	   in the green the Trusted chip already uses. */
+	   in the green the Trusted chip already uses. Shared token rather than a
+	   repeated literal, so "the green the chip uses" stays true by construction. */
 	.medal {
-		color: #1a7f37;
+		color: var(--ok-fg);
 	}
 	.status-tip {
 		position: absolute;
@@ -1751,20 +1765,24 @@
 		font-weight: 700;
 		white-space: nowrap;
 	}
+	/* The three insurance states use the app's status palette rather than their own
+	   literals. They previously restated it — and had already drifted, with an
+	   amber border one shade off every other warning in the app. Tokens also mean
+	   these finally have a dark treatment; before, the pale fills stayed pale. */
 	.ins-pill.ok {
-		color: #1a7f37;
-		background: #e6f4ea;
-		border-color: #4ea866;
+		color: var(--ok-fg);
+		background: var(--ok-bg);
+		border-color: var(--ok-line);
 	}
 	.ins-pill.warn {
-		color: #8a5a00;
-		background: #fff4d6;
-		border-color: #e0b34d;
+		color: var(--wait-fg);
+		background: var(--wait-bg);
+		border-color: var(--wait-line);
 	}
 	.ins-pill.bad {
-		color: #cf222e;
-		background: #ffebe9;
-		border-color: #e5534b;
+		color: var(--stop-fg);
+		background: var(--stop-bg);
+		border-color: var(--stop-line);
 	}
 	/* Tabs on the left, the ⚙ opposite them, sharing one underline. */
 	.tab-row {
@@ -2062,7 +2080,7 @@
 	.btn.primary {
 		background: var(--yellow);
 		border-color: transparent;
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	.btn.primary:hover {
 		background: var(--yellow-deep);
@@ -2089,13 +2107,39 @@
 		box-shadow: none;
 	}
 	.empty {
-		border: 1.5px dashed #d0d7de;
+		display: grid;
+		justify-items: center;
+		gap: 0.75rem;
+		border: 1.5px dashed var(--line-strong);
 		border-radius: 12px;
 		padding: 1.5rem;
 		text-align: center;
-		color: #57606a;
+		color: var(--fg-muted);
 		font-weight: 600;
 		margin-bottom: 1rem;
+	}
+	.empty-line {
+		margin: 0;
+	}
+	/* Styled here rather than reaching for `.primary-btn`: that class is defined
+	   per-page in the two orders views, not globally, so using it here would have
+	   rendered a bare browser button. */
+	.empty-cta {
+		padding: 0.55rem 1.1rem;
+		border-radius: 10px;
+		border: 1px solid var(--yellow-deep);
+		background: var(--yellow);
+		/* Yellow is light in both themes, so its text is pinned dark rather than
+		   following a token that flips. */
+		color: var(--on-yellow);
+		font-family: inherit;
+		font-size: 0.9rem;
+		font-weight: 800;
+		cursor: pointer;
+		box-shadow: var(--pop-shadow-sm);
+	}
+	.empty-cta:hover {
+		background: var(--yellow-deep);
 	}
 	.modal-backdrop {
 		position: fixed;

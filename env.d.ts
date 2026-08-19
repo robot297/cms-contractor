@@ -189,9 +189,12 @@ export type CoercedEnvSchema = {
   
   /**
    * **SEED_DEV_LOGIN**  
-   * Set to "true" to provision a pre-verified contractor login at boot, so local  
-   * development doesn't require completing a real email-verification loop against  
-   * a fresh database. Credentials live in src/lib/server/dev-login.server.ts.  
+   * Set to "true" to provision pre-verified logins at boot, so local development  
+   * doesn't require completing a real email-verification loop against a fresh  
+   * database. Provisions BOTH sides of the product: a contractor, and a customer  
+   * already linked to one of that contractor's customer records with an order and a  
+   * timeline on it — the customer portal is otherwise unreachable without several  
+   * minutes of setup. Credentials live in src/lib/server/dev-login.server.ts.  
    *   
    * MUST stay off on any reachable deployment — the credentials are public.  
    * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
@@ -228,13 +231,92 @@ export type CoercedEnvSchema = {
    */
   ID_SCAN_DEV_TOOLS?: string;
   
+  /**
+   * **SENTRY_DSN**  
+   * Error reporting — Sentry  
+   * Unhandled errors on both halves of the app (server load/actions/hooks, and the  
+   * browser) are reported to Sentry so a contractor hitting a bug doesn't have to  
+   * describe it for us to see it.  
+   *   
+   * Leave SENTRY_DSN blank in development: reporting is simply off, every surface  
+   * still works, and errors go to the console as they always have. Nothing about  
+   * the app's behaviour depends on Sentry being reachable.  
+   *   
+   * The DSN is public by design — it identifies the project to report to, it is not  
+   * a credential, and it is deliberately NOT marked @sensitive so varlock inlines it  
+   * into the browser bundle (the client half of the SDK needs it there).  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_DSN?: string;
+  
+  /**
+   * **SENTRY_ENVIRONMENT**  
+   * Which deployment an event came from ("production", "staging", …). Defaults to  
+   * the Node environment when blank, which is right for most cases; set it when one  
+   * NODE_ENV=production image is deployed to more than one environment.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_ENVIRONMENT?: string;
+  
+  /**
+   * **SENTRY_TRACES_SAMPLE_RATE**  
+   * Fraction of requests traced for performance (0 to 1). Errors are ALWAYS sent  
+   * regardless — this only governs the sampling of performance data, which is what  
+   * gets expensive at volume. 0 turns tracing off and keeps error reporting.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M26%2012h-4v2h4v2h-3v2h3v2h-4v2h4a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-7%2010h-6v-4a2%202%200%200%201%202-2h2v-2h-4v-2h4a2%202%200%200%201%202%202v2a2%202%200%200%201-2%202h-2v2h4ZM8%2020v-8H6v1H4v2h2v5H4v2h6v-2z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_TRACES_SAMPLE_RATE?: number;
+  
+  /**
+   * **SENTRY_AUTH_TOKEN** 🔐 _sensitive_  
+   * Source-map upload, so production stack traces name real files and lines instead  
+   * of minified chunks. Build-time only — the app never reads these at runtime, and  
+   * the upload is skipped entirely when the token is blank, so local and CI builds  
+   * that don't need it are unaffected.  
+   * Create the token at Sentry → Settings → Auth Tokens, with project:releases.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_AUTH_TOKEN?: string;
+  
+  /**
+   * **SENTRY_ORG**  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_ORG?: string;
+  
+  /**
+   * **SENTRY_PROJECT**  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_PROJECT?: string;
+  
+  /**
+   * **CUSTOMER_PORTAL_DEV_TOOLS**  
+   * Customer-portal view-as. When "true", the contractor nav grows a "Customer view"  
+   * button that opens the SEEDED dev customer's portal as they would see it, in the  
+   * same session and with no sign-out — so the customer-facing half of the product  
+   * is reachable while building it. Needs SEED_DEV_LOGIN=true to have a target; with  
+   * no seeded customer the button simply does not appear.  
+   *   
+   * The impersonated view is read-only: every write is refused while it is active,  
+   * so no record can claim a customer said something they did not. The signed-in  
+   * user's role is never changed (docs/adr/0002-one-role-per-user.md), ownership of  
+   * the target customer is re-checked on every request, and with this flag unset any  
+   * leftover selection cookie is cleared rather than merely ignored.  
+   *   
+   * MUST stay off in production — it is a development affordance, not an admin or  
+   * support tool. See docs/adr/0008-view-as-is-a-development-affordance.md.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  CUSTOMER_PORTAL_DEV_TOOLS?: string;
+  
 };
 
-type _CoercedEnvSchema_717152d9 = CoercedEnvSchema;
+type _CoercedEnvSchema_16204262 = CoercedEnvSchema;
 
 declare module 'varlock/env' {
-  export interface TypedEnvSchema extends Readonly<_CoercedEnvSchema_717152d9> {}
-  export interface PublicTypedEnvSchema extends Readonly<Pick<_CoercedEnvSchema_717152d9, 'MIGRATIONS_FOLDER' | 'ORIGIN' | 'GITHUB_REPO' | 'GITHUB_LABEL_BUG' | 'GITHUB_LABEL_FEATURE' | 'TURNSTILE_SITE_KEY' | 'STRIPE_PRICE_MONTHLY' | 'STRIPE_PRICE_ANNUAL' | 'BILLING_DEV_TOOLS' | 'EMAIL_FROM' | 'EMAIL_DEV_TOOLS' | 'SEED_DEV_LOGIN' | 'ID_SCAN_DEV_TOOLS'>> {}
+  export interface TypedEnvSchema extends Readonly<_CoercedEnvSchema_16204262> {}
+  export interface PublicTypedEnvSchema extends Readonly<Pick<_CoercedEnvSchema_16204262, 'MIGRATIONS_FOLDER' | 'ORIGIN' | 'GITHUB_REPO' | 'GITHUB_LABEL_BUG' | 'GITHUB_LABEL_FEATURE' | 'TURNSTILE_SITE_KEY' | 'STRIPE_PRICE_MONTHLY' | 'STRIPE_PRICE_ANNUAL' | 'BILLING_DEV_TOOLS' | 'EMAIL_FROM' | 'EMAIL_DEV_TOOLS' | 'SEED_DEV_LOGIN' | 'ID_SCAN_DEV_TOOLS' | 'SENTRY_DSN' | 'SENTRY_ENVIRONMENT' | 'SENTRY_TRACES_SAMPLE_RATE' | 'SENTRY_ORG' | 'SENTRY_PROJECT' | 'CUSTOMER_PORTAL_DEV_TOOLS'>> {}
 }
 
 
@@ -244,17 +326,17 @@ export type EnvSchemaAsStrings = {
       : (CoercedEnvSchema[Property] extends boolean ? ('true' | 'false') : string)
 };
 
-type _EnvSchemaAsStrings_717152d9 = EnvSchemaAsStrings;
+type _EnvSchemaAsStrings_16204262 = EnvSchemaAsStrings;
 declare global {
 
   // add types for global import.meta.env
-  interface ImportMetaEnv extends _EnvSchemaAsStrings_717152d9 {}
+  interface ImportMetaEnv extends _EnvSchemaAsStrings_16204262 {}
   interface ImportMeta {
     readonly env: ImportMetaEnv;
   }
 
   // add types for global process.env
   namespace NodeJS {
-    interface ProcessEnv extends _EnvSchemaAsStrings_717152d9 {}
+    interface ProcessEnv extends _EnvSchemaAsStrings_16204262 {}
   }
 }

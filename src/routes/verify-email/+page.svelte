@@ -114,7 +114,7 @@
 		border: none;
 		border-radius: 10px;
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		font: inherit;
 		font-size: 0.88rem;
 		font-weight: 700;

@@ -289,7 +289,7 @@
 	.segmented label.selected {
 		background: var(--yellow);
 		border-color: transparent;
-		color: #14171c;
+		color: var(--on-yellow);
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.segmented input {
@@ -428,7 +428,7 @@
 	/* The app's yellow primary, replacing this page's leftover brand-blue. */
 	.btn.primary {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		border-color: transparent;
 	}
 	.btn.primary:hover:not(:disabled) {

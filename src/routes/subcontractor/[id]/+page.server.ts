@@ -1,15 +1,16 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import {
-	MAX_ATTACHMENT_BYTES,
-	formatBytes,
-	isAllowedAttachmentType
-} from '$lib/crm';
-import {
-	addSubcontractorAttachment,
 	addSubcontractorNote,
 	GuestWriteForbiddenError,
 	subcontractorOrderView
 } from '$lib/server/subcontractor.server';
+import {
+	DocumentWriteForbiddenError,
+	listDocuments,
+	uploadDocuments,
+	viewerFromLocals,
+	type UploadInput
+} from '$lib/server/documents.server';
 import type { Actions, PageServerLoad } from './$types';
 
 function requireSubcontractor(locals: App.Locals) {
@@ -24,7 +25,11 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	// (never present in this payload). Null when the sub isn't assigned to it.
 	const view = await subcontractorOrderView(user.id, params.id);
 	if (!view) error(404, 'Job not found');
-	return { view };
+	// Both Tiers read the Documents on a job they are assigned to. Only Trusted
+	// may add one — the same rule `orderAccess` applies to the write path, rather
+	// than a second copy of it living on this page.
+	const documents = await listDocuments(viewerFromLocals(locals)!, params.id);
+	return { view, documents };
 };
 
 export const actions: Actions = {
@@ -42,28 +47,43 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
-	uploadPhoto: async ({ request, locals, params }) => {
-		const user = requireSubcontractor(locals);
+	/**
+	 * Job photos and files, through the same upload path as everyone else's.
+	 * Never billing-guarded: a subcontractor's write is not a contractor's
+	 * (docs/adr/0005-lapsing-never-reaches-customers.md).
+	 */
+	uploadDocuments: async ({ request, locals, params }) => {
+		requireSubcontractor(locals);
 		const form = await request.formData();
-		const file = form.get('file');
-		if (!(file instanceof File) || file.size === 0)
-			return fail(400, { message: 'Choose a photo to upload' });
-		if (file.size > MAX_ATTACHMENT_BYTES)
-			return fail(400, { message: `File is too large (max ${formatBytes(MAX_ATTACHMENT_BYTES)})` });
-		if (!isAllowedAttachmentType(file.type))
-			return fail(400, { message: 'Unsupported file type (images or PDF only)' });
-		const data = Buffer.from(await file.arrayBuffer());
-		try {
-			await addSubcontractorAttachment(user.id, params.id, {
-				filename: file.name,
-				mimeType: file.type,
-				size: file.size,
-				data
+		const files: UploadInput[] = [];
+		for (const entry of form.getAll('file')) {
+			if (!(entry instanceof File) || entry.size === 0) continue;
+			files.push({
+				filename: entry.name,
+				mimeType: entry.type,
+				size: entry.size,
+				data: Buffer.from(await entry.arrayBuffer())
 			});
+		}
+		if (files.length === 0) return fail(400, { message: 'Choose a photo or file to upload' });
+
+		try {
+			const outcomes = await uploadDocuments(viewerFromLocals(locals)!, params.id, files);
+			const stored = outcomes.filter((o) => o.ok).length;
+			const message = [
+				stored > 0 ? `${stored} uploaded` : '',
+				...outcomes
+					.filter((o) => !o.ok)
+					.map((r) => `${r.filename} was ${'reason' in r ? r.reason : 'refused'}`)
+			]
+				.filter(Boolean)
+				.join(' · ');
+			if (stored === 0) return fail(400, { message });
+			return { success: true, message };
 		} catch (err) {
-			if (err instanceof GuestWriteForbiddenError) return fail(403, { message: err.message });
+			// A Guest's Tier is what refuses this, exactly as it refuses a note.
+			if (err instanceof DocumentWriteForbiddenError) return fail(403, { message: err.message });
 			throw err;
 		}
-		return { success: true };
 	}
 };

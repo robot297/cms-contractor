@@ -14,7 +14,7 @@
 		'Unlimited customers, orders and subcontractors',
 		'Customer portals with magic-link invites',
 		'Subcontractor access with trusted and guest levels',
-		'Order timelines, attachments and follow-ups',
+		'Order timelines, documents and follow-ups',
 		'Custom email templates and branding',
 		'Every feature — nothing held back for a higher plan'
 	];
@@ -197,7 +197,7 @@
 	}
 	.toggle-opt.on {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	.toggle-opt:focus-visible {
 		outline: 2px solid var(--yellow-deep);

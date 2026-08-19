@@ -193,7 +193,7 @@
 		border-radius: 999px;
 		/* Brand yellow is light in both themes, so the label stays pinned dark. */
 		background: #ffcc00;
-		color: #14171c;
+		color: var(--on-yellow);
 		border: none;
 		box-shadow: var(--pop-shadow-sm);
 		font-size: 0.75rem;
@@ -251,7 +251,7 @@
 	   as the nav. Label pinned dark: yellow is light in both themes. */
 	.tabs button.active {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		box-shadow: 0 1px 3px rgba(27, 31, 36, 0.18);
 	}
 	.tabs button:focus-visible {
@@ -311,7 +311,7 @@
 		border: none;
 		border-radius: 10px;
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		font-size: 0.85rem;
 		box-shadow: var(--pop-shadow-sm);
 	}

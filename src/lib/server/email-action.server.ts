@@ -1,5 +1,6 @@
 import { fail, redirect, type RequestEvent } from '@sveltejs/kit';
 import { renderEmail } from '$lib/email';
+import { formatCents } from '$lib/crm';
 import { assertCanWrite } from './billing.server';
 import { recordEmailSent } from './crm.server';
 import {
@@ -180,4 +181,56 @@ export async function sendEmailAction(event: RequestEvent) {
 	}
 
 	return { sent: true, recorded };
+}
+
+/**
+ * Email a customer their final invoice at close-out. Reuses the same render/send/
+ * record chain as a composed message, so it carries the contractor's branding and
+ * lands on the order timeline. Returns 'skipped' when there is nowhere or no way to
+ * send (no address, unconfigured, dev-tools/simulation mode, or a provider refusal)
+ * — completing the order must not fail just because the courtesy email couldn't go.
+ */
+export async function sendFinalInvoiceEmail(
+	user: { id: string; name: string; email: string },
+	order: { id: string; projectName: string | null; customerName: string; customerEmail: string },
+	invoice: { amountCents: number | null; notes: string | null }
+): Promise<'sent' | 'skipped'> {
+	const to = order.customerEmail.trim();
+	// Same guards as a real send: no address, no provider, or a server in simulation
+	// mode all mean "don't actually send".
+	if (!to || !isEmailConfigured() || isEmailDevToolsEnabled()) return 'skipped';
+	await assertCanWrite(user.id);
+	const settings = await getContractorSettings(user.id);
+	const businessName = settings.businessName || user.name;
+
+	const lines: string[] = [
+		'Hi {{customer}},',
+		'',
+		'Here is the final invoice for your {{project}} project.'
+	];
+	if (invoice.amountCents != null) lines.push('', `Total: ${formatCents(invoice.amountCents)}`);
+	const notes = invoice.notes?.trim();
+	if (notes) lines.push('', notes);
+	lines.push('', 'Thank you for your business.');
+
+	const rendered = renderEmail(
+		{ subject: 'Final invoice for {{project}}', body: lines.join('\n') },
+		{ customer: order.customerName, contractor: businessName, project: order.projectName ?? '' },
+		{ businessName, signature: settings.signature }
+	);
+
+	const result = await sendEmail({
+		to,
+		replyTo: user.email,
+		fromName: businessName,
+		subject: rendered.subject,
+		html: rendered.html,
+		text: rendered.text
+	});
+	if (!result.ok) return 'skipped';
+	await recordEmailSent(order.id, user.id, {
+		customerName: order.customerName,
+		subject: rendered.subject
+	});
+	return 'sent';
 }

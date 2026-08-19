@@ -1,3 +1,15 @@
+> **SUPERSEDED — archived unimplemented (0/22 tasks).**
+>
+> Replaced by `order-documents`, which unifies the existing `attachment` table into a
+> single Document concept rather than introducing a second, parallel one. Two document
+> models in one product is worse than either.
+>
+> What this change wanted that `order-documents` deliberately defers, recorded so it is
+> not lost: document **tags**, the contractor→customer **sharing** toggle, **response
+> requests** (acknowledge / reply on a shared document), and **object storage**.
+> `order-documents` builds a storage seam so the last of those becomes a module swap,
+> and names the other three as explicit non-goals.
+
 ## Why
 
 Contractors need to exchange real artifacts with their customers — quotes, permits, photos, invoices, sign-off sheets — not just status text. Today there is no way to attach a document to a customer or order, share it into the customer portal, or ask the customer to acknowledge or respond to it. This change adds document upload, organization (tags), controlled sharing into the portal, and a lightweight response request, building on the customer directory (`contractor-customer-directory`).
@@ -16,9 +28,11 @@ Out of scope (deferred): object-storage/S3 backend (local disk first), virus sca
 ## Capabilities
 
 ### New Capabilities
+
 - `customer-documents`: Upload, tag, store (local disk + DB metadata), share into the customer portal, download with access control, and request/collect a customer response on a document.
 
 ### Modified Capabilities
+
 <!-- No published main specs are affected at the requirement level beyond what customer-documents introduces. Portal visibility is additive. -->
 
 ## Impact

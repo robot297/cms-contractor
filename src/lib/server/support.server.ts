@@ -62,6 +62,18 @@ function labelFor(type: Feedback['type']): string {
 	return ENV.GITHUB_LABEL_FEATURE?.trim() || 'enhancement';
 }
 
+/**
+ * Labels for one report: its type, plus which pane it came from so the two
+ * audiences can be filtered apart.
+ *
+ * The surface labels are NOT env-overridable, unlike the type labels — they are
+ * ours, they are only two, and a repo that lacks them gets them created by the
+ * first report rather than needing configuration.
+ */
+function labelsFor(feedback: Feedback): string[] {
+	return [labelFor(feedback.type), `from:${feedback.surface}`];
+}
+
 // ------------------------------------------------------------- Screenshots
 
 /** Client and server both enforce this; GitHub's Contents API takes far more,
@@ -167,7 +179,7 @@ export async function submitFeedback(
 				'User-Agent': 'contractor-crm-support',
 				'Content-Type': 'application/json'
 			},
-			body: JSON.stringify({ title, body, labels: [labelFor(feedback.type)] })
+			body: JSON.stringify({ title, body, labels: labelsFor(feedback) })
 		});
 	} catch (error) {
 		console.error('[support] network error reaching GitHub:', error);

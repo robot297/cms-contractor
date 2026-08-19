@@ -605,7 +605,7 @@
 	.btn.primary {
 		background: var(--yellow);
 		border-color: var(--yellow-deep);
-		color: #1f2328;
+		color: var(--on-yellow);
 	}
 	.btn.small {
 		padding: 0.4rem 0.7rem;

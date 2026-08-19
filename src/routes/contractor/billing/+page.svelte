@@ -282,7 +282,7 @@
 	}
 	.pill.trial {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		border-color: #14171c;
 	}
 	.pill.active,
@@ -367,7 +367,7 @@
 	}
 	.toggle-opt.on {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	.save {
 		font-size: 0.68rem;

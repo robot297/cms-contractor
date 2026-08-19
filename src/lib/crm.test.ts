@@ -11,6 +11,11 @@ import {
 	getVisibleCustomerState,
 	isCustomerLinked,
 	isFollowUpDue,
+	parseDateInput,
+	toDateInput,
+	followUpUrgency,
+	followUpDaysOverdue,
+	followUpLabel,
 	isValidAvatarDataUrl,
 	buildFeedbackIssue,
 	feedbackTypeLabel,
@@ -29,19 +34,250 @@ import {
 	BILLING_LAUNCHED_AT,
 	TRIAL_LIMITS,
 	snoozeDate,
+	isSnoozePreset,
 	tierLabel,
 	validateCustomerContact,
 	validateOrderSetup,
 	validateSubcontractorContact,
 	renderTemplate,
-	composeEmail
+	composeEmail,
+	customerProgress,
+	checkUploadContent,
+	sniffFileType,
+	safeFilename,
+	splitFilename,
+	normalizeMessageTopic,
+	messageTopicLabel,
+	CUSTOMER_QUICK_ACTIONS,
+	CONTRACTOR_ORDER_STATES,
+	CUSTOMER_PROGRESS_STEPS,
+	customerStateLabel,
+	isCustomerActionState
 } from './crm';
 
 describe('customer-visible state mapping', () => {
-	it('maps contractor lifecycle states to customer-friendly labels', () => {
+	it('maps contractor lifecycle states to a coarse rail stage', () => {
 		expect(getVisibleCustomerState('Deposit Pending')).toBe('Pending');
 		expect(getVisibleCustomerState('Work Scheduled')).toBe('Scheduled');
 		expect(getVisibleCustomerState('Work Complete')).toBe('Completed');
+	});
+
+	// The regression this suite exists for: `Final Payment Pending` was missing
+	// from the switch and fell through a `default` to 'Pending', which sent the
+	// customer's rail BACKWARDS to the first step on a job whose work was done.
+	it('keeps a job awaiting final payment in the working stage, not back at the start', () => {
+		expect(getVisibleCustomerState('Final Payment Pending')).toBe('In Progress');
+	});
+
+	it('gives every contractor state a rail stage and a label', () => {
+		// Both switches are exhaustive with no `default`, so a state added later is
+		// a type error. This is the runtime half of that guarantee: it also catches
+		// a `default` being reintroduced, which would silence the type error.
+		for (const state of CONTRACTOR_ORDER_STATES) {
+			expect(getVisibleCustomerState(state), state).toBeTruthy();
+			expect(customerStateLabel(state), state).toBeTruthy();
+		}
+	});
+
+	it('speaks to the customer rather than repeating the contractor workflow', () => {
+		// The label is the customer's words, not the workflow's. If these ever come
+		// back identical, the point of having two functions has been lost.
+		expect(customerStateLabel('Deposit Pending')).toBe('Deposit due');
+		expect(customerStateLabel('Final Payment Pending')).toBe('Final payment due');
+		expect(customerStateLabel('Inquiry')).toBe('Received');
+	});
+
+	it('every rail stage a label maps into is a real step or a stated departure', () => {
+		const offPath = ['Cancelled', 'On Hold'];
+		for (const state of CONTRACTOR_ORDER_STATES) {
+			const stage = getVisibleCustomerState(state);
+			const known =
+				(CUSTOMER_PROGRESS_STEPS as readonly string[]).includes(stage) || offPath.includes(stage);
+			expect(known, `${state} -> ${stage}`).toBe(true);
+		}
+	});
+
+	it('flags only the states where the customer owes something', () => {
+		expect(isCustomerActionState('Deposit Pending')).toBe(true);
+		expect(isCustomerActionState('Final Payment Pending')).toBe(true);
+		expect(isCustomerActionState('In Progress')).toBe(false);
+		expect(isCustomerActionState('Quote Sent')).toBe(false);
+	});
+});
+
+describe('customer progress', () => {
+	it('places an on-path state on the track', () => {
+		const p = customerProgress('In Progress');
+		expect(p.onPath).toBe(true);
+		if (p.onPath) {
+			expect(p.steps).toEqual(['Pending', 'Scheduled', 'In Progress', 'Completed']);
+			expect(p.currentIndex).toBe(2);
+		}
+	});
+
+	it('marks the first and last steps correctly', () => {
+		const first = customerProgress('Pending');
+		const last = customerProgress('Completed');
+		expect(first.onPath && first.currentIndex).toBe(0);
+		expect(last.onPath && last.currentIndex).toBe(3);
+	});
+
+	it.each(['Cancelled', 'On Hold'] as const)('reports %s as off the path', (state) => {
+		// Cancelled and On Hold are departures from the path, not points on it —
+		// rendering them as a step would imply the job is still moving along it.
+		const p = customerProgress(state);
+		expect(p.onPath).toBe(false);
+		if (!p.onPath) expect(p.label).toBe(state);
+	});
+});
+
+describe('message topics', () => {
+	it('accepts the known topics', () => {
+		expect(normalizeMessageTopic('payment')).toBe('payment');
+		expect(normalizeMessageTopic('issue')).toBe('issue');
+	});
+
+	it('falls back to general rather than throwing', () => {
+		// An unknown topic must never cost the customer their message.
+		expect(normalizeMessageTopic('nonsense')).toBe('general');
+		expect(normalizeMessageTopic(null)).toBe('general');
+		expect(normalizeMessageTopic(undefined)).toBe('general');
+	});
+
+	it('labels each topic for the contractor’s inbox', () => {
+		expect(messageTopicLabel('payment')).toBe('Payment');
+		expect(messageTopicLabel('issue')).toBe('Problem');
+		expect(messageTopicLabel('general')).toBe('Message');
+	});
+
+	it('gives every quick action a valid topic', () => {
+		for (const a of CUSTOMER_QUICK_ACTIONS) {
+			expect(normalizeMessageTopic(a.topic)).toBe(a.topic);
+		}
+	});
+
+	it('warns on the payment action that the app takes no payment', () => {
+		// CONTEXT.md: this product tracks payment as a status and never processes
+		// it. A button labelled "Make a payment" has to say so.
+		const pay = CUSTOMER_QUICK_ACTIONS.find((a) => a.topic === 'payment');
+		expect(pay?.note).toMatch(/not through this app/i);
+	});
+});
+
+describe('upload content checking', () => {
+	const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(24).fill(0)]);
+	const PNG = bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+	const JPEG = bytes(0xff, 0xd8, 0xff);
+	const GIF = bytes(0x47, 0x49, 0x46, 0x38);
+	const PDF = bytes(0x25, 0x50, 0x44, 0x46);
+	const WEBP = new Uint8Array([
+		0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0, 0, 0, 0
+	]);
+
+	it('recognizes each accepted type from its signature', () => {
+		expect(sniffFileType(PNG)).toBe('image/png');
+		expect(sniffFileType(JPEG)).toBe('image/jpeg');
+		expect(sniffFileType(GIF)).toBe('image/gif');
+		expect(sniffFileType(WEBP)).toBe('image/webp');
+		expect(sniffFileType(PDF)).toBe('application/pdf');
+	});
+
+	it('accepts a file whose content matches its claim', () => {
+		expect(checkUploadContent('application/pdf', PDF)).toBeNull();
+		expect(checkUploadContent('image/png', PNG)).toBeNull();
+	});
+
+	it('refuses a script however it is labelled', () => {
+		// `#!/bin/sh` renamed receipt.pdf and posted as application/pdf is the
+		// whole reason content is read rather than trusted.
+		const shell = bytes(0x23, 0x21, 0x2f, 0x62, 0x69, 0x6e);
+		expect(checkUploadContent('application/pdf', shell)).toBe('scripts are not accepted');
+		expect(checkUploadContent('image/png', shell)).toBe('scripts are not accepted');
+	});
+
+	it('refuses compressed archives, including Office formats', () => {
+		// .docx/.xlsx/.pptx are zip containers, so "no compressed content" excludes
+		// them too. Deliberate, not an oversight.
+		const zip = bytes(0x50, 0x4b, 0x03, 0x04);
+		expect(checkUploadContent('application/pdf', zip)).toBe('compressed archives are not accepted');
+		expect(sniffFileType(bytes(0x1f, 0x8b))).toBe('archive');
+		expect(sniffFileType(bytes(0x37, 0x7a, 0xbc, 0xaf))).toBe('archive');
+		expect(sniffFileType(bytes(0x52, 0x61, 0x72, 0x21))).toBe('archive');
+	});
+
+	it('refuses executables', () => {
+		expect(checkUploadContent('image/jpeg', bytes(0x7f, 0x45, 0x4c, 0x46))).toBe(
+			'programs are not accepted'
+		);
+		expect(checkUploadContent('image/jpeg', bytes(0x4d, 0x5a))).toBe('programs are not accepted');
+		expect(checkUploadContent('image/jpeg', bytes(0xcf, 0xfa, 0xed, 0xfe))).toBe(
+			'programs are not accepted'
+		);
+	});
+
+	it('refuses content that disagrees with its claimed type', () => {
+		// Both are allowed types, but the mismatch means the client is broken or
+		// probing — neither is worth storing.
+		expect(checkUploadContent('application/pdf', PNG)).toBe('file content does not match its type');
+	});
+
+	it('refuses a disallowed type even when the content is unrecognized', () => {
+		expect(checkUploadContent('application/zip', bytes(0x00, 0x01))).toBe('unsupported type');
+	});
+
+	it('refuses unrecognized content under an allowed claim', () => {
+		// Plain text posted as a PDF has no signature we know; storing it would be
+		// trusting the label again.
+		expect(checkUploadContent('application/pdf', bytes(0x68, 0x65, 0x6c, 0x6c, 0x6f))).toBe(
+			'file content does not match its type'
+		);
+	});
+
+	it('does not read past the end of a short file', () => {
+		expect(() => sniffFileType(new Uint8Array([0x25]))).not.toThrow();
+		expect(sniffFileType(new Uint8Array([]))).toBeNull();
+	});
+});
+
+describe('document filenames', () => {
+	it('splits a name from its extension', () => {
+		expect(splitFilename('IMG_4821.jpg')).toEqual({ stem: 'IMG_4821', ext: '.jpg' });
+		expect(splitFilename('scan.of.permit.pdf')).toEqual({ stem: 'scan.of.permit', ext: '.pdf' });
+	});
+
+	it('treats a name with no usable extension as all stem', () => {
+		expect(splitFilename('receipt')).toEqual({ stem: 'receipt', ext: '' });
+		// A leading dot is the whole name (".env"), not an extension.
+		expect(splitFilename('.env')).toEqual({ stem: '.env', ext: '' });
+		expect(splitFilename('trailing.')).toEqual({ stem: 'trailing.', ext: '' });
+	});
+
+	it('keeps what a person would actually type', () => {
+		expect(safeFilename('Kitchen - before', '.jpg')).toBe('Kitchen - before.jpg');
+		expect(safeFilename('permit_2026', '.pdf')).toBe('permit_2026.pdf');
+	});
+
+	it('strips path separators so a rename cannot escape', () => {
+		// This value reaches a Content-Disposition header and the filesystem.
+		// Slashes go first, then the leading dots they left behind.
+		expect(safeFilename('../../etc/passwd', '.pdf')).toBe('etcpasswd.pdf');
+		expect(safeFilename('a\\b:c*d?e"f<g>h|i', '.png')).toBe('abcdefghi.png');
+	});
+
+	it('never returns a hidden or empty name', () => {
+		expect(safeFilename('...', '.pdf')).toBe('document.pdf');
+		expect(safeFilename('   ', '.pdf')).toBe('document.pdf');
+		expect(safeFilename('', '.pdf')).toBe('document.pdf');
+	});
+
+	it('caps the length', () => {
+		expect(safeFilename('x'.repeat(200), '.pdf')).toBe('x'.repeat(80) + '.pdf');
+	});
+
+	it('always keeps the extension the upload actually had', () => {
+		// The stem is the customer's; the extension never is, so a rename can't
+		// leave a document that won't open.
+		expect(safeFilename('my notes.exe', '.pdf')).toBe('my notes.exe.pdf');
 	});
 });
 
@@ -233,14 +469,18 @@ describe('order setup validation', () => {
 describe('follow-ups', () => {
 	const now = new Date('2026-07-19T00:00:00.000Z');
 
-	it('defaults a new follow-up to a week out', () => {
+	it('defaults a new follow-up to a fortnight out', () => {
+		// Two weeks, not one. Getting in touch now resets this clock, and a weekly
+		// cadence meant answering a question on Monday earned you a reminder about
+		// the same job the following Monday.
+		expect(DEFAULT_FOLLOWUP_DAYS).toBe(14);
 		expect(defaultFollowUp(DEFAULT_FOLLOWUP_DAYS, now).toISOString()).toBe(
-			'2026-07-26T00:00:00.000Z'
+			'2026-08-02T00:00:00.000Z'
 		);
 	});
 
 	it('honours a contractor-set interval', () => {
-		expect(defaultFollowUp(14, now).toISOString()).toBe('2026-08-02T00:00:00.000Z');
+		expect(defaultFollowUp(3, now).toISOString()).toBe('2026-07-22T00:00:00.000Z');
 	});
 
 	it('only accepts the offered intervals', () => {
@@ -377,51 +617,84 @@ describe('support feedback', () => {
 	});
 
 	it('validates a good submission and trims fields', () => {
-		const result = validateFeedback({ type: 'bug', title: '  Save fails  ', detail: '  broken  ' });
+		const result = validateFeedback(
+			{ type: 'bug', title: '  Save fails  ', detail: '  broken  ' },
+			'contractor'
+		);
 		expect(result.ok).toBe(true);
 		if (result.ok) {
-			expect(result.value).toEqual({ type: 'bug', title: 'Save fails', detail: 'broken' });
+			expect(result.value).toEqual({
+				type: 'bug',
+				title: 'Save fails',
+				detail: 'broken',
+				surface: 'contractor'
+			});
 		}
 	});
 
 	it('requires a summary and details', () => {
-		expect(validateFeedback({ type: 'bug', title: '', detail: 'x' })).toMatchObject({
+		expect(validateFeedback({ type: 'bug', title: '', detail: 'x' }, 'contractor')).toMatchObject({
 			ok: false,
 			field: 'title'
 		});
-		expect(validateFeedback({ type: 'feature', title: 'x', detail: '' })).toMatchObject({
-			ok: false,
-			field: 'detail'
-		});
+		expect(validateFeedback({ type: 'feature', title: 'x', detail: '' }, 'customer')).toMatchObject(
+			{
+				ok: false,
+				field: 'detail'
+			}
+		);
 	});
 
 	it('rejects an over-long summary', () => {
-		const result = validateFeedback({ type: 'bug', title: 'x'.repeat(141), detail: 'ok' });
+		const result = validateFeedback(
+			{ type: 'bug', title: 'x'.repeat(141), detail: 'ok' },
+			'contractor'
+		);
 		expect(result.ok).toBe(false);
 		if (!result.ok) expect(result.field).toBe('title');
 	});
 
 	it('builds a bug issue: [Bug] prefix, bug label context, submitter in body', () => {
 		const { title, body } = buildFeedbackIssue(
-			{ type: 'bug', title: 'Status won’t save', detail: 'Tapping save does nothing.' },
+			{
+				type: 'bug',
+				title: 'Status won’t save',
+				detail: 'Tapping save does nothing.',
+				surface: 'contractor'
+			},
 			{ name: 'Rae', email: 'rae@example.com' }
 		);
-		expect(title).toBe('[Bug] Status won’t save');
+		expect(title).toBe('[Bug][Contractor] Status won’t save');
 		expect(body).toContain('Tapping save does nothing.');
 		expect(body).toContain('Rae (rae@example.com)');
 		expect(body).toContain('Type: Bug report');
+		expect(body).toContain('Surface: Contractor app');
 	});
 
 	it('builds a feature issue with the [Feature] prefix', () => {
 		const { title, body } = buildFeedbackIssue({
 			type: 'feature',
 			title: 'CSV export',
-			detail: 'Export orders.'
+			detail: 'Export orders.',
+			surface: 'contractor'
 		});
-		expect(title).toBe('[Feature] CSV export');
+		expect(title).toBe('[Feature][Contractor] CSV export');
 		expect(body).toContain('Type: Feature request');
 		// Falls back gracefully when no submitter is provided.
-		expect(body).toContain('a contractor');
+		expect(body).toContain('someone');
+	});
+
+	it('marks a report filed from the customer portal', () => {
+		// Triage reads a list of titles; whose experience broke is the first thing
+		// worth knowing, so the surface rides in the title as well as the body.
+		const { title, body } = buildFeedbackIssue({
+			type: 'bug',
+			title: 'Timeline is empty',
+			detail: 'Nothing shows.',
+			surface: 'customer'
+		});
+		expect(title).toBe('[Bug][Customer] Timeline is empty');
+		expect(body).toContain('Surface: Customer portal');
 	});
 });
 
@@ -632,5 +905,154 @@ describe('BILLING_LAUNCHED_AT', () => {
 	it('is in the past, so new signups actually start a trial', () => {
 		expect(BILLING_LAUNCHED_AT.getTime()).toBeLessThan(Date.now());
 		expect(shouldBeComped(new Date())).toBe(false);
+	});
+});
+
+/**
+ * Follow-up urgency. Compared by calendar day on purpose — see the note on
+ * `followUpUrgency`. Dates are built with the local-time constructor rather than
+ * ISO strings, because `new Date('2026-07-19')` is UTC midnight, which is the
+ * PREVIOUS day in every US timezone and would make these tests pass or fail
+ * depending on where they run.
+ */
+describe('followUpUrgency', () => {
+	/** 2026-07-19, 2pm local. */
+	const now = new Date(2026, 6, 19, 14, 0, 0);
+	const day = (offset: number, hour = 0) => new Date(2026, 6, 19 + offset, hour, 0, 0);
+
+	it('reports a date on an earlier day as overdue', () => {
+		expect(followUpUrgency(day(-1), now)).toBe('overdue');
+		expect(followUpUrgency(day(-9), now)).toBe('overdue');
+	});
+
+	it('reports today as today, whatever time of day it is', () => {
+		expect(followUpUrgency(day(0, 0), now)).toBe('today');
+		expect(followUpUrgency(day(0, 9), now)).toBe('today');
+		// Still today's work at 4pm, not "nine hours overdue" — the whole reason
+		// this is a calendar comparison rather than an elapsed-time one.
+		expect(followUpUrgency(day(0, 23), now)).toBe('today');
+	});
+
+	it('reports a later day as upcoming', () => {
+		expect(followUpUrgency(day(1), now)).toBe('upcoming');
+		expect(followUpUrgency(day(30), now)).toBe('upcoming');
+	});
+
+	it('reports no date, and an unparseable one, as none', () => {
+		expect(followUpUrgency(null, now)).toBe('none');
+		expect(followUpUrgency('not a date', now)).toBe('none');
+	});
+
+	it('accepts an ISO string, as the loader hands it over the wire', () => {
+		expect(followUpUrgency(day(-2).toISOString(), now)).toBe('overdue');
+	});
+});
+
+describe('followUpDaysOverdue', () => {
+	const now = new Date(2026, 6, 19, 14, 0, 0);
+	const day = (offset: number, hour = 0) => new Date(2026, 6, 19 + offset, hour, 0, 0);
+
+	it('counts whole calendar days late', () => {
+		expect(followUpDaysOverdue(day(-1), now)).toBe(1);
+		expect(followUpDaysOverdue(day(-14), now)).toBe(14);
+	});
+
+	it('is zero for today and for anything still ahead', () => {
+		expect(followUpDaysOverdue(day(0, 23), now)).toBe(0);
+		expect(followUpDaysOverdue(day(3), now)).toBe(0);
+		expect(followUpDaysOverdue(null, now)).toBe(0);
+	});
+});
+
+describe('followUpLabel', () => {
+	const now = new Date(2026, 6, 19, 14, 0, 0);
+	const day = (offset: number) => new Date(2026, 6, 19 + offset, 0, 0, 0);
+
+	it('counts the days rather than only saying "overdue"', () => {
+		// Three days late and three weeks late are different conversations.
+		expect(followUpLabel(day(-1), now)).toBe('1 day overdue');
+		expect(followUpLabel(day(-3), now)).toBe('3 days overdue');
+		expect(followUpLabel(day(-21), now)).toBe('21 days overdue');
+	});
+
+	it('names today plainly', () => {
+		expect(followUpLabel(day(0), now)).toBe('Due today');
+	});
+
+	it('reads an upcoming date in the same words the settings use', () => {
+		expect(followUpLabel(day(1), now)).toBe('Due in a day');
+		expect(followUpLabel(day(7), now)).toBe('Due in a week');
+	});
+
+	it('says so when there is no follow-up at all', () => {
+		expect(followUpLabel(null, now)).toBe('No follow-up set');
+	});
+});
+
+/**
+ * The date-picker round trip. These are the regression guard for a one-day
+ * error that was invisible until the dashboard started counting days: every
+ * assertion here fails under the old `new Date('2026-08-14')` for any runner
+ * west of Greenwich.
+ */
+describe('parseDateInput / toDateInput', () => {
+	it('parses a picker value as the local calendar day it names', () => {
+		const parsed = parseDateInput('2026-08-14')!;
+		expect(parsed.getFullYear()).toBe(2026);
+		expect(parsed.getMonth()).toBe(7);
+		expect(parsed.getDate()).toBe(14);
+		// Local midnight, not UTC midnight — that difference IS the bug.
+		expect(parsed.getHours()).toBe(0);
+	});
+
+	it('round-trips a day without drifting', () => {
+		for (const day of ['2026-01-01', '2026-08-14', '2026-12-31']) {
+			expect(toDateInput(parseDateInput(day))).toBe(day);
+		}
+	});
+
+	it('treats blank and absent as no date', () => {
+		expect(parseDateInput('')).toBeNull();
+		expect(parseDateInput('   ')).toBeNull();
+		expect(parseDateInput(undefined)).toBeNull();
+	});
+
+	it('refuses a malformed value rather than guessing', () => {
+		expect(parseDateInput('14/08/2026')).toBeNull();
+		expect(parseDateInput('2026-8-4')).toBeNull();
+		expect(parseDateInput('tomorrow')).toBeNull();
+	});
+
+	it('refuses a date that does not exist instead of rolling it forward', () => {
+		// `new Date(2026, 1, 31)` silently becomes 3 March.
+		expect(parseDateInput('2026-02-31')).toBeNull();
+		expect(parseDateInput('2026-13-01')).toBeNull();
+	});
+
+	it('formats null and an unparseable date as empty', () => {
+		expect(toDateInput(null)).toBe('');
+		expect(toDateInput('not a date')).toBe('');
+	});
+});
+
+describe('snoozeDate', () => {
+	const from = new Date(2026, 6, 19, 9, 0, 0);
+	const daysBetween = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / 86400000);
+
+	it.each([
+		['1d', 1],
+		['3d', 3],
+		['1w', 7],
+		['1m', 30]
+	] as const)('pushes %s out by %i days', (preset, days) => {
+		expect(daysBetween(from, snoozeDate(preset, from))).toBe(days);
+	});
+
+	it('accepts every preset it advertises, and nothing else', () => {
+		for (const preset of ['1d', '3d', '1w', '1m']) expect(isSnoozePreset(preset)).toBe(true);
+		expect(isSnoozePreset('2w')).toBe(false);
+		expect(isSnoozePreset('')).toBe(false);
+		// The lookup is an object, so inherited keys must not read as presets.
+		expect(isSnoozePreset('toString')).toBe(false);
 	});
 });
