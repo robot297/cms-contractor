@@ -4,9 +4,11 @@ The getting-started **Guide** has no progress column. Each step is answered by a
 domain whether the thing actually happened — does this Contractor have a Customer, an Order,
 a sent Invite, an Assignment — so the checklist can never claim a step is done for an account
 where it isn't, and can never be left stale by a failed write, a deleted record, or a Customer
-created before the Guide existed. What _is_ stored, on `contractor_settings`, is the one thing
-that isn't recoverable from domain data: the Contractor's own continue-or-dismiss choice
-(`guide_state`: `active` | `extended` | `dismissed`).
+created before the Guide existed. What _is_ stored, on `contractor_settings`, is the thing that
+isn't recoverable from domain data: the Contractor's own choices — continue-or-dismiss
+(`guide_state`: `active` | `extended` | `dismissed`) and which optional steps they waved away
+(`guide_skipped_steps`). "They never invited anyone" and "they decided not to" are identical in
+the Customers table.
 
 ## Consequences
 
@@ -16,10 +18,14 @@ that isn't recoverable from domain data: the Contractor's own continue-or-dismis
 - Deleting every Order un-ticks step two. That is deliberate: the Guide describes the account
   as it is now. The Contractor's dismissal still holds, so the card does not come back
   uninvited.
-- One step breaks the rule and is stored: "follow-ups". `createOrder` already sets
-  `nextFollowUpAt` to a three-day default, so "has a follow-up" is true the instant an Order
-  exists and would tick itself before the Contractor read anything. That step teaches rather
-  than asks, and is completed by acknowledgement (`guide_followup_ack_at`).
+- A step whose subject is _seeded_ cannot ask "does it exist" — the answer is yes before the
+  Contractor has read anything. The Guide once carried a "follow-ups" step for exactly this
+  reason, ticked by acknowledgement in `guide_followup_ack_at`; it was removed, and the column
+  with it, rather than kept as a standing exception. Its replacement, "make your emails sound
+  like you", stays derived by asking a sharper question: not "do they have templates" (always
+  true) but "is any of the wording theirs" — a template that isn't a starter verbatim, or a
+  signature or business name they set. Seeded features should tighten the question, not store
+  an acknowledgement.
 
 ## Why not the `user` table
 

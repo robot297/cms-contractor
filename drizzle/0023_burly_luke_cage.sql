@@ -1,0 +1,1 @@
+ALTER TABLE "attachment" ADD COLUMN "uploaded_by_role" text DEFAULT 'contractor' NOT NULL;

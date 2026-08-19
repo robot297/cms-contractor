@@ -24,11 +24,20 @@ _Avoid_: Account (ambiguous — could mean User or Customer or Subcontractor).
 
 **Subcontractor**:
 A contractor-scoped record for a trade partner the Contractor delegates work to. Belongs to exactly one Contractor and may Link to at most one User via a Subcontractor Invite — mirroring the Customer record↔User pattern (the same trade person under two Contractors = two Subcontractor records → one User). Carries a profile the Contractor administers (trade/specialty, contact, company, license #, insurance) and an access Tier. A Subcontractor is assigned to Orders to receive work.
-_Avoid_: Vendor, crew, worker, contractor (a Subcontractor is a distinct record, not a Contractor User).
+**Workers** is the plural the Order workspace uses on screen — the tab listing who is assigned to a job — because that panel is about the people on this job rather than about the records. The entity is still a Subcontractor everywhere else, singular and in the code.
+_Avoid_: Vendor, crew, contractor (a Subcontractor is a distinct record, not a Contractor User); _worker_ as the name of the entity — it is a UI plural for a set of Assignments, not a synonym for the record.
 
 **Tier (Trusted Subcontractor / Guest Contractor)**:
 An access level the primary Contractor assigns to each Subcontractor, gating both visibility and write access on assigned Orders. A **Trusted Subcontractor** sees the full Order (including the Customer's contact details + timeline) and may write back (timeline notes, job photos). A **Guest Contractor** sees work details only — project, type, status, work timeline — with the Customer's contact PII redacted, and is read-only. The Tier lives on the Subcontractor record and applies to all their assignments.
 _Avoid_: Permission, role (role is a User concept; Tier is a Subcontractor-record concept).
+
+**ID Scan**:
+Filling the Add/Edit Subcontractor form by photographing the Subcontractor's ID instead of typing it. Two paths: the PDF417 barcode on the back of a US/CA licence, decoded on the contractor's own device, and — for a card with no barcode, such as a trade licence — sending the photo to be read, which is off entirely unless the deployment configures it. An ID Scan never writes: it prefills a form the Contractor then reviews and saves, so every rule that governs a typed entry still governs a scanned one.
+_Avoid_: OCR (only one of the two paths is optical), verification (a scan captures what the card says, it does not vouch for it), import.
+
+**Scanned ID**:
+What one ID Scan read: a name, a single-line address, a document number, a date of birth and an expiry, plus which path produced it. A Scanned ID is never stored — neither is the photo. Only the name and address prefill a Subcontractor; the rest is shown on the confirm step so the Contractor can see the scan read the right card, then discarded with the image. The one exception is a trade licence read by vision, whose number is what `licenseNumber` on a Subcontractor actually means — a driver's licence number never fills that field.
+_Avoid_: Document (a Document is a stored artifact; a Scanned ID is deliberately not stored), record.
 
 **Subcontractor Invite**:
 A magic/invite link a Contractor sends so a Subcontractor can access their portal, bound to the Subcontractor record by token (email is a fallback) — the same load-bearing binding as the customer Invite ([ADR-0001](docs/adr/0001-bind-customer-to-user-by-invite-token.md)), implemented as a parallel mechanism rather than by generalizing the customer Invite. See [ADR-0003](docs/adr/0003-parallel-subcontractor-invite.md).
@@ -48,6 +57,38 @@ A Contractor's private, searchable list of their own Customers, independent of w
 **Order**:
 A unit of tracked work a Contractor performs for a Customer, with a lifecycle state and a timeline. Links to one Customer.
 _Avoid_: Project (used in older business proposal), job, ticket.
+
+**Timeline**:
+The record of what happened to an **Order** — status changes, notes, milestones, a **Document** arriving. Shown to the **Contractor** and the **Customer** as **History**, which is what both surfaces call it on screen; _Timeline_ remains the name of the entity and the table.
+_Avoid_: Feed, activity, log; and do not use _Timeline_ as a UI label — the two surfaces agreed on History and drifting back would split them again.
+
+**Order State** / **Stage**:
+An Order carries one of ten **Order States** — the Contractor's workflow, from _Inquiry_ to _On Hold / Archived_. The **Customer** is told all ten, in their own words: _Deposit Pending_ reads as "Deposit due", _Inquiry_ as "Received". What the Customer is shown as a progress rail is the coarser **Stage** — Pending, Scheduled, In Progress, Completed — because a rail with ten dots is unreadable on a phone. The two answer different questions and are allowed to look out of step: the Stage says how far along the job is, the State says what is happening now. Cancelled and On Hold are neither — they are departures from the rail rather than points on it.
+_Avoid_: Status (ambiguous between the two), phase.
+
+**Portal**:
+The surface a **Customer** or **Subcontractor** sees — their own work and nothing else, reached by **Invite** rather than by signing up. The Contractor's own app is not a Portal. Each Portal is scoped to the records its holder is linked or assigned to, and none of them consults a **Subscription** ([ADR-0005](docs/adr/0005-lapsing-never-reaches-customers.md)).
+_Avoid_: Dashboard (the Contractor's word), client area, account page.
+
+**Message**:
+One thing said about an **Order**, written by the **Contractor** or by the **Customer**, and visible to both. A Message is _not_ a **Timeline** entry: the Timeline records what happened to the job, a Message records what someone said about it. Only a Message carries an author who could have said something else.
+_Avoid_: Note (an internal note is a Timeline entry the Customer never sees), request, comment, update.
+
+**Topic**:
+What a **Customer**'s **Message** is about — a question, a payment matter, scheduling, or a reported problem. **Dormant**: the quick actions that set it have been removed from the portal, so every new Message is _general_. Messages sent while the actions existed keep their Topic and still display it, and the column and the labels remain — this is a UI that was taken away, not a concept that was deleted. Anything that reintroduces it needs to decide whether a Topic is worth asking a Customer for at all.
+_Avoid_: Category, type (a **Feedback** has a type — bug or feature — which is a different thing), priority.
+
+**Thread**:
+The ordered set of **Messages** on one **Order** — exactly one per Order, read oldest-first, never deleted. Both ends see the same Thread; each side separately tracks which of the other's Messages it has read, so an unread count means "waiting on you" rather than "new to everyone".
+_Avoid_: Conversation (fine in prose, but the Thread is the object), inbox, chat.
+
+**Document**:
+One file on one **Order** — a quote, a permit, a receipt, a sign-off sheet, the photo of the meter reading. A Document records what it is called, what type it is, who uploaded it (both their role and which **User**), and when it arrived. It is always owned by the Order's **Contractor**, whoever sent it, because ownership follows the job rather than the sender. Any role may add one through the same upload path, and every surface opens one the same way: over the page, never by navigating at the file.
+_Avoid_: Attachment (the old word — retired), file (fine in prose; a Document is the object), upload (that is the act, not the thing), asset.
+
+**Withdraw**:
+A **Customer** removing a **Document** they sent, allowed only until their **Contractor** has read it. Once read it stays: a Document that has been seen is a record of what was exchanged, not a draft. This is not the same as the Contractor's _delete_, which applies to any Document on their own Order at any time. The rule needs its own name in the code — `withdrawDocument` is not `deleteDocument` — but the Customer is not asked to learn it: the control says **Remove**, and where it is gone the portal says the Contractor has seen the file.
+_Avoid_: Unsend, recall, take back, undo (as UI copy — the code keeps _withdraw_ for the rule).
 
 **Subscription**:
 A Contractor's billing standing. Every Contractor has exactly one, created the moment they sign up and never absent. Its status is `trialing`, `active`, `past_due`, `lapsed`, or `comped`. Only Contractors have one — Customers and Subcontractors arrive by Invite and never pay.
@@ -81,6 +122,15 @@ _Avoid_: Onboarding (ambiguous with signup and with the Invite flow), tour, wiza
 - A **Contractor** sends an **Invite** to a **Customer**; the Customer does not self-register.
 - Accepting an **Invite** binds the accepting **User** to the **Customer** via the Invite's token (email match is a fallback). A **User** may link to at most one **Customer** per **Contractor**.
 - An **Order** belongs to one **Contractor** and references one **Customer**.
+- Every **Order State** maps to exactly one customer-facing label and one **Stage**. Both mappings are exhaustive by construction: adding an eleventh State is a type error, not a state that quietly reports as _Pending_ — which is what happened to _Final Payment Pending_, whose absence sent the Customer's rail backwards to the first step on a job whose work was finished.
+- An **Order** has exactly one **Thread**, holding the **Messages** between its Contractor and its Customer. A Message never appears on the Order's **Timeline**, and a Timeline entry is never a Message.
+- An **Order** holds many **Documents**, and a **Document** belongs to exactly one Order. Every Document on an Order is owned by that Order's **Contractor**, regardless of which role uploaded it.
+- A **Customer** sees only the **Documents** they sent themselves. What their **Contractor** has filed on the same Order stays the Contractor's until sharing exists as a concept — a deliberate hold, restated here so it is not lost by accident.
+- A **Subcontractor** sees the **Documents** on Orders they are assigned to. **Tier** governs writing one exactly as it governs a timeline note: a Trusted Subcontractor may upload, a Guest Contractor may only read.
+- A **Lapsed** Contractor may not upload a **Document**; their **Customer** and their assigned **Subcontractors** still may ([ADR-0005](docs/adr/0005-lapsing-never-reaches-customers.md)).
+- A **Customer**'s **Portal** shows every **Order** across all their Customer records, so the same person working with two Contractors sees both sets of work in one place.
+- A **Message** from a Customer is unread to the **Contractor** until they open the Thread, and vice versa — read state is per side, never shared.
+- A **Lapsed** Contractor may not send a **Message**; their **Customer** may still send one and is still delivered a notification to the Contractor ([ADR-0005](docs/adr/0005-lapsing-never-reaches-customers.md)).
 - A **Contractor** owns many **Subcontractors** (contractor-scoped, exactly as with Customers).
 - A **Subcontractor** links to at most one **User** account (set when it accepts a **Subcontractor Invite**), and a **User** holds one global role — so a login is never both a Customer and a Subcontractor.
 - A **Subcontractor** is assigned to many **Orders**, and an **Order** may have many assigned **Subcontractors** (**Assignment**).
@@ -110,5 +160,8 @@ _Avoid_: Onboarding (ambiguous with signup and with the Invite flow), tour, wiza
 - "Account": used to mean both **User** (login) and **Customer** (contact record) — these are distinct.
 - "No login for clients" (BUSINESS_PROPOSAL.md:66) was reversed in the actual codebase: Customers DO authenticate via magic-link **Invite**. The proposal's anonymous-shareable-link model is not what was built.
 - "Tier": `src/routes/pricing/+page.svelte` shipped a `tiers` array of pricing levels (Solo / Crew / Contractor Pro), colliding with **Tier** as defined above (Trusted Subcontractor vs Guest Contractor). Resolved: **Tier** is exclusively a Subcontractor-record concept. There are no pricing tiers — there is one paid **Subscription** priced per Contractor, so the pricing page's `tiers` array is to be removed outright rather than renamed.
-- "Payments": the **Order** lifecycle includes states named _Deposit Pending_ and _Final Payment Pending_. Those describe money moving between a **Contractor** and their **Customer**, which this product only ever tracks as a status — it never handles it. The only money this product moves is a Contractor's **Subscription**.
+- "Payments": the **Order** lifecycle includes states named _Deposit Pending_ and _Final Payment Pending_. Those describe money moving between a **Contractor** and their **Customer**, which this product only ever tracks as a status — it never handles it. The only money this product moves is a Contractor's **Subscription**. This used to need careful handling, because the portal offered a **Make a payment** quick action that was really a message and had to say so on screen. Removing the quick actions removed the problem: there is now no control in the portal that could be mistaken for a payment rail.
+- "Attachment" vs **Document**: the storage layer, the UI and the docs each used a different word for the same thing — `attachment` in the table, "Documents" on the portal, "Files" in the contractor's workspace. Resolved: the concept is a **Document**, the table is `document`, and _Attachment_ is retired rather than kept as a synonym. "Files" survives only as a tab label.
+- **Document** ideas deliberately NOT built, inherited from the superseded `customer-documents` change and named here so they read as decisions rather than as omissions: **sharing** a Contractor's Document with their Customer (needs a decision about default visibility that nothing currently forces); **response requests** (asking the Customer to send a specific document back); **versioning**, **e-signature** and **virus scanning**; and **object storage** — bytes stay in Postgres and the seam to move them exists, but the S3 backend does not, because migrating existing bytes is its own risk. Tags and notes on a Document _were_ built. Multi-file upload makes an Order's row footprint grow faster than before, so the object-storage move is owed sooner than it was.
 - Seats: pricing is per Contractor, but a company buying several Contractor logins under one bill is not built. Until it is, one **Subscription** covers exactly one Contractor; a firm buys separate Subscriptions.
+- "Waiting" as alarm vs as work: a count of unanswered Customer messages was rendered in the destructive red on the nav and inside an Order, and in the brand accent on the dashboard and the Orders list — each with a comment defending its choice. So the same number read as routine on one screen and as a fault on the next. Resolved: an unanswered message is the **Contractor's normal work queue**, not an error, so waiting counts wear the accent and `--danger` is reserved for destructive actions and error states. See [ADR-0009](docs/adr/0009-waiting-counts-use-the-accent-not-danger.md).

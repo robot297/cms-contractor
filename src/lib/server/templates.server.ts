@@ -1,7 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from './db';
 import { contractorSettings, emailTemplate } from './db/schema';
-import { DEFAULT_SIGNATURE, STARTER_EMAIL_TEMPLATES } from '$lib/crm';
+import { DEFAULT_SIGNATURE, isFollowUpDays, STARTER_EMAIL_TEMPLATES } from '$lib/crm';
 // Billing gate. Applied to the contractor's own edits only — `ensureStarterTemplates`
 // and `getContractorSettings` below are provisioning, not contractor writes, and
 // must keep working for a lapsed contractor so their surfaces still render.
@@ -116,6 +116,23 @@ export async function saveContractorSettings(
 		.insert(contractorSettings)
 		.values({ contractorId, ...input })
 		.onConflictDoUpdate({ target: contractorSettings.contractorId, set: input });
+}
+
+/**
+ * Set how far out new orders schedule their first follow-up. Only affects orders
+ * created from here on — follow-ups already on the board are dates the
+ * contractor may have moved by hand, and rewriting those would undo real work.
+ */
+export async function saveFollowUpDays(contractorId: string, days: number): Promise<void> {
+	await assertCanWrite(contractorId);
+	if (!isFollowUpDays(days)) throw new Error('Unsupported follow-up interval');
+	await db
+		.insert(contractorSettings)
+		.values({ contractorId, followUpDays: days })
+		.onConflictDoUpdate({
+			target: contractorSettings.contractorId,
+			set: { followUpDays: days }
+		});
 }
 
 /**

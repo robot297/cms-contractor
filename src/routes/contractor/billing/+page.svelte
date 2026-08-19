@@ -234,7 +234,7 @@
 
 	.card {
 		background: var(--surface);
-		border: 2px solid var(--line);
+		border: 1px solid var(--line);
 		border-radius: 14px;
 		padding: 1.25rem;
 		box-shadow: var(--card-shadow);
@@ -282,7 +282,7 @@
 	}
 	.pill.trial {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 		border-color: #14171c;
 	}
 	.pill.active,
@@ -367,7 +367,7 @@
 	}
 	.toggle-opt.on {
 		background: var(--yellow);
-		color: #14171c;
+		color: var(--on-yellow);
 	}
 	.save {
 		font-size: 0.68rem;
@@ -416,12 +416,13 @@
 	.btn {
 		padding: 0.7rem 1.2rem;
 		border-radius: 10px;
-		border: 2px solid #14171c;
+		border: none;
 		background: #14171c;
 		color: #fff;
-		font-weight: 800;
+		font-weight: 700;
 		font-size: 0.88rem;
 		cursor: pointer;
+		box-shadow: var(--pop-shadow-sm);
 	}
 	.btn:hover {
 		background: #000;
@@ -446,12 +447,10 @@
 	   more specific states elsewhere. */
 	:global(:root[data-theme='dark']) .btn.primary {
 		background: var(--fg);
-		border-color: var(--fg);
 		color: #14171c;
 	}
 	:global(:root[data-theme='dark']) .btn.primary:hover {
 		background: #fff;
-		border-color: #fff;
 	}
 
 	/* Development-only panel. Dashed and sunken so it can never be mistaken for

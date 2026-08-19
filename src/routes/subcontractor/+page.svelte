@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { tierLabel, type SubcontractorTier } from '$lib/crm';
 	import type { PageData } from './$types';
 
@@ -42,14 +43,14 @@
 			{#if data.bindError}
 				No access yet.
 			{:else}
-				You have no assigned jobs right now. When a contractor assigns you to an order, it’ll show up
-				here.
+				You have no assigned jobs right now. When a contractor assigns you to an order, it’ll show
+				up here.
 			{/if}
 		</div>
 	{:else}
 		<div class="grid">
 			{#each data.orders as o (o.id)}
-				<a class="card" href="/subcontractor/{o.id}">
+				<a class="card" href={resolve(`/subcontractor/${o.id}`)}>
 					<div class="card-top">
 						<strong>{o.projectName ?? 'Untitled job'}</strong>
 						<span class="state">{o.customerVisibleState}</span>
@@ -88,7 +89,7 @@
 		letter-spacing: 0.03em;
 		padding: 0.15rem 0.55rem;
 		border-radius: 999px;
-		border: 2px solid #111;
+		border: none;
 	}
 	.tier.trusted {
 		background: #22c55e;
@@ -109,15 +110,16 @@
 	.signout {
 		padding: 0.4rem 0.9rem;
 		border-radius: 999px;
-		border: 2px solid #111;
+		border: 1px solid #d0d7de;
 		background: #fff;
 		cursor: pointer;
-		font-weight: 800;
+		font-weight: 700;
 		font-size: 0.8rem;
+		box-shadow: 0 1px 2px rgba(27, 31, 36, 0.08);
 	}
 	.hint {
 		background: #fffbe6;
-		border: 2px solid #111;
+		border: 1px solid #e6d98a;
 		border-radius: 10px;
 		padding: 0.7rem 0.9rem;
 		font-weight: 600;
@@ -125,7 +127,7 @@
 	}
 	.notice.error {
 		background: #fef2f2;
-		border: 2px solid #b91c1c;
+		border: 1px solid #e5a3a3;
 		border-radius: 10px;
 		padding: 0.8rem 1rem;
 		margin: 1rem 0;
@@ -139,10 +141,12 @@
 		margin-top: 1rem;
 	}
 	.card {
-		border: 3px solid #111;
+		border: 1px solid #e2e6ea;
 		border-radius: 14px;
 		background: #fff;
-		box-shadow: 5px 5px 0 #111;
+		box-shadow:
+			0 1px 2px rgba(27, 31, 36, 0.06),
+			0 4px 14px rgba(27, 31, 36, 0.08);
 		padding: 0.9rem;
 		text-decoration: none;
 		color: inherit;
@@ -159,8 +163,11 @@
 		font-size: 0.72rem;
 		font-weight: 800;
 		text-transform: uppercase;
-		background: #ffcc00;
-		border: 2px solid #111;
+		background: var(--yellow);
+		/* Stated, not inherited: the pill's fill is light in both themes, so it must
+		   not pick up the shell's text colour, which flips to near-white in dark. */
+		color: var(--on-yellow);
+		border: none;
 		border-radius: 999px;
 		padding: 0.12rem 0.55rem;
 	}
@@ -170,7 +177,7 @@
 		font-size: 0.9rem;
 	}
 	.empty {
-		border: 2px dashed #999;
+		border: 1.5px dashed #c9ced6;
 		border-radius: 12px;
 		padding: 1.5rem;
 		text-align: center;

@@ -18,7 +18,13 @@ import {
 } from '$lib/server/subcontractor.server';
 import { InvalidAvatarError } from '$lib/server/crm.server';
 import type { Actions, PageServerLoad } from './$types';
-import { withBillingErrors } from '$lib/server/billing.server';
+import { assertCanWrite, withBillingErrors } from '$lib/server/billing.server';
+import { sendEmailAction } from '$lib/server/email-action.server';
+import {
+	extractIdFromImage,
+	isIdScanDevToolsEnabled,
+	isIdScanVisionConfigured
+} from '$lib/server/id-scan.server';
 
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
@@ -37,6 +43,7 @@ function readProfile(form: FormData) {
 		trade: form.get('trade')?.toString(),
 		tier: form.get('tier')?.toString(),
 		licenseNumber: form.get('licenseNumber')?.toString(),
+		licenseExpiresAt: form.get('licenseExpiresAt')?.toString(),
 		insuranceCarrier: form.get('insuranceCarrier')?.toString(),
 		insuranceExpiresAt: form.get('insuranceExpiresAt')?.toString(),
 		notes: form.get('notes')?.toString(),
@@ -70,12 +77,38 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			assignedOrders: await listSubcontractorOrders(user.id, s.id)
 		}))
 	);
-	return { subcontractors: roster, search };
+	return {
+		subcontractors: roster,
+		search,
+		// What the scanner may offer. The barcode path is on-device and always
+		// available; only reading a card that has no barcode needs a provider.
+		idScan: {
+			visionConfigured: isIdScanVisionConfigured(),
+			devTools: isIdScanDevToolsEnabled()
+		},
+		// Open the add form on arrival ONLY when explicitly asked to — the `?new`
+		// the getting-started guide links with.
+		//
+		// It used to open on an empty roster too, on the reasoning that there was
+		// nothing else to do here. That is wrong: someone opening Subcontractors is
+		// not necessarily trying to add one, and landing in a form nobody asked for
+		// means the first thing you do on the page is dismiss it. The empty state
+		// offers the button instead, which is the same journey with the decision
+		// left where it belongs.
+		openAdd: url.searchParams.has('new')
+	};
 };
 
 // Wrapped so a billing refusal from any guarded write returns a 402 the form
 // can render, rather than a 500. See withBillingErrors.
 export const actions: Actions = withBillingErrors({
+	/**
+	 * Sending a composed message. Shared by every surface that mounts the
+	 * composer — the implementation lives in one file so the rule about when a
+	 * send is recorded on a timeline can't drift between pages.
+	 */
+	sendEmail: sendEmailAction,
+
 	addSubcontractor: async ({ request, locals }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
@@ -157,6 +190,30 @@ export const actions: Actions = withBillingErrors({
 		if (!inviteId) return fail(400, { action: 'invite', message: 'Invite is required' });
 		await revokeSubcontractorInvite(inviteId, user.id);
 		return { success: true };
+	},
+
+	/**
+	 * Read a photographed card that has no barcode.
+	 *
+	 * Reads nothing and writes nothing — it turns an image into field values the
+	 * contractor then reviews and saves through `addSubcontractor` /
+	 * `editSubcontractor` like any typed entry. It is still behind the write
+	 * guard: a lapsed contractor cannot save the result, so letting them spend a
+	 * provider call producing it would only be a slower refusal.
+	 *
+	 * The image is not stored, and neither is the result — it goes back in the
+	 * response and lives in the browser until the form is saved or dismissed.
+	 */
+	scanId: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		await assertCanWrite(user.id);
+		const form = await request.formData();
+		const image = form.get('image')?.toString() ?? '';
+		if (!image) return fail(400, { action: 'scan', reason: 'invalid' });
+
+		const result = await extractIdFromImage(image);
+		if (!result.ok) return fail(422, { action: 'scan', reason: result.reason });
+		return { success: true, scan: result.scan };
 	},
 
 	setAvatar: async ({ request, locals }) => {

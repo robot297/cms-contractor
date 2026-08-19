@@ -3,6 +3,8 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { theme } from '$lib/theme.svelte';
+	import Toaster from '$lib/Toaster.svelte';
+	import DevSwitcher from '$lib/DevSwitcher.svelte';
 	import type { LayoutData } from './$types';
 	import type { Snippet } from 'svelte';
 
@@ -20,7 +22,9 @@
 	const onOrders = $derived(path.startsWith('/contractor/orders'));
 	const onCustomers = $derived(path.startsWith('/contractor/customers'));
 	const onSubcontractors = $derived(path.startsWith('/contractor/subcontractors'));
-	const onTemplates = $derived(path.startsWith('/contractor/settings/templates'));
+	// One entry now: email templates live on the account page rather than at their
+	// own route, which still exists only to redirect.
+	const onAccount = $derived(path.startsWith('/contractor/settings'));
 	const onSupport = $derived(path.startsWith('/contractor/support'));
 	const onBilling = $derived(path.startsWith('/contractor/billing'));
 
@@ -40,23 +44,41 @@
 			: null
 	);
 
-	// A persistent trial marker in the nav. This replaces the old last-week strip
-	// banner: the dashboard now carries the welcome and the detail, so a third copy
-	// of "you're on a trial" across the top of every page was just noise. The badge
-	// stays for the whole trial and tightens up in the last few days.
+	// Trial state feeds the account menu's sub-line; the full detail (end date,
+	// days left, capacity) lives on the settings page's Account tab. The old bar
+	// badge is gone — its slot now holds the settings gear.
 	const onTrial = $derived(billing.canWrite && billing.status === 'trialing');
 	const trialDays = $derived(billing.trialDaysRemaining);
-	const trialUrgent = $derived(onTrial && trialDays !== null && trialDays <= 3);
 
 	const year = new Date().getFullYear();
 
 	// Mobile nav: links + user/sign-out collapse behind a hamburger.
 	let menuOpen = $state(false);
-	// Close the menu whenever the route changes (a link was followed).
+	// The account menu behind the avatar: billing and sign-out. The name and a red
+	// SIGN OUT button sitting in the bar was the widest thing in it, and the first
+	// to collide with the trial badge once the rail tightened up on a tablet.
+	let userMenuOpen = $state(false);
+	// Two letters at most — "Jo Bloggs" → JB, "testerooni" → T.
+	const initials = $derived(
+		(data.userName ?? '')
+			.split(/\s+/)
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((word) => word[0]?.toUpperCase() ?? '')
+			.join('') || '?'
+	);
+	function closeMenus() {
+		menuOpen = false;
+		userMenuOpen = false;
+	}
+	// Close both menus whenever the route changes (a link was followed).
 	$effect(() => {
 		void path; // track route changes so the mobile menu closes on navigation
-		menuOpen = false;
+		closeMenus();
 	});
+	// …and on the click itself, because tapping the link for the page you're already
+	// on is not a navigation: the effect above never re-runs, so the menu just sat
+	// there looking broken.
 
 	// The gliding rail indicator. Rather than six links each painting their own
 	// active state, one pill slides to whichever link is current. Its position is
@@ -98,8 +120,9 @@
 <div class="shell" style="min-height: 100dvh; display: flex; flex-direction: column;">
 	<div class="bar">
 		<nav class="nav">
-			<a href={resolve('/')} class="brand">🛠 Contractor&nbsp;CRM</a>
-
+			<a href={resolve('/')} class="brand">
+				<span class="brand-word">Contractor&nbsp;CRM</span>
+			</a>
 			<button
 				type="button"
 				class="theme-toggle"
@@ -170,50 +193,90 @@
 				{/if}
 			</button>
 
+			<!-- Click-away for the mobile menu. The account menu has had one of these
+			     since it was built; the hamburger overlay never did, so the only way out
+			     of it was the X — tapping the page behind it did nothing, which reads as
+			     a stuck menu rather than as a deliberate modal. Rendered only while
+			     open, and only a scrim on the widths where the menu is an overlay. -->
+			{#if menuOpen}
+				<button
+					type="button"
+					class="nav-scrim"
+					aria-label="Close menu"
+					onclick={() => (menuOpen = false)}
+				></button>
+			{/if}
+
 			<div class="nav-collapse" class:open={menuOpen}>
 				<div class="nav-links" class:ready={railReady} bind:this={railEl}>
 					<span class="rail-glide" style="--x: {railX}px; --w: {railW}px;" aria-hidden="true"
 					></span>
-					<a href={resolve('/contractor')} class="navlink" class:is-active={onDashboard}
-						>Dashboard</a
+					<a
+						href={resolve('/contractor')}
+						class="navlink"
+						class:is-active={onDashboard}
+						onclick={closeMenus}>Dashboard</a
 					>
-					<a href={resolve('/contractor/orders')} class="navlink" class:is-active={onOrders}
-						>Orders</a
+					<a
+						href={resolve('/contractor/orders')}
+						class="navlink"
+						class:is-active={onOrders}
+						onclick={closeMenus}
+						>Orders{#if data.awaitingReply > 0}<span
+								class="count-badge nav-badge"
+								aria-label="{data.awaitingReply} awaiting a reply">{data.awaitingReply}</span
+							>{/if}</a
 					>
-					<a href={resolve('/contractor/customers')} class="navlink" class:is-active={onCustomers}
-						>Customers</a
+					<a
+						href={resolve('/contractor/customers')}
+						class="navlink"
+						class:is-active={onCustomers}
+						onclick={closeMenus}>Customers</a
 					>
 					<a
 						href={resolve('/contractor/subcontractors')}
 						class="navlink"
-						class:is-active={onSubcontractors}>Subcontractors</a
+						class:is-active={onSubcontractors}
+						onclick={closeMenus}>Subcontractors</a
 					>
 					<a
-						href={resolve('/contractor/settings/templates')}
+						href={resolve('/contractor/support')}
 						class="navlink"
-						class:is-active={onTemplates}>Templates</a
-					>
-					<a href={resolve('/contractor/support')} class="navlink" class:is-active={onSupport}
-						>Support</a
-					>
-					<a href={resolve('/contractor/billing')} class="navlink" class:is-active={onBilling}
-						>Billing</a
+						class:is-active={onSupport}
+						onclick={closeMenus}>Support</a
 					>
 				</div>
 				<div class="nav-right">
-					{#if onTrial}
-						<a
-							class="trial-badge"
-							class:urgent={trialUrgent}
-							href={resolve('/contractor/billing')}
-							title={trialDays !== null
-								? `Free trial — ${trialDays} ${trialDays === 1 ? 'day' : 'days'} left`
-								: 'Free trial'}
+					<!-- Settings, in the slot the trial badge used to hold: it's admin,
+					     not a work surface, so it sits with the account cluster. In the
+					     collapsed menu the same control drops to the bottom-left of the
+					     utility row (also the badge's old seat) and gains its label. -->
+					<a
+						class="settings-gear"
+						class:on={onAccount}
+						href={resolve('/contractor/settings')}
+						title="Settings"
+						aria-label="Settings"
+						onclick={closeMenus}
+					>
+						<svg
+							width="20"
+							height="20"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
 						>
-							<span class="dot" aria-hidden="true"></span>
-							Trial{#if trialDays !== null}<span class="trial-days">· {trialDays}d</span>{/if}
-						</a>
-					{/if}
+							<circle cx="12" cy="12" r="3.2" />
+							<path
+								d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+							/>
+						</svg>
+						<span class="gear-label">Settings</span>
+					</a>
 					<!-- Mobile/tablet home for the theme toggle: the bar's icon button is
 					     hidden at this width. Icon-only, with the label carried by aria so it
 					     costs a square instead of a row. Same shared store as the bar's. -->
@@ -253,8 +316,72 @@
 							</svg>
 						{/if}
 					</button>
-					<span class="username">{data.userName}</span>
-					<form method="POST" action="/logout">
+					<!-- Development-only: one button to the customer's side of the same
+					     job. Absent entirely unless CUSTOMER_PORTAL_DEV_TOOLS is set AND
+					     the seeder has run, so the server sends no target when either is
+					     missing and nothing about the feature reaches the browser. -->
+					{#if data.viewAsEnabled && (data.viewAsCustomer || data.devSignInEnabled)}
+						<DevSwitcher
+							side="contractor"
+							devCustomer={data.viewAsCustomer}
+							canSignInAs={data.devSignInEnabled}
+							orderId={page.params.id ?? null}
+						/>
+					{/if}
+					<!-- Account: avatar in the bar, everything else behind it. -->
+					<div class="user">
+						<button
+							type="button"
+							class="avatar"
+							class:on={userMenuOpen}
+							aria-haspopup="menu"
+							aria-expanded={userMenuOpen}
+							title={data.userName}
+							aria-label="Account menu"
+							onclick={() => (userMenuOpen = !userMenuOpen)}>{initials}</button
+						>
+						{#if userMenuOpen}
+							<button
+								type="button"
+								class="user-scrim"
+								aria-label="Close account menu"
+								onclick={() => (userMenuOpen = false)}
+							></button>
+							<div class="user-menu" role="menu">
+								<div class="user-menu-head">
+									<span class="user-menu-name">{data.userName}</span>
+									{#if onTrial && trialDays !== null}
+										<span class="user-menu-sub"
+											>Trial · {trialDays}
+											{trialDays === 1 ? 'day' : 'days'} left</span
+										>
+									{/if}
+								</div>
+								<a
+									class="user-menu-item"
+									class:is-active={onAccount}
+									role="menuitem"
+									href={resolve('/contractor/settings')}
+									onclick={closeMenus}>Account</a
+								>
+								<a
+									class="user-menu-item"
+									class:is-active={onBilling}
+									role="menuitem"
+									href={resolve('/contractor/billing')}
+									onclick={closeMenus}>Billing</a
+								>
+								<form method="POST" action="/logout">
+									<button type="submit" class="user-menu-item danger" role="menuitem"
+										>Sign out</button
+									>
+								</form>
+							</div>
+						{/if}
+					</div>
+					<!-- The collapsed menu's sign-out. It has no avatar to hide things
+					     behind, so this is a plain row alongside the links. -->
+					<form method="POST" action="/logout" class="signout-form">
 						<button type="submit" class="signout">Sign out</button>
 					</form>
 				</div>
@@ -288,6 +415,10 @@
 		{@render children()}
 	</main>
 
+	<!-- Mounted once for the whole section so a confirmation outlives the card that
+	     raised it — the contact composer closes on send and the toast reports it. -->
+	<Toaster />
+
 	<footer>
 		<div class="hazard"></div>
 		<div class="bar">
@@ -308,7 +439,9 @@
 	   the theme: ink-on-light in light, light-on-dark in dark. The yellow active pill
 	   and the red sign-out are the exceptions; both already read on either bar. */
 	.shell {
-		--bar-bg: var(--surface);
+		/* Not flat white: a faint top-lit gradient so the bar reads as its own
+		   surface — chrome, not just page background that happens to hold links. */
+		--bar-bg: linear-gradient(180deg, #ffffff, #f6f6f1);
 		--bar-line: var(--line);
 		--bar-fg: var(--fg);
 		--bar-fg-dim: rgba(31, 35, 40, 0.66);
@@ -318,15 +451,15 @@
 		--bar-rail-bg: linear-gradient(180deg, rgba(17, 17, 17, 0.06), rgba(17, 17, 17, 0.02));
 		/* The inset top highlight only reads on a dark bar. */
 		--bar-inset-hi: transparent;
-		/* Pop-art wordmark, inverted per theme: ink on yellow in light, yellow on ink
-		   in dark. Yellow type on a white bar would be unreadable. */
-		--brand-fg: #14171c;
-		--brand-shadow: 2px 2px 0 var(--yellow);
-		--brand-fg-hover: #000000;
 	}
 	.bar {
 		background: var(--bar-bg);
 		border-block: 1px solid var(--bar-line);
+	}
+	/* Header only (the footer's bar is nested in <footer>): a soft cast below the
+	   bar + accent line so the chrome sits above the page instead of on it. */
+	.shell > .bar {
+		box-shadow: 0 4px 16px rgba(27, 31, 36, 0.06);
 	}
 	.foot-text {
 		font-size: 0.75rem;
@@ -336,6 +469,7 @@
 		letter-spacing: 0.03em;
 	}
 	:global(:root[data-theme='dark']) .shell {
+		--bar-bg: linear-gradient(180deg, #20252d, #181c22);
 		--bar-fg: #ffffff;
 		--bar-fg-dim: rgba(255, 255, 255, 0.72);
 		--bar-edge: rgba(255, 255, 255, 0.14);
@@ -343,9 +477,9 @@
 		--bar-wash-strong: rgba(255, 255, 255, 0.14);
 		--bar-rail-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
 		--bar-inset-hi: rgba(255, 255, 255, 0.07);
-		--brand-fg: var(--yellow);
-		--brand-shadow: 2px 2px 0 #000;
-		--brand-fg-hover: #ffffff;
+	}
+	:global(:root[data-theme='dark']) .shell > .bar {
+		box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
 	}
 
 	.nav {
@@ -361,17 +495,22 @@
 		gap: 1rem;
 		flex-wrap: wrap;
 	}
+	/* Wordmark: a small yellow tile carrying the glyph, plain strong type beside
+	   it. Replaces the hard yellow text-shadow treatment, which read as clip-art.
+	   Colors ride --bar-fg, so both themes come out right with no brand tokens. */
 	.brand {
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.02em;
-		color: var(--brand-fg);
-		text-shadow: var(--brand-shadow);
+		display: inline-flex;
+		align-items: center;
+		gap: 0.55rem;
+		color: var(--bar-fg);
 		text-decoration: none;
 		flex-shrink: 0;
 	}
-	.brand:hover {
-		color: var(--brand-fg-hover);
+	.brand-word {
+		font-weight: 900;
+		font-size: 0.92rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 	/* Desktop: links sit next to the brand, user/sign-out pushed to the right. */
 	.nav-collapse {
@@ -469,6 +608,13 @@
 			color 0.2s ease,
 			background 0.2s ease;
 	}
+	/* Customers waiting on an answer, carried on the nav so it is visible from
+	   wherever you are rather than only on the dashboard. The pill itself is the
+	   shared `.count-badge` in app.css — all that is local to the nav is the gap
+	   between the link's label and the count. */
+	.nav-badge {
+		margin-left: 0.35rem;
+	}
 	.navlink:hover {
 		color: var(--bar-fg);
 		background: var(--bar-wash-strong);
@@ -480,9 +626,12 @@
 		color: #14171c;
 		background: transparent;
 	}
-	/* No-JS / pre-measure fallback: without the pill, the active link paints its own. */
+	/* No-JS / pre-measure fallback: without the pill, the active link paints its own.
+	   Foreground restated rather than left to the `.is-active` rule above — a yellow
+	   fill has to carry its own dark text so the pairing can't be split apart. */
 	.nav-links:not(.ready) .navlink.is-active {
 		background: var(--yellow);
+		color: var(--on-yellow);
 	}
 	.navlink:focus-visible {
 		outline: 2px solid var(--yellow);
@@ -499,76 +648,192 @@
 		}
 	}
 
-	/* Trial marker. Sits with the user chrome so it rides the bar in both themes and
-	   drops into the collapsed menu at narrow widths without extra work. Yellow reads
-	   on either bar, and the label is dark-pinned because yellow stays light in dark. */
-	.trial-badge {
+	/* The settings gear. Same quiet icon-only chrome as the theme toggle, except
+	   when you're on the settings section: then it takes the yellow active pill so
+	   the bar still answers "where am I" with the rail link gone. The label only
+	   appears in the collapsed menu (see the 1024px block). */
+	.settings-gear {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.35rem;
+		justify-content: center;
+		gap: 0.45rem;
+		width: 2.4rem;
+		height: 2.4rem;
 		flex-shrink: 0;
-		padding: 0.3rem 0.7rem;
 		border-radius: 999px;
-		border: 1.5px solid #14171c;
-		background: var(--yellow);
-		color: #14171c;
+		color: var(--bar-fg-dim);
 		text-decoration: none;
-		font-size: 0.7rem;
-		font-weight: 800;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		transition:
+			color 0.16s ease,
+			background 0.16s ease;
+	}
+	.gear-label {
+		display: none;
+		font-size: 0.9rem;
+		font-weight: 700;
 		white-space: nowrap;
 	}
-	.trial-badge:hover {
-		background: var(--yellow-deep);
+	.settings-gear:hover {
+		color: var(--bar-fg);
+		background: var(--bar-wash-strong);
 	}
-	.trial-badge:focus-visible {
+	/* Pinned dark on yellow, like every active pill. */
+	.settings-gear.on,
+	.settings-gear.on:hover {
+		background: var(--yellow);
+		color: var(--on-yellow);
+	}
+	.settings-gear:focus-visible {
 		outline: 2px solid var(--yellow);
 		outline-offset: 2px;
 	}
-	.trial-days {
-		font-variant-numeric: tabular-nums;
-		opacity: 0.75;
-	}
-	.dot {
-		width: 0.4rem;
-		height: 0.4rem;
-		border-radius: 50%;
-		background: #14171c;
-	}
-	/* Last few days: amber with light type, so it stops reading as a welcome. */
-	.trial-badge.urgent {
-		background: #bf8700;
-		border-color: #8a6200;
-		color: #fff;
-	}
-	.trial-badge.urgent:hover {
-		background: #a67400;
-	}
-	.trial-badge.urgent .dot {
-		background: #fff;
+	.settings-gear svg {
+		display: block;
+		flex: none;
 	}
 
-	.username {
-		font-size: 0.8rem;
+	/* Account. One square in the bar; the name, billing and sign-out all live in the
+	   menu behind it, which is what buys the trial badge its room back. */
+	.user {
+		position: relative;
+		flex: none;
+	}
+	.avatar {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		width: 2rem;
+		height: 2rem;
+		padding: 0;
+		border-radius: 999px;
+		border: 1.5px solid var(--bar-edge);
+		background: var(--bar-wash);
 		color: var(--bar-fg);
+		font-family: inherit;
+		font-size: 0.72rem;
+		font-weight: 800;
+		letter-spacing: 0.02em;
+		line-height: 1;
+		cursor: pointer;
+	}
+	.avatar:hover,
+	.avatar.on {
+		background: var(--yellow);
+		border-color: var(--yellow);
+		color: var(--on-yellow);
+	}
+	.avatar:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: 2px;
+	}
+	.user-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 90;
+		border: none;
+		background: transparent;
+		cursor: default;
+	}
+	/* Sits under the overlay (z-index 50) but over the page. Only exists at the
+	   widths where the nav actually collapses — above that the links are inline
+	   and a full-screen scrim would swallow every click on the page. */
+	.nav-scrim {
+		display: none;
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+		border: none;
+		background: transparent;
+		cursor: default;
+	}
+	@media (max-width: 1024px) {
+		.nav-scrim {
+			display: block;
+		}
+	}
+	.user-menu {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 8px);
+		z-index: 100;
+		box-sizing: border-box;
+		min-width: 13rem;
+		max-width: calc(100vw - 2rem);
+		padding: 0.35rem;
+		display: grid;
+		gap: 0.1rem;
+		background: var(--surface);
+		border: 1px solid var(--line-strong);
+		border-radius: 12px;
+		box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+	}
+	.user-menu-head {
+		display: grid;
+		gap: 0.1rem;
+		padding: 0.45rem 0.6rem 0.55rem;
+		margin-bottom: 0.15rem;
+		border-bottom: 1px solid var(--line);
+	}
+	.user-menu-name {
+		font-size: 0.88rem;
+		font-weight: 800;
+		color: var(--fg);
+		overflow-wrap: anywhere;
+	}
+	.user-menu-sub {
+		font-size: 0.72rem;
 		font-weight: 700;
+		color: var(--fg-muted);
+	}
+	.user-menu-item {
+		display: block;
+		width: 100%;
+		box-sizing: border-box;
+		padding: 0.5rem 0.6rem;
+		border: none;
+		border-radius: 8px;
+		background: none;
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.85rem;
+		font-weight: 600;
+		text-align: left;
+		text-decoration: none;
+		cursor: pointer;
+	}
+	.user-menu-item:hover {
+		background: var(--surface-sunken);
+	}
+	.user-menu-item.is-active {
+		color: var(--fg);
+		background: color-mix(in srgb, var(--yellow) 22%, var(--surface));
+	}
+	.user-menu-item.danger {
+		color: var(--danger);
+	}
+	.user-menu-item:focus-visible {
+		outline: 2px solid var(--yellow);
+		outline-offset: -2px;
+	}
+	/* Collapsed-menu-only pieces. Hidden on the bar, where the account menu behind
+	   the avatar covers the same ground. Turned on in the 1024px block below. */
+	.signout-form {
+		display: none;
 	}
 	.signout {
-		padding: 0.32rem 0.8rem;
-		border-radius: 999px;
-		border: 1.5px solid #e5534b;
-		background: #cf222e;
-		color: #fff;
+		padding: 0.55rem 0.9rem;
+		border-radius: 10px;
+		border: 1.5px solid var(--danger);
+		background: none;
+		color: var(--danger);
+		font-family: inherit;
+		font-size: 0.9rem;
+		font-weight: 700;
 		cursor: pointer;
-		font-weight: 800;
-		text-transform: uppercase;
-		font-size: 0.72rem;
-		letter-spacing: 0.02em;
 	}
 	.signout:hover {
-		background: #b3202a;
-		border-color: #b3202a;
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
 	}
 
 	/* The theme toggle inside the collapsed menu. Icon-only square, not a full-width
@@ -613,6 +878,12 @@
 		height: 2.6rem;
 		padding: 0;
 		flex-shrink: 0;
+		/* Above the click-away scrim (40), below the menu it opens (50). Without
+		   this the scrim covers the button that closes the menu, so the X becomes
+		   unclickable the moment the menu is open — tapping it just dismisses via
+		   the scrim, and tapping it again reopens. */
+		position: relative;
+		z-index: 45;
 		border: 1.5px solid var(--bar-edge);
 		background: var(--bar-rail-bg);
 		color: var(--bar-fg);
@@ -670,11 +941,6 @@
 
 	/* Hide the signed-in name below wide desktop — it only crowds the bar and the
 	   overlay doesn't need it. */
-	@media (max-width: 1180px) {
-		.username {
-			display: none;
-		}
-	}
 
 	/* Tablet + mobile: collapse behind the hamburger as an animated overlay. The
 	   inline bar can't fit the full link set, so tablets get the menu too. */
@@ -748,36 +1014,50 @@
 		.navlink.is-active,
 		.navlink.is-active:hover {
 			background: var(--yellow);
-			color: #14171c;
+			color: var(--on-yellow);
 			box-shadow: none;
 		}
-		/* One compact line rather than a stack of full-width blocks: name on the left,
-		   theme icon and sign-out on the right. */
+		/* Sign-out becomes a row of its own — the avatar and its popover are dropped
+		   entirely here. A menu that opens a second menu is a poor trade on a screen
+		   this size. */
+		.signout-form {
+			display: block;
+			margin-top: 0.15rem;
+		}
+		.signout {
+			width: 100%;
+			box-sizing: border-box;
+		}
+		.user {
+			display: none;
+		}
+		/* One compact line rather than a stack of full-width blocks: Settings on the
+		   left (the trial badge's old seat), theme icon on the right. */
 		.nav-right {
 			flex-direction: row;
 			align-items: center;
-			justify-content: space-between;
+			justify-content: flex-end;
 			gap: 0.5rem;
 			margin-top: 0.35rem;
 			padding-top: 0.7rem;
 			border-top: 1px solid var(--bar-edge);
 		}
-		.username {
-			padding: 0 0.2rem;
-			margin-right: auto;
-		}
-		/* The badge leads the row in the menu, ahead of the name. */
-		.trial-badge {
+		/* The gear leads the row and gains its label — an icon-only square tucked in
+		   a corner is too easy to read as decoration. */
+		.settings-gear {
 			order: -1;
+			margin-right: auto;
+			width: auto;
+			height: auto;
+			padding: 0.45rem 0.8rem;
+			background: var(--bar-wash);
+			color: var(--bar-fg);
+		}
+		.gear-label {
+			display: inline;
 		}
 		.theme-row {
 			display: inline-flex;
-		}
-		.signout {
-			text-transform: none;
-			font-size: 0.85rem;
-			border-radius: 999px;
-			padding: 0.4rem 0.9rem;
 		}
 	}
 

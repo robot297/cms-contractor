@@ -62,6 +62,85 @@ function labelFor(type: Feedback['type']): string {
 	return ENV.GITHUB_LABEL_FEATURE?.trim() || 'enhancement';
 }
 
+/**
+ * Labels for one report: its type, plus which pane it came from so the two
+ * audiences can be filtered apart.
+ *
+ * The surface labels are NOT env-overridable, unlike the type labels — they are
+ * ours, they are only two, and a repo that lacks them gets them created by the
+ * first report rather than needing configuration.
+ */
+function labelsFor(feedback: Feedback): string[] {
+	return [labelFor(feedback.type), `from:${feedback.surface}`];
+}
+
+// ------------------------------------------------------------- Screenshots
+
+/** Client and server both enforce this; GitHub's Contents API takes far more,
+ *  but a support screenshot has no business being bigger. */
+export const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024; // 5 MB
+
+export type SupportScreenshot = { name: string; type: string; bytes: Uint8Array };
+
+/** Image types worth accepting from a screenshot picker. */
+export function isAllowedScreenshotType(mime: string): boolean {
+	return ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mime);
+}
+
+/**
+ * Park the screenshot in the support repo (a `support-uploads/` folder, via the
+ * Contents API) so the issue can reference it — the Issues API itself has no
+ * supported way to attach an image. Returns the embed + link URLs, or null on
+ * any failure: a screenshot that didn't stick must never cost the report.
+ */
+async function uploadScreenshot(
+	repo: string,
+	token: string,
+	shot: SupportScreenshot
+): Promise<{ imageUrl: string; linkUrl: string } | null> {
+	// Sanitized original name, stamped so two "Screenshot.png"s never collide.
+	const safeName =
+		shot.name
+			.replace(/[^a-zA-Z0-9._-]+/g, '-')
+			.replace(/^-+|-+$/g, '')
+			.slice(-64) || 'screenshot.png';
+	const path = `support-uploads/${Date.now()}-${safeName}`;
+	try {
+		const response = await fetch(
+			`https://api.github.com/repos/${repo}/contents/${encodeURIComponent(path)}`,
+			{
+				method: 'PUT',
+				headers: {
+					Authorization: `Bearer ${token}`,
+					Accept: 'application/vnd.github+json',
+					'X-GitHub-Api-Version': '2022-11-28',
+					'User-Agent': 'contractor-crm-support',
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					message: `Add support screenshot ${safeName}`,
+					content: Buffer.from(shot.bytes).toString('base64')
+				})
+			}
+		);
+		if (!response.ok) {
+			console.error(`[support] screenshot upload failed (${response.status})`);
+			return null;
+		}
+		const data = (await response.json()) as {
+			content?: { html_url?: string; download_url?: string };
+		};
+		if (!data.content?.html_url) return null;
+		return {
+			imageUrl: data.content.download_url ?? data.content.html_url,
+			linkUrl: data.content.html_url
+		};
+	} catch (error) {
+		console.error('[support] screenshot upload error:', error);
+		return null;
+	}
+}
+
 export type FiledIssue = { url: string; number: number };
 
 /**
@@ -71,7 +150,8 @@ export type FiledIssue = { url: string; number: number };
  */
 export async function submitFeedback(
 	feedback: Feedback,
-	submittedBy?: { name?: string | null; email?: string | null }
+	submittedBy?: { name?: string | null; email?: string | null },
+	screenshot?: SupportScreenshot | null
 ): Promise<FiledIssue> {
 	const repo = ENV.GITHUB_REPO?.trim();
 	const token = ENV.GITHUB_TOKEN?.trim();
@@ -83,7 +163,10 @@ export async function submitFeedback(
 		throw new SupportError('The support form is misconfigured. Please contact your admin.');
 	}
 
-	const { title, body } = buildFeedbackIssue(feedback, submittedBy);
+	// Best-effort: a failed upload files the issue without the image rather than
+	// bouncing the whole report.
+	const uploaded = screenshot ? await uploadScreenshot(repo, token, screenshot) : null;
+	const { title, body } = buildFeedbackIssue(feedback, submittedBy, uploaded);
 
 	let response: Response;
 	try {
@@ -96,7 +179,7 @@ export async function submitFeedback(
 				'User-Agent': 'contractor-crm-support',
 				'Content-Type': 'application/json'
 			},
-			body: JSON.stringify({ title, body, labels: [labelFor(feedback.type)] })
+			body: JSON.stringify({ title, body, labels: labelsFor(feedback) })
 		});
 	} catch (error) {
 		console.error('[support] network error reaching GitHub:', error);

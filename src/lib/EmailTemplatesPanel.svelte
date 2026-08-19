@@ -2,9 +2,10 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { composeEmail, EMAIL_BODY_LENGTH_GUIDANCE, EMAIL_TEMPLATE_PLACEHOLDERS } from '$lib/crm';
-	import type { PageData, ActionData } from './$types';
+	import { renderEmail } from '$lib/email';
+	import type { EmailTemplatesData, EmailTemplatesForm } from '$lib/email-templates.types';
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data, form }: { data: EmailTemplatesData; form: EmailTemplatesForm } = $props();
 
 	// Sample values used to preview how placeholders resolve. Contractor name comes
 	// from the (live-editable) business-name field so the preview tracks edits.
@@ -95,304 +96,302 @@
 		)
 	);
 
-	// Which tag is awaiting delete confirmation.
-	let confirmingTag = $state<string | null>(null);
+	// The formatted preview is the send path's own output — same renderer, same
+	// branding — so what's on screen is what lands in the inbox rather than an
+	// approximation of it. See docs/adr/0007-the-app-sends-email-mailto-is-the-fallback.md.
+	const branding = $derived({ businessName, signature });
+	const editHtml = $derived(
+		renderEmail(
+			{ subject: editSubject, body: editBody },
+			{ ...SAMPLE, contractor: businessName },
+			branding
+		).html
+	);
+	const createHtml = $derived(
+		renderEmail(
+			{ subject: newSubject, body: newBody },
+			{ ...SAMPLE, contractor: businessName },
+			branding
+		).html
+	);
+	// One toggle for the page: the accordion only ever has a single panel open.
+	let previewMode = $state<'html' | 'text'>('html');
 </script>
 
-<svelte:head><title>Email templates · Settings</title></svelte:head>
-
-<div class="wrap">
-	<h1 class="page-title">Email templates</h1>
-
-	<!-- Placeholder reference -->
-	<section class="card">
-		<h2>Placeholders</h2>
-		<ul class="chips">
-			{#each EMAIL_TEMPLATE_PLACEHOLDERS as p (p.token)}
-				<li><code>{`{{${p.token}}}`}</code> <span>{p.label}</span></li>
-			{/each}
-		</ul>
-	</section>
-
-	<!-- Tags. The vocabulary is derived from what's actually in use, so retiring one
-	     means stripping it off every record that carries it — which is why it asks. -->
-	<section class="card">
-		<h2>Tags</h2>
-		{#if data.contractorTags.length === 0}
-			<p class="tags-none">
-				No tags yet. Add them on a customer, order or subcontractor and they'll collect here.
-			</p>
-		{:else}
-			<p class="tags-hint">
-				Used across your customers, orders and subcontractors. Deleting one removes it from every
-				record that uses it.
-			</p>
-			<ul class="tag-list">
-				{#each data.contractorTags as tag (tag)}
-					<li>
-						<span class="tag-name">{tag}</span>
-						{#if confirmingTag === tag}
-							<form
-								method="POST"
-								action="?/deleteTag"
-								use:enhance={() =>
-									async ({ update }) => {
-										confirmingTag = null;
-										await update();
-									}}
-							>
-								<input type="hidden" name="tag" value={tag} />
-								<button type="submit" class="tag-yes">Delete everywhere</button>
-							</form>
-							<button type="button" class="tag-no" onclick={() => (confirmingTag = null)}
-								>Cancel</button
-							>
-						{:else}
-							<button
-								type="button"
-								class="tag-del"
-								aria-label={`Delete tag ${tag}`}
-								onclick={() => (confirmingTag = tag)}>Delete</button
-							>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</section>
-
-	<!-- Signature / branding -->
-	<section class="card">
-		<h2>Signature &amp; branding</h2>
-		<form method="POST" action="?/saveSignature" use:enhance={keepFields} class="grid">
-			<label class="field">
-				<span>Business name</span>
-				<input
-					name="businessName"
-					bind:value={businessName}
-					placeholder="e.g. Oak &amp; Iron Builds"
-				/>
-			</label>
-			<label class="field">
-				<span>Signature</span>
-				<textarea
-					name="signature"
-					bind:value={signature}
-					rows="3"
-					placeholder="Thanks so much,&#10;{`{{contractor}}`}"></textarea>
-			</label>
-			<div class="preview">
-				<span class="preview-label">Signature preview</span>
-				<pre>{composeEmail(
-						{ subject: '', body: '' },
-						{ ...SAMPLE, contractor: businessName },
-						signature
-					).body || '—'}</pre>
-			</div>
-			<div class="row-actions">
-				<button
-					type="submit"
-					class="btn primary"
-					disabled={!signatureDirty}
-					title={signatureDirty ? 'Save signature' : 'No changes to save'}>Save signature</button
-				>
-				{#if form?.saved === 'signature' && !signatureDirty}<span class="ok">Saved ✓</span>{/if}
-			</div>
-		</form>
-	</section>
-
-	<!-- Templates: an accordion — pick one to expand + edit -->
-	<section class="card">
-		<div class="card-head">
-			<h2>Templates</h2>
-			<button type="button" class="btn primary" onclick={openCreate}>＋ New</button>
+<!-- Preview header, shared by the create and edit panels: a label plus the
+     formatted/plain-text switch. Both parts are sent, so both are viewable. -->
+{#snippet previewHead()}
+	<div class="preview-head">
+		<span class="preview-label">Preview</span>
+		<div class="preview-switch">
+			<button
+				type="button"
+				class:on={previewMode === 'html'}
+				aria-pressed={previewMode === 'html'}
+				onclick={() => (previewMode = 'html')}>Formatted</button
+			>
+			<button
+				type="button"
+				class:on={previewMode === 'text'}
+				aria-pressed={previewMode === 'text'}
+				onclick={() => (previewMode = 'text')}>Plain text</button
+			>
 		</div>
+	</div>
+{/snippet}
 
-		{#if creating}
-			<div class="editor">
-				<form
-					method="POST"
-					action="?/createTemplate"
-					use:enhance={() =>
-						async ({ update, result }) => {
-							await update({ reset: false });
-							if (result.type === 'success') creating = false;
-						}}
-					class="grid"
-				>
-					<label class="field">
-						<span>Name</span>
-						<input name="name" bind:value={newName} placeholder="e.g. Follow-up" required />
-					</label>
-					<label class="field">
-						<span>Subject</span>
-						<input
-							name="subject"
-							bind:value={newSubject}
-							placeholder="Following on {`{{project}}`}"
-						/>
-					</label>
-					<label class="field">
-						<span>Body</span>
-						<textarea
-							name="body"
-							bind:value={newBody}
-							rows="5"
-							placeholder="Hi {`{{customer}}`},&#10;&#10;…"></textarea>
-						<small class="muted"
-							>Keep under ~{EMAIL_BODY_LENGTH_GUIDANCE.toLocaleString()} characters — some mail apps trim
-							long <code>mailto:</code> messages.</small
-						>
-					</label>
-					<div class="preview">
-						<span class="preview-label">Preview</span>
-						{#if createPreview.subject}<div class="preview-subject">
-								{createPreview.subject}
-							</div>{/if}
+<!-- Signature / branding -->
+<section class="card">
+	<h2>Signature &amp; branding</h2>
+	<form method="POST" action="?/saveSignature" use:enhance={keepFields} class="grid">
+		<label class="field">
+			<span>Business name</span>
+			<input
+				name="businessName"
+				bind:value={businessName}
+				placeholder="e.g. Oak &amp; Iron Builds"
+			/>
+		</label>
+		<label class="field">
+			<span>Signature</span>
+			<textarea
+				name="signature"
+				bind:value={signature}
+				rows="3"
+				placeholder="Thanks so much,&#10;{`{{contractor}}`}"></textarea>
+		</label>
+		<div class="preview">
+			<span class="preview-label">Signature preview</span>
+			<pre>{composeEmail(
+					{ subject: '', body: '' },
+					{ ...SAMPLE, contractor: businessName },
+					signature
+				).body || '—'}</pre>
+		</div>
+		<div class="row-actions">
+			<button
+				type="submit"
+				class="btn primary"
+				disabled={!signatureDirty}
+				title={signatureDirty ? 'Save signature' : 'No changes to save'}>Save signature</button
+			>
+			{#if form?.saved === 'signature' && !signatureDirty}<span class="ok">Saved ✓</span>{/if}
+		</div>
+	</form>
+</section>
+
+<!-- Templates: an accordion — pick one to expand + edit -->
+<section class="card">
+	<div class="card-head">
+		<h2>Templates</h2>
+		<button type="button" class="btn primary" onclick={openCreate}>＋ New</button>
+	</div>
+
+	{#if creating}
+		<div class="editor">
+			<form
+				method="POST"
+				action="?/createTemplate"
+				use:enhance={() =>
+					async ({ update, result }) => {
+						await update({ reset: false });
+						if (result.type === 'success') creating = false;
+					}}
+				class="grid"
+			>
+				<label class="field">
+					<span>Name</span>
+					<input name="name" bind:value={newName} placeholder="e.g. Follow-up" required />
+				</label>
+				<label class="field">
+					<span>Subject</span>
+					<input
+						name="subject"
+						bind:value={newSubject}
+						placeholder="Following on {`{{project}}`}"
+					/>
+				</label>
+				<label class="field">
+					<span>Body</span>
+					<textarea
+						name="body"
+						bind:value={newBody}
+						rows="5"
+						placeholder="Hi {`{{customer}}`},&#10;&#10;…"></textarea>
+					<small class="muted"
+						>Keep under ~{EMAIL_BODY_LENGTH_GUIDANCE.toLocaleString()} characters — some mail apps trim
+						long <code>mailto:</code> messages.</small
+					>
+				</label>
+				<div class="preview">
+					{@render previewHead()}
+					{#if createPreview.subject}<div class="preview-subject">
+							{createPreview.subject}
+						</div>{/if}
+					{#if previewMode === 'html'}
+						<iframe
+							class="preview-frame"
+							title="Formatted email preview"
+							sandbox=""
+							srcdoc={createHtml}
+						></iframe>
+					{:else}
 						<pre>{createPreview.body || '—'}</pre>
-					</div>
-					{#if form?.action === 'create' && form?.message}
-						<p class="err">{form.message}</p>
 					{/if}
-					<div class="row-actions">
-						<button
-							type="submit"
-							class="btn primary"
-							disabled={!createDirty}
-							title={createDirty ? 'Add template' : 'Give the template a name first'}
-							>Add template</button
-						>
-						<button type="button" class="btn" onclick={() => (creating = false)}>Cancel</button>
-					</div>
-				</form>
-			</div>
-		{/if}
+				</div>
+				{#if form?.action === 'create' && form?.message}
+					<p class="err">{form.message}</p>
+				{/if}
+				<div class="row-actions">
+					<button
+						type="submit"
+						class="btn primary"
+						disabled={!createDirty}
+						title={createDirty ? 'Add template' : 'Give the template a name first'}
+						>Add template</button
+					>
+					<button type="button" class="btn" onclick={() => (creating = false)}>Cancel</button>
+				</div>
+			</form>
+		</div>
+	{/if}
 
-		{#if data.templates.length === 0 && !creating}
-			<p class="muted">No templates yet.</p>
-		{/if}
+	{#if data.templates.length === 0 && !creating}
+		<p class="muted">No templates yet.</p>
+	{/if}
 
-		<ul class="tlist">
-			{#each data.templates as t, i (t.id)}
-				<li class="titem" class:open={openId === t.id}>
-					<div class="titem-head">
-						<button type="button" class="titem-toggle" onclick={() => openEdit(t)}>
-							<span class="chev">▸</span>
-							<span class="titem-labels">
-								<span class="tname">{t.name}</span>
-								<span class="tsubject">{t.subject || 'No subject'}</span>
-							</span>
-						</button>
-						<div class="titem-reorder">
-							<form method="POST" action="?/reorderTemplate" use:enhance>
-								<input type="hidden" name="id" value={t.id} />
-								<input type="hidden" name="direction" value="up" />
-								<button
-									class="icon-btn"
-									style="width: 1.9rem; height: 1.9rem; font-size: 0.9rem;"
-									title="Move up"
-									disabled={i === 0}>↑</button
-								>
-							</form>
-							<form method="POST" action="?/reorderTemplate" use:enhance>
-								<input type="hidden" name="id" value={t.id} />
-								<input type="hidden" name="direction" value="down" />
-								<button
-									class="icon-btn"
-									style="width: 1.9rem; height: 1.9rem; font-size: 0.9rem;"
-									title="Move down"
-									disabled={i === data.templates.length - 1}>↓</button
-								>
-							</form>
-						</div>
-					</div>
-
-					{#if openId === t.id}
-						<div class="editor">
-							<form
-								method="POST"
-								action="?/updateTemplate"
-								use:enhance={() =>
-									async ({ update, result }) => {
-										await update({ reset: false });
-										// Re-seed the buffers from the freshly-loaded row so a
-										// still-open editor (e.g. after a failed save) shows what
-										// is actually stored, not what was typed.
-										const saved = data.templates.find((x) => x.id === t.id);
-										if (saved) {
-											editName = saved.name;
-											editSubject = saved.subject;
-											editBody = saved.body;
-										}
-										if (result.type === 'success') openId = null;
-									}}
-								class="grid"
+	<ul class="tlist">
+		{#each data.templates as t, i (t.id)}
+			<li class="titem" class:open={openId === t.id}>
+				<div class="titem-head">
+					<button type="button" class="titem-toggle" onclick={() => openEdit(t)}>
+						<span class="chev">▸</span>
+						<span class="titem-labels">
+							<span class="tname">{t.name}</span>
+							<span class="tsubject">{t.subject || 'No subject'}</span>
+						</span>
+					</button>
+					<div class="titem-reorder">
+						<form method="POST" action="?/reorderTemplate" use:enhance>
+							<input type="hidden" name="id" value={t.id} />
+							<input type="hidden" name="direction" value="up" />
+							<button
+								class="icon-btn"
+								style="width: 1.9rem; height: 1.9rem; font-size: 0.9rem;"
+								title="Move up"
+								disabled={i === 0}>↑</button
 							>
-								<input type="hidden" name="id" value={t.id} />
-								<label class="field">
-									<span>Name</span>
-									<input name="name" bind:value={editName} required />
-								</label>
-								<label class="field">
-									<span>Subject</span>
-									<input name="subject" bind:value={editSubject} placeholder="Subject" />
-								</label>
-								<label class="field">
-									<span>Body</span>
-									<textarea name="body" bind:value={editBody} rows="5"></textarea>
-								</label>
-								<div class="preview">
-									<span class="preview-label">Preview</span>
-									{#if editPreview.subject}<div class="preview-subject">
-											{editPreview.subject}
-										</div>{/if}
+						</form>
+						<form method="POST" action="?/reorderTemplate" use:enhance>
+							<input type="hidden" name="id" value={t.id} />
+							<input type="hidden" name="direction" value="down" />
+							<button
+								class="icon-btn"
+								style="width: 1.9rem; height: 1.9rem; font-size: 0.9rem;"
+								title="Move down"
+								disabled={i === data.templates.length - 1}>↓</button
+							>
+						</form>
+					</div>
+				</div>
+
+				{#if openId === t.id}
+					<div class="editor">
+						<form
+							method="POST"
+							action="?/updateTemplate"
+							use:enhance={() =>
+								async ({ update, result }) => {
+									await update({ reset: false });
+									// Re-seed the buffers from the freshly-loaded row so a
+									// still-open editor (e.g. after a failed save) shows what
+									// is actually stored, not what was typed.
+									const saved = data.templates.find((x) => x.id === t.id);
+									if (saved) {
+										editName = saved.name;
+										editSubject = saved.subject;
+										editBody = saved.body;
+									}
+									if (result.type === 'success') openId = null;
+								}}
+							class="grid"
+						>
+							<input type="hidden" name="id" value={t.id} />
+							<label class="field">
+								<span>Name</span>
+								<input name="name" bind:value={editName} required />
+							</label>
+							<label class="field">
+								<span>Subject</span>
+								<input name="subject" bind:value={editSubject} placeholder="Subject" />
+							</label>
+							<label class="field">
+								<span>Body</span>
+								<textarea name="body" bind:value={editBody} rows="5"></textarea>
+							</label>
+							<div class="preview">
+								{@render previewHead()}
+								{#if editPreview.subject}<div class="preview-subject">
+										{editPreview.subject}
+									</div>{/if}
+								{#if previewMode === 'html'}
+									<iframe
+										class="preview-frame"
+										title="Formatted email preview"
+										sandbox=""
+										srcdoc={editHtml}
+									></iframe>
+								{:else}
 									<pre>{editPreview.body || '—'}</pre>
-								</div>
-								<div class="row-actions">
+								{/if}
+							</div>
+							<div class="row-actions">
+								<button
+									type="submit"
+									class="btn primary"
+									disabled={!editDirty}
+									title={editDirty ? 'Save changes' : 'No changes to save'}>Save</button
+								>
+								<button type="button" class="btn" onclick={() => (openId = null)}>Cancel</button>
+								<span class="spacer"></span>
+								{#if confirmingId === t.id}
+									<span class="confirm">Delete?</span>
 									<button
+										class="btn danger"
 										type="submit"
-										class="btn primary"
-										disabled={!editDirty}
-										title={editDirty ? 'Save changes' : 'No changes to save'}>Save</button
+										formaction="?/deleteTemplate"
+										formnovalidate>Yes</button
 									>
-									<button type="button" class="btn" onclick={() => (openId = null)}>Cancel</button>
-									<span class="spacer"></span>
-									{#if confirmingId === t.id}
-										<span class="confirm">Delete?</span>
-										<button
-											class="btn danger"
-											type="submit"
-											formaction="?/deleteTemplate"
-											formnovalidate>Yes</button
-										>
-										<button type="button" class="btn" onclick={() => (confirmingId = null)}
-											>No</button
-										>
-									{:else}
-										<button
-											type="button"
-											class="btn danger-ghost"
-											onclick={() => (confirmingId = t.id)}>Delete</button
-										>
-									{/if}
-								</div>
-							</form>
-						</div>
-					{/if}
-				</li>
-			{/each}
-		</ul>
-	</section>
-</div>
+									<button type="button" class="btn" onclick={() => (confirmingId = null)}>No</button
+									>
+								{:else}
+									<button
+										type="button"
+										class="btn danger-ghost"
+										onclick={() => (confirmingId = t.id)}>Delete</button
+									>
+								{/if}
+							</div>
+						</form>
+					</div>
+				{/if}
+			</li>
+		{/each}
+	</ul>
+</section>
+
+<!-- Placeholder reference. Last, not first: it's a lookup table you glance at
+     while writing a template, not the headline of the page. -->
+<section class="card">
+	<h2>Placeholders</h2>
+	<ul class="chips">
+		{#each EMAIL_TEMPLATE_PLACEHOLDERS as p (p.token)}
+			<li><code>{`{{${p.token}}}`}</code> <span>{p.label}</span></li>
+		{/each}
+	</ul>
+</section>
 
 <style>
-	.wrap {
-		max-width: 760px;
-		margin: 0 auto;
-		padding: 1.5rem 1rem 3rem;
-		display: grid;
-		gap: 1.1rem;
-	}
 	.card h2 {
 		margin: 0 0 0.6rem;
 		font-size: 1.05rem;
@@ -449,16 +448,19 @@
 		font-weight: 600;
 		color: #57606a;
 	}
+	/* App-wide field recipe: hairline border, sunken well that lifts on focus,
+	   yellow ring. Token-driven so dark needs no border/background override. */
 	.field input,
 	.field textarea {
 		width: 100%;
 		box-sizing: border-box;
 		padding: 0.55rem 0.65rem;
-		border: 1.5px solid #d9dde3;
+		border: 1px solid var(--field-border);
 		border-radius: 10px;
 		font-size: 0.92rem;
 		font-family: inherit;
 		color: #1f2328;
+		background: var(--field-bg);
 	}
 	.field textarea {
 		resize: vertical;
@@ -466,8 +468,9 @@
 	.field input:focus,
 	.field textarea:focus {
 		outline: none;
-		border-color: #a98be2;
-		box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.16);
+		border-color: var(--yellow-deep);
+		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		background: var(--field-bg-focus);
 	}
 	.preview {
 		background: #f9fafb;
@@ -477,12 +480,53 @@
 		display: grid;
 		gap: 0.3rem;
 	}
+	.preview-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
 	.preview-label {
 		font-size: 0.72rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: #8b949e;
 		font-weight: 700;
+	}
+	/* Segmented switch between the two parts of the same message. */
+	.preview-switch {
+		display: flex;
+		gap: 0.15rem;
+		padding: 0.1rem;
+		border-radius: 999px;
+		border: 1px solid var(--line);
+		background: var(--surface);
+	}
+	.preview-switch button {
+		border: none;
+		background: none;
+		border-radius: 999px;
+		padding: 0.18rem 0.6rem;
+		font-family: inherit;
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+		cursor: pointer;
+	}
+	.preview-switch button.on {
+		background: var(--yellow);
+		/* Pinned dark: yellow stays light in both themes. */
+		color: var(--on-yellow);
+	}
+	/* The email renders in its own document, so app.css can't leak into it and the
+	   preview is the real thing rather than a styled approximation. */
+	.preview-frame {
+		width: 100%;
+		height: 340px;
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: #f6f8fa;
 	}
 	.preview-subject {
 		font-weight: 700;
@@ -612,8 +656,9 @@
 	   is light in either theme, so its text/border stay pinned dark. */
 	.btn.primary {
 		background: var(--yellow);
-		color: #14171c;
-		border-color: #14171c;
+		color: var(--on-yellow);
+		/* Transparent, not none: keeps the box the same size as its siblings. */
+		border-color: transparent;
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.btn.primary:hover:not(:disabled) {
@@ -672,10 +717,10 @@
 	:global(:root[data-theme='dark']) .field > span {
 		color: var(--fg-muted);
 	}
+	/* Border/background are token-driven above; only text color needs dark, and
+	   keeping the rest out means the focus rules can't be outranked. */
 	:global(:root[data-theme='dark']) .field input,
 	:global(:root[data-theme='dark']) .field textarea {
-		background: var(--field-bg);
-		border-color: var(--field-border);
 		color: var(--fg);
 	}
 	:global(:root[data-theme='dark']) .preview {
@@ -729,63 +774,5 @@
 	}
 	:global(:root[data-theme='dark']) .ok {
 		color: #4ac26b;
-	}
-	.tags-hint,
-	.tags-none {
-		margin: 0;
-		font-size: 0.85rem;
-		color: var(--fg-muted);
-		line-height: 1.5;
-	}
-	.tag-list {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: grid;
-		gap: 0.3rem;
-	}
-	.tag-list li {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.4rem 0.6rem;
-		border: 1px solid var(--line);
-		border-radius: 10px;
-		background: var(--surface-sunken);
-	}
-	.tag-name {
-		flex: 1;
-		min-width: 0;
-		font-size: 0.85rem;
-		font-weight: 700;
-		overflow-wrap: anywhere;
-	}
-	.tag-del,
-	.tag-no {
-		border: none;
-		background: none;
-		padding: 0.2rem 0.4rem;
-		color: var(--fg-muted);
-		font-family: inherit;
-		font-size: 0.78rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-	.tag-del:hover {
-		color: var(--danger);
-	}
-	.tag-no:hover {
-		color: var(--fg);
-	}
-	.tag-yes {
-		border: 1px solid var(--danger);
-		background: var(--danger);
-		color: #fff;
-		border-radius: 999px;
-		padding: 0.25rem 0.7rem;
-		font-family: inherit;
-		font-size: 0.75rem;
-		font-weight: 700;
-		cursor: pointer;
 	}
 </style>

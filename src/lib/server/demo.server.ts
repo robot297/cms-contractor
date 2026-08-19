@@ -50,6 +50,15 @@ export function isDemoEnabled(): boolean {
 }
 
 /**
+ * Whether a signed-in account IS the shared demo login. Used to refuse the
+ * abilities a public shared account must not have — sending real email, above
+ * all — while everything else behaves like a normal contractor.
+ */
+export function isDemoUser(email: string): boolean {
+	return email === DEMO_CONTRACTOR.email;
+}
+
+/**
  * Provision (if needed) and re-seed the demo contractor, then hand back its
  * credentials so the caller can establish a session the normal way. Throws if
  * the account can't be provisioned.
@@ -63,7 +72,13 @@ export async function prepareDemoSession(): Promise<{ email: string; password: s
 /** Create the demo login if it doesn't exist yet; return its user id. */
 async function ensureDemoContractor(): Promise<string> {
 	const existing = await findDemoUserId();
-	if (existing) return existing;
+	if (existing) {
+		// Keep the account verified even if it predates verification enforcement —
+		// otherwise the public demo would bounce off the verify-email gate, and its
+		// address is ours, not something a visitor can click a link for.
+		await db.update(user).set({ emailVerified: true }).where(eq(user.id, existing));
+		return existing;
+	}
 
 	try {
 		// Goes through Better Auth so the password is hashed exactly like a real
@@ -86,7 +101,8 @@ async function ensureDemoContractor(): Promise<string> {
 	const id = await findDemoUserId();
 	if (!id) throw new Error('Demo contractor could not be provisioned');
 	// Self-signup already defaults to contractor; enforce it in case that changes.
-	await db.update(user).set({ role: 'contractor' }).where(eq(user.id, id));
+	// Verified by fiat: the demo address is ours and never receives a link.
+	await db.update(user).set({ role: 'contractor', emailVerified: true }).where(eq(user.id, id));
 	// Comp the demo permanently. Provisioned fresh it would otherwise start a
 	// 14-day trial and the public demo would silently lapse two weeks later. Note
 	// that `seedDemoData` deliberately does not touch the subscription row, so a
@@ -150,8 +166,10 @@ async function seedDemoData(contractorId: string): Promise<void> {
 			email: c.email,
 			phone: c.phone,
 			address: c.address,
+			city: c.city,
+			state: c.state,
+			postalCode: c.postalCode,
 			notes: c.notes,
-			tags: c.tags,
 			avatar: c.avatar,
 			preferredContact: c.preferredContact
 		});

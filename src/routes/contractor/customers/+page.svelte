@@ -3,9 +3,19 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { customerContactSchema, formatPhone, normalizePreferredContact } from '$lib/crm';
-	import ContactComposer from '$lib/ContactComposer.svelte';
-	import TagPicker from '$lib/TagPicker.svelte';
+	import {
+		customerContactSchema,
+		formatPhone,
+		normalizePreferredContact,
+		portalInfoFor,
+		preferredContactLabel
+	} from '$lib/crm';
+	import { importSummaryLine, type ImportSummary } from '$lib/contact-import';
+	import { toast } from '$lib/toast.svelte';
+	import AddressFields from '$lib/AddressFields.svelte';
+	import AlphaRail from '$lib/AlphaRail.svelte';
+	import ContactPanel from '$lib/ContactPanel.svelte';
+	import ContactImport from '$lib/ContactImport.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -196,8 +206,55 @@
 	let openedFromEmpty = $state(false);
 	let addError = $state('');
 
+	// --- Contact import ----------------------------------------------------
+	let importDialog: HTMLDialogElement | undefined = $state();
+	// The dialog's contents are mounted only while it is open, so reopening it
+	// always starts back at "where are these contacts coming from" rather than on
+	// the review list from last time.
+	let importOpen = $state(false);
+	// Existing emails, so the review list can flag someone already on file rather
+	// than offering them and failing on the duplicate check.
+	const existingEmails = $derived(data.customers.map((c) => c.email));
+	// Trial headroom, so the dialog can warn before a long list runs into the cap.
+	const importRemaining = $derived(
+		data.billing.limits
+			? Math.max(0, data.billing.limits.customer.limit - data.billing.limits.customer.used)
+			: null
+	);
+
+	/** Hand over from the add form. One modal at a time, so this closes that one. */
+	function openImport() {
+		addDialog?.close();
+		// That form is no longer the one being answered, so its "send them back to
+		// the dashboard afterwards" errand doesn't carry over to a later add.
+		openedFromEmpty = false;
+		importOpen = true;
+		importDialog?.showModal();
+	}
+
+	function onImported(summary: ImportSummary) {
+		importDialog?.close();
+		const detail = importSummaryLine(summary);
+		if (summary.imported === 0) {
+			toast.show('Nothing was imported', { detail: detail || undefined });
+			return;
+		}
+		toast.success(
+			`Imported ${summary.imported} ${summary.imported === 1 ? 'customer' : 'customers'}`,
+			{ detail: detail || undefined }
+		);
+	}
+
 	// --- Per-card interaction ---------------------------------------------
+	// Editing opens a full-screen overlay over the card rather than expanding inside
+	// it — a whole form never had the room in a directory card, least of all on a
+	// phone. `editingId` is the customer being edited.
 	let editingId: string | null = $state(null);
+	function openEdit(id: string) {
+		editingId = id;
+		gearOpenId = null;
+		confirmingArchiveId = null;
+	}
 	let confirmingArchiveId: string | null = $state(null);
 	// Which contact row is expanded to show full details + quick actions.
 	let expandedId: string | null = $state(null);
@@ -205,11 +262,17 @@
 	let gearOpenId: string | null = $state(null);
 	// Which expanded card is showing its message composer (hidden until "Contact").
 	let contactOpenId: string | null = $state(null);
+	// The open pane is tabbed so it stays about one screenful: three stacked
+	// panels plus notes ran well past the fold on a phone. Every card opens on
+	// its first tab, like the subcontractor profile.
+	let detailTab: 'details' | 'account' | 'notes' = $state('details');
+
 	function toggleExpanded(id: string) {
 		expandedId = expandedId === id ? null : id;
 		confirmingArchiveId = null;
 		gearOpenId = null;
 		contactOpenId = null;
+		detailTab = 'details';
 	}
 
 	// --- Live search (debounced) + suggestions ----------------------------
@@ -242,8 +305,7 @@
 		return out.filter((n) => n.toLowerCase() !== raw);
 	});
 
-	// --- Alphabetical grouping + A–Z jump rail ----------------------------
-	const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
+	// --- Alphabetical grouping + A–Z jump rail (rail itself is AlphaRail) ---
 	function letterOf(name: string): string {
 		const ch = name.trim().charAt(0).toUpperCase();
 		return /[A-Z]/.test(ch) ? ch : '#';
@@ -262,39 +324,6 @@
 	function jumpTo(letter: string, behavior: ScrollBehavior = 'smooth') {
 		document.getElementById(`sec-${letter}`)?.scrollIntoView({ behavior, block: 'start' });
 	}
-	// Dock-style magnification: the hovered letter is largest, neighbours taper off.
-	let railHover: number | null = $state(null);
-	// The rail element, so touch/mouse position can be mapped to a letter index.
-	let railNav: HTMLElement | undefined = $state();
-	// Map a pointer's Y onto a letter and magnify it. Child transforms don't
-	// reflow, so the nav's own box stays stable — no feedback loop as letters
-	// grow. `jump` is true while actively scrubbing (touch drag / mouse-down).
-	function railAt(clientY: number, jump: boolean) {
-		if (!railNav) return;
-		const r = railNav.getBoundingClientRect();
-		const frac = (clientY - r.top) / r.height;
-		const i = Math.max(0, Math.min(ALPHABET.length - 1, Math.round(frac * (ALPHABET.length - 1))));
-		railHover = i;
-		if (jump && presentLetters.has(ALPHABET[i])) jumpTo(ALPHABET[i], 'auto');
-	}
-	function railScale(i: number): number {
-		if (railHover === null) return 1;
-		const d = Math.abs(i - railHover);
-		if (d === 0) return 2;
-		if (d === 1) return 1.6;
-		if (d === 2) return 1.3;
-		if (d === 3) return 1.12;
-		return 1;
-	}
-	// Push neighbours away from the hovered letter so the enlarged glyphs don't
-	// collide — the dock "spread" that makes the magnified letter easy to hit.
-	function railShift(i: number): number {
-		if (railHover === null) return 0;
-		const d = Math.abs(i - railHover);
-		if (d === 0) return 0;
-		const push = d === 1 ? 9 : d === 2 ? 15 : d === 3 ? 18 : 19;
-		return Math.sign(i - railHover) * push;
-	}
 
 	function liveFormatPhone(e: Event & { currentTarget: HTMLInputElement }) {
 		e.currentTarget.value = formatPhone(e.currentTarget.value);
@@ -307,19 +336,51 @@
 			email: formData.get('email')?.toString(),
 			phone: formData.get('phone')?.toString(),
 			address: formData.get('address')?.toString(),
-			notes: formData.get('notes')?.toString(),
-			tags: formData.get('tags')?.toString()
+			city: formData.get('city')?.toString(),
+			state: formData.get('state')?.toString(),
+			postalCode: formData.get('postalCode')?.toString(),
+			notes: formData.get('notes')?.toString()
 		});
 		return result.success ? null : result.error.issues[0].message;
 	}
 
+	/** "Austin, TX" from the captured fields — the profile pane's City row. */
+	function cityState(c: { city: string | null; state: string | null }): string {
+		return [c.city, c.state].filter(Boolean).join(', ');
+	}
+
+	/** How this customer prefers to be reached, for the Contact panel. */
+	function preferredLabel(value: string | null | undefined): string {
+		return preferredContactLabel(normalizePreferredContact(value));
+	}
+
+	/**
+	 * Where the customer stands with the portal. A pending invite that has already
+	 * lapsed is reported as expired rather than pending — "invite sent" is not a
+	 * useful thing to read about a link that no longer opens.
+	 */
+	function portalStatus(c: { id: string; userId: string | null }): string {
+		if (isLinked(c)) return 'Linked';
+		const pending = data.invites.find((i) => i.customerId === c.id && i.status === 'pending');
+		if (!pending) return 'Not linked yet';
+		return new Date(pending.expiresAt).getTime() > Date.now() ? 'Invite pending' : 'Invite expired';
+	}
+
+	/** Short, readable date for the Account panel. */
+	function fmtDay(d: string | Date): string {
+		const date = typeof d === 'string' ? new Date(d) : d;
+		return Number.isNaN(date.getTime())
+			? '—'
+			: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+	}
+
+	// `width: 100%; box-sizing: border-box` is load-bearing, not decoration: an
+	// <input> carries an intrinsic default width of roughly 20 characters, so
+	// without these it refuses to shrink below ~180px and pushes its container
+	// wider than the phone. That is what put a horizontal scrollbar on the
+	// city/state/ZIP row. Every control below wants to fill its cell anyway.
 	const fieldStyle =
-		'padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
-	// Gear (⚙) menu that holds Edit / Send app invite / Archive.
-	// Sizing only — the gold look comes from the shared `.icon-btn` class.
-	const gearBtn = 'width: 2.3rem; height: 2.3rem; font-size: 1.55rem;';
-	const menuItem =
-		'display: block; width: 100%; text-align: left; padding: 0.55rem 0.8rem; border: none; background: none; cursor: pointer; font-size: 0.9rem; color: inherit;';
+		'width: 100%; box-sizing: border-box; padding: 0.5rem; border-radius: 8px; border: 1px solid #d0d7de; font-size: 1rem;';
 </script>
 
 <svelte:head>
@@ -433,10 +494,13 @@
 
 						{#each group.items as c (c.id)}
 							{@const expanded = expandedId === c.id}
-							<article class="card">
+							<!-- The shared `.card` padding is zeroed out here: every row inside
+							     brings its own, and the two together made a collapsed contact
+							     twice as tall as the name it shows. -->
+							<article class="card" style="padding: 0; gap: 0;">
 								<!-- Contact row -->
 								<div
-									style="display: flex; align-items: center; gap: 0.7rem; padding: 0.65rem 0.8rem;"
+									style="display: flex; align-items: center; gap: 0.7rem; padding: 0.45rem 0.7rem;"
 								>
 									<button
 										type="button"
@@ -482,19 +546,13 @@
 											style="font-size: 0.82rem; color: #8c959f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
 											>{c.phone ?? c.email}</span
 										>
-										<!-- Tags at a glance, without expanding the row. -->
-										{#if c.tags.length > 0}
-											<span class="tag-chips" style="margin-top: 0.1rem;">
-												{#each c.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
-											</span>
-										{/if}
 									</button>
 
 									{#if isLinked(c)}
 										<span
+											class="status-pill ok"
 											title="Customer has joined"
-											style="font-size: 0.72rem; color: #1a7f37; background: #e6f4ea; border: 1px solid #4ea866; border-radius: 999px; padding: 0.05rem 0.5rem; white-space: nowrap;"
-											>Linked</span
+											style="font-size: 0.72rem; padding: 0.05rem 0.5rem;">Linked</span
 										>
 									{/if}
 									<span
@@ -505,144 +563,160 @@
 								</div>
 
 								{#if expanded}
-									<div
-										style="border-top: 1px solid #eef1f4; padding: 0.8rem; display: grid; gap: 0.75rem;"
-									>
+									<div class="detail">
 										{#if editingId === c.id}
-											<!-- Edit mode -->
-											<form
-												method="POST"
-												action="?/editCustomer"
-												use:enhance={({ formData, cancel }) => {
-													const err = firstError(formData);
-													if (err) {
-														addError = '';
-														alert(err);
-														cancel();
-														return;
-													}
-													return async ({ result, update }) => {
-														await update();
-														if (result.type === 'success') editingId = null;
-													};
-												}}
-												style="display: grid; gap: 0.5rem;"
+											<!-- Edit mode: a full-screen overlay so the form has the whole screen to breathe
+											     rather than a directory card's width. The card underneath stays put. -->
+											<div
+												class="edit-overlay"
+												role="dialog"
+												aria-modal="true"
+												aria-label="Edit {c.name}"
 											>
-												<input type="hidden" name="id" value={c.id} />
-												<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-													<input
-														name="name"
-														value={c.name}
-														required
-														style="flex: 1; min-width: 120px; {fieldStyle}"
-													/>
-													<input
-														name="email"
-														type="email"
-														value={c.email}
-														readonly={isLinked(c)}
-														title={isLinked(c)
-															? 'Email is locked once the customer has joined'
-															: ''}
-														style="flex: 1; min-width: 140px; {fieldStyle} background: {isLinked(c)
-															? '#f6f8fa'
-															: '#fff'};"
-													/>
-												</div>
-												<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-													<input
-														name="phone"
-														type="tel"
-														value={c.phone ?? ''}
-														oninput={liveFormatPhone}
-														placeholder="Phone"
-														style="flex: 1; min-width: 120px; {fieldStyle}"
-													/>
-													<input
-														name="address"
-														value={c.address ?? ''}
-														placeholder="Address"
-														style="flex: 2; min-width: 160px; {fieldStyle}"
-													/>
-												</div>
-												<TagPicker value={c.tags} />
-												<label
-													style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;"
-												>
-													Preferred contact method
-													<select name="preferredContact" style={fieldStyle}>
-														<option
-															value="email"
-															selected={normalizePreferredContact(c.preferredContact) === 'email'}
-															>Email</option
+												<button
+													type="button"
+													class="edit-backdrop"
+													aria-label="Close edit"
+													onclick={() => (editingId = null)}
+												></button>
+												<div class="edit-sheet">
+													<div class="edit-sheet-head">
+														<h2 class="edit-sheet-title">Edit {c.name}</h2>
+														<button
+															type="button"
+															class="edit-sheet-x"
+															aria-label="Close"
+															onclick={() => (editingId = null)}>✕</button
 														>
-														<option
-															value="call"
-															selected={normalizePreferredContact(c.preferredContact) === 'call'}
-															>Call</option
-														>
-														<option
-															value="text"
-															selected={normalizePreferredContact(c.preferredContact) === 'text'}
-															>Text</option
-														>
-													</select>
-												</label>
-												<textarea
-													name="notes"
-													rows="2"
-													placeholder="Project details / notes"
-													style="{fieldStyle} resize: vertical;">{c.notes ?? ''}</textarea
-												>
-												{#if form?.action === 'edit' && 'id' in form && form.id === c.id && form.message}
-													<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">
-														{form.message}
-													</p>
-												{/if}
-												<div style="display: flex; gap: 0.5rem;">
-													<button
-														type="submit"
-														style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer;"
-														>Save</button
-													>
-													<button
-														type="button"
-														onclick={() => (editingId = null)}
-														style="padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer;"
-														>Cancel</button
-													>
-												</div>
-											</form>
-										{:else}
-											<!-- Contact details -->
-											<div style="display: grid; gap: 0.3rem; font-size: 0.9rem;">
-												<div style="word-break: break-word;">
-													<span style="color: #8c959f;">Email</span> · {c.email}
-												</div>
-												{#if c.phone}
-													<div><span style="color: #8c959f;">Phone</span> · {c.phone}</div>
-												{/if}
-												{#if c.address}
-													<div style="word-break: break-word;">
-														<span style="color: #8c959f;">Address</span> · {c.address}
 													</div>
-												{/if}
-											</div>
-
-											{#if c.tags.length > 0}
-												<div class="tag-chips">
-													{#each c.tags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
+													<form
+														method="POST"
+														action="?/editCustomer"
+														use:enhance={({ formData, cancel }) => {
+															const err = firstError(formData);
+															if (err) {
+																addError = '';
+																alert(err);
+																cancel();
+																return;
+															}
+															return async ({ result, update }) => {
+																await update();
+																if (result.type === 'success') editingId = null;
+															};
+														}}
+														style="display: grid; gap: 0.5rem;"
+													>
+														<input type="hidden" name="id" value={c.id} />
+														<!-- Placeholders stand in for labels on this form, so the
+												     required marker rides along in them. -->
+														<input
+															name="name"
+															value={c.name}
+															required
+															aria-required="true"
+															placeholder="Name *"
+															aria-label="Name"
+															style={fieldStyle}
+														/>
+														<!-- Email gets its own row rather than sharing one with the name:
+												     addresses are long, and half a row truncated them. It carries the
+												     same field styling as every other input — the locked state is
+												     said in words below, since the old grey fill never survived the
+												     shared input rule in app.css. -->
+														<input
+															name="email"
+															type="email"
+															value={c.email}
+															readonly={isLinked(c)}
+															required
+															aria-required="true"
+															placeholder="Email *"
+															aria-label="Email"
+															title={isLinked(c)
+																? 'Email is locked once the customer has joined'
+																: ''}
+															style={fieldStyle}
+														/>
+														{#if isLinked(c)}
+															<p style="margin: -0.2rem 0 0; font-size: 0.78rem; color: #8c959f;">
+																Locked — {c.name} has joined with this address.
+															</p>
+														{/if}
+														<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+															<input
+																name="phone"
+																type="tel"
+																inputmode="tel"
+																autocomplete="tel"
+																value={c.phone ?? ''}
+																oninput={liveFormatPhone}
+																placeholder="Phone"
+																style={fieldStyle}
+															/>
+															<input
+																name="address"
+																value={c.address ?? ''}
+																placeholder="Street address"
+																autocomplete="street-address"
+																style={fieldStyle}
+															/>
+														</div>
+														<!-- Same ZIP-led address as the add form: what's on file shows as
+												     a summary until they ask to change it. -->
+														<AddressFields
+															city={c.city}
+															state={c.state}
+															postalCode={c.postalCode}
+															{fieldStyle}
+														/>
+														<label
+															style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;"
+														>
+															Preferred contact method
+															<select name="preferredContact" style={fieldStyle}>
+																<option
+																	value="email"
+																	selected={normalizePreferredContact(c.preferredContact) ===
+																		'email'}>Email</option
+																>
+																<option
+																	value="call"
+																	selected={normalizePreferredContact(c.preferredContact) ===
+																		'call'}>Call</option
+																>
+																<option
+																	value="text"
+																	selected={normalizePreferredContact(c.preferredContact) ===
+																		'text'}>Text</option
+																>
+															</select>
+														</label>
+														<textarea
+															name="notes"
+															rows="2"
+															placeholder="Project details / notes"
+															style="{fieldStyle} resize: vertical;">{c.notes ?? ''}</textarea
+														>
+														{#if form?.action === 'edit' && 'id' in form && form.id === c.id && form.message}
+															<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">
+																{form.message}
+															</p>
+														{/if}
+														<!-- Same footer as the Add-customer modal: Save is the yellow
+														     primary, Cancel is a quiet text way-out beside it. -->
+														<div class="add-actions">
+															<button
+																type="button"
+																onclick={() => (editingId = null)}
+																class="add-cancel">Cancel</button
+															>
+															<button type="submit" class="add-save">Save changes</button>
+														</div>
+													</form>
 												</div>
-											{/if}
-
-											{#if c.notes}
-												<p
-													style="margin: 0; font-size: 0.9rem; color: #57606a; white-space: pre-wrap;"
-												>
-													{c.notes}
-												</p>
-											{/if}
-
+											</div>
+										{:else}
 											{#if confirmingArchiveId === c.id}
 												<div
 													style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; background: #fff8f8; border: 1px solid #ffd7d5; border-radius: 10px; padding: 0.5rem 0.7rem;"
@@ -674,11 +748,43 @@
 														>Cancel</button
 													>
 												</div>
-											{:else}
-												<!-- Contact (💬) + manage (⚙️) actions, bottom-right like the dashboard -->
-												<div
-													style="display: flex; justify-content: flex-end; align-items: center; gap: 0.4rem; border-top: 1px solid #eef1f4; padding-top: 0.7rem;"
-												>
+											{/if}
+
+											<div class="tab-row">
+												<div class="tabs" role="tablist">
+													<button
+														type="button"
+														role="tab"
+														class="tab"
+														class:active={detailTab === 'details'}
+														aria-selected={detailTab === 'details'}
+														onclick={() => (detailTab = 'details')}>Details</button
+													>
+													<button
+														type="button"
+														role="tab"
+														class="tab"
+														class:active={detailTab === 'account'}
+														aria-selected={detailTab === 'account'}
+														onclick={() => (detailTab = 'account')}>Account</button
+													>
+													{#if c.notes}
+														<button
+															type="button"
+															role="tab"
+															class="tab"
+															class:active={detailTab === 'notes'}
+															aria-selected={detailTab === 'notes'}
+															onclick={() => (detailTab = 'notes')}>Notes</button
+														>
+													{/if}
+												</div>
+
+												<!-- Message (💬) and manage (⚙️) ride opposite the tabs, the same
+													     place the subcontractor profile keeps its ⚙: at the foot of the
+													     card their menus opened past the bottom of the viewport, with
+													     nothing repositioning them as the page scrolled. -->
+												<div class="pane-actions">
 													<!-- Message: opens the composer in a popover, defaulting to the
 													     customer's preferred channel. -->
 													<div style="position: relative;">
@@ -688,8 +794,7 @@
 															aria-label="Message customer"
 															aria-expanded={contactOpenId === c.id}
 															onclick={() => (contactOpenId = contactOpenId === c.id ? null : c.id)}
-															class="icon-btn"
-															style={gearBtn}>💬</button
+															class="icon-btn pane-btn">💬</button
 														>
 														{#if contactOpenId === c.id}
 															<!-- Dimmed click-away scrim so the composer is the focus. -->
@@ -699,10 +804,18 @@
 																onclick={() => (contactOpenId = null)}
 																class="contact-scrim"
 															></button>
-															<div class="contact-pop up">
-																<ContactComposer
-																	customer={c}
-																	rows={2}
+															<!-- Opens downward now that it hangs from the top of the pane. -->
+															<div class="contact-pop">
+																<ContactPanel
+																	contact={c}
+																	conversations={data.conversations[c.id] ?? []}
+																	canChat={isLinked(c)}
+																	customerId={c.id}
+																	portal={portalInfoFor({
+																		linked: isLinked(c),
+																		customerId: c.id,
+																		invites: data.invites
+																	})}
 																	onsent={() => (contactOpenId = null)}
 																	onclose={() => (contactOpenId = null)}
 																/>
@@ -717,8 +830,7 @@
 															aria-label="Manage customer"
 															aria-expanded={gearOpenId === c.id}
 															onclick={() => (gearOpenId = gearOpenId === c.id ? null : c.id)}
-															class="icon-btn"
-															style={gearBtn}>⚙️</button
+															class="icon-btn pane-btn">⚙️</button
 														>
 														{#if gearOpenId === c.id}
 															<!-- click-away backdrop -->
@@ -733,37 +845,113 @@
 															>
 																<button
 																	type="button"
-																	onclick={() => {
-																		editingId = c.id;
-																		confirmingArchiveId = null;
-																		gearOpenId = null;
-																	}}
-																	style={menuItem}>Edit</button
+																	onclick={() => openEdit(c.id)}
+																	class="menu-item">Edit</button
 																>
-																{#if !isLinked(c)}
-																	<form
-																		method="POST"
-																		action="?/sendInvite"
-																		use:enhance={() => {
-																			gearOpenId = null;
-																			return async ({ update }) => await update();
-																		}}
-																	>
-																		<input type="hidden" name="id" value={c.id} />
-																		<button type="submit" style={menuItem}>Send app invite</button>
-																	</form>
-																{/if}
 																<button
 																	type="button"
 																	onclick={() => {
 																		confirmingArchiveId = c.id;
 																		gearOpenId = null;
 																	}}
-																	style="{menuItem} color: #cf222e; border-top: 1px solid #eaeef2;"
-																	>Archive</button
+																	class="menu-item danger">Archive</button
 																>
 															</div>
 														{/if}
+													</div>
+												</div>
+											</div>
+
+											<!-- Facts in titled panels, the same treatment as a subcontractor
+											     profile: grouped by the question being asked, values flush right,
+											     and the grid refilling to one column on a phone. -->
+											{#if detailTab === 'details'}
+												<div class="profile">
+													<div class="fact-group">
+														<div class="fact-head">
+															<span class="fact-icon" aria-hidden="true">✉</span>Contact
+														</div>
+														<dl class="fact-list">
+															<div class="fact">
+																<dt>Email</dt>
+																<dd><a href="mailto:{c.email}">{c.email}</a></dd>
+															</div>
+															<div class="fact">
+																<dt>Phone</dt>
+																<dd>
+																	<!-- Display form keeps its punctuation, the href doesn't. -->
+																	{#if c.phone}<a href="tel:{c.phone.replace(/[^\d+]/g, '')}"
+																			>{c.phone}</a
+																		>{:else}<span class="unset">Not set</span>{/if}
+																</dd>
+															</div>
+															<div class="fact">
+																<dt>Prefers</dt>
+																<dd>{preferredLabel(c.preferredContact)}</dd>
+															</div>
+														</dl>
+													</div>
+
+													<div class="fact-group">
+														<div class="fact-head">
+															<span class="fact-icon" aria-hidden="true">📍</span>Location
+														</div>
+														<dl class="fact-list">
+															<div class="fact">
+																<dt>Street</dt>
+																<dd>
+																	{#if c.address}{c.address}{:else}<span class="unset">Not set</span
+																		>{/if}
+																</dd>
+															</div>
+															<div class="fact">
+																<dt>City</dt>
+																<dd>
+																	{#if cityState(c)}{cityState(c)}{:else}<span class="unset"
+																			>Not set</span
+																		>{/if}
+																</dd>
+															</div>
+															<div class="fact">
+																<dt>ZIP</dt>
+																<dd>
+																	{#if c.postalCode}{c.postalCode}{:else}<span class="unset"
+																			>Not set</span
+																		>{/if}
+																</dd>
+															</div>
+														</dl>
+													</div>
+												</div>
+											{:else if detailTab === 'account'}
+												<div class="profile">
+													<div class="fact-group">
+														<div class="fact-head">
+															<span class="fact-icon" aria-hidden="true">👤</span>Account
+														</div>
+														<dl class="fact-list">
+															<div class="fact">
+																<dt>Portal</dt>
+																<dd>{portalStatus(c)}</dd>
+															</div>
+															<div class="fact">
+																<dt>Added</dt>
+																<dd>{fmtDay(c.createdAt)}</dd>
+															</div>
+															<div class="fact">
+																<dt>Updated</dt>
+																<dd>{fmtDay(c.updatedAt)}</dd>
+															</div>
+														</dl>
+													</div>
+												</div>
+											{:else if c.notes}
+												<div class="profile">
+													<div class="fact-group wide">
+														<div class="fact-head">
+															<span class="fact-icon" aria-hidden="true">📝</span>Notes
+														</div>
+														<p class="notes-body">{c.notes}</p>
 													</div>
 												</div>
 											{/if}
@@ -776,38 +964,10 @@
 				{/each}
 			</section>
 
-			<!-- A–Z jump rail with dock-style magnification -->
+			<!-- A–Z jump rail with dock-style magnification (shared with the
+			     subcontractor directory). -->
 			{#if data.customers.length > 0}
-				<nav
-					aria-label="Jump to letter"
-					bind:this={railNav}
-					onpointerdown={(e) => {
-						railNav?.setPointerCapture?.(e.pointerId);
-						railAt(e.clientY, true);
-					}}
-					onpointermove={(e) => railAt(e.clientY, e.pointerType !== 'mouse' || e.buttons > 0)}
-					onpointerup={() => (railHover = null)}
-					onpointercancel={() => (railHover = null)}
-					onpointerleave={() => (railHover = null)}
-					style="position: sticky; top: 84px; display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; padding: 0.25rem 0.35rem; touch-action: none;"
-				>
-					{#each ALPHABET as letter, i (letter)}
-						{@const present = presentLetters.has(letter)}
-						<button
-							type="button"
-							tabindex="-1"
-							aria-hidden="true"
-							style="border: none; background: none; font-size: 0.72rem; font-weight: 700; line-height: 1.05; padding: 0.1rem 0.35rem; border-radius: 4px; pointer-events: none; cursor: {present
-								? 'pointer'
-								: 'default'}; color: {present
-								? '#0969da'
-								: '#c9d1d9'}; transform: translateY({railShift(i)}px) scale({railScale(
-								i
-							)}); transform-origin: center center; transition: transform 0.12s ease-out; will-change: transform;"
-							>{letter}</button
-						>
-					{/each}
-				</nav>
+				<AlphaRail present={presentLetters} onjump={(letter) => jumpTo(letter, 'auto')} />
 			{/if}
 		</div>
 	</div>
@@ -899,6 +1059,23 @@
 	</div>
 </dialog>
 
+<!-- Contact-import modal. Wider than the add form: it shows a list to review,
+     not a form to fill in. -->
+<dialog
+	bind:this={importDialog}
+	onclose={() => (importOpen = false)}
+	style="border: none; border-radius: 16px; padding: 0; max-width: 560px; width: 94vw; box-shadow: 0 12px 40px rgba(0,0,0,0.2);"
+>
+	{#if importOpen}
+		<ContactImport
+			{existingEmails}
+			remaining={importRemaining}
+			onclose={() => importDialog?.close()}
+			onimported={onImported}
+		/>
+	{/if}
+</dialog>
+
 <!-- Add-customer modal -->
 <dialog
 	bind:this={addDialog}
@@ -916,8 +1093,9 @@
 			}
 			addError = '';
 			return async ({ result, update }) => {
-				// "Add & create order" answers with a redirect to the order form; let the
-				// default handling follow it rather than closing the dialog here.
+				// With "Create an order for them next" ticked the action answers with a
+				// redirect to the order form; let the default handling follow it rather
+				// than closing the dialog here.
 				if (result.type === 'redirect') return update();
 				await update();
 				if (result.type !== 'success') return;
@@ -939,16 +1117,24 @@
 				>✕</button
 			>
 		</div>
+		<!-- The other way to add someone, offered where adding someone is already the
+		     task. Typing a customer in and importing a batch of them are the same
+		     errand, so the import belongs in front of this form rather than behind
+		     its own button in the directory header. -->
+		<button type="button" class="add-import" onclick={openImport}> Import from my contacts </button>
+		<!-- Says what the asterisks mean before the first one appears. -->
+		<p class="req-legend"><span class="req" aria-hidden="true">*</span> Required</p>
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
-			Name
-			<input name="name" required style={fieldStyle} />
+			<span>Name <span class="req" aria-hidden="true">*</span></span>
+			<input name="name" required aria-required="true" style={fieldStyle} />
 		</label>
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
-			Email
+			<span>Email <span class="req" aria-hidden="true">*</span></span>
 			<input
 				name="email"
 				type="email"
 				required
+				aria-required="true"
 				inputmode="email"
 				autocomplete="email"
 				style={fieldStyle}
@@ -962,15 +1148,14 @@
 				inputmode="tel"
 				autocomplete="tel"
 				oninput={liveFormatPhone}
-				placeholder="(555) 123-4567"
 				style={fieldStyle}
 			/>
 		</label>
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
-			Address
+			Street address
 			<input name="address" autocomplete="street-address" style={fieldStyle} />
 		</label>
-		<TagPicker />
+		<AddressFields labels {fieldStyle} />
 		<label style="display: grid; gap: 0.2rem; font-size: 0.85rem; color: #57606a;">
 			Preferred contact method
 			<select name="preferredContact" style={fieldStyle}>
@@ -994,15 +1179,19 @@
 		{#if addError || (form?.action === 'add' && form?.message)}
 			<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">{addError || form?.message}</p>
 		{/if}
-		<!-- Two ways out. Most customers are added because there's work to book, so
-		     "Add & create order" saves finding them again on the orders screen; the
-		     `next` value is what the action keys the redirect off. -->
+		<!-- One save button, with the follow-on offered as a choice above it rather
+		     than as a second button beside it. Most customers are added because
+		     there's work to book, so the option is worth surfacing — but it's a
+		     detail of the save, not a rival to it. An unchecked checkbox submits
+		     nothing, so `next=order` reaches the action only when it's ticked,
+		     which is exactly what that action already keys its redirect off. -->
+		<label class="add-also">
+			<input type="checkbox" name="next" value="order" />
+			<span>Create an order for them next</span>
+		</label>
 		<div class="add-actions">
 			<button type="button" onclick={() => addDialog?.close()} class="add-cancel">Cancel</button>
-			<button type="submit" name="next" value="order" class="add-secondary"
-				>Add &amp; create order</button
-			>
-			<button type="submit" class="add-primary">Add customer</button>
+			<button type="submit" class="add-save">Add customer</button>
 		</div>
 	</form>
 </dialog>
@@ -1122,6 +1311,183 @@
 </dialog>
 
 <style>
+	/* Directory cards: not plain white — a faint top-lit wash over the shared
+	   .card and a soft raise on hover, matching the subcontractor roster so both
+	   directories read as one system. */
+	article.card {
+		background: linear-gradient(
+			180deg,
+			var(--surface) 55%,
+			color-mix(in srgb, var(--surface-sunken) 60%, var(--surface))
+		);
+		transition:
+			border-color 0.15s ease,
+			box-shadow 0.15s ease;
+	}
+	article.card:hover {
+		border-color: var(--line-strong);
+		box-shadow:
+			0 1px 2px rgba(27, 31, 36, 0.05),
+			0 8px 22px rgba(27, 31, 36, 0.1);
+	}
+	:global(:root[data-theme='dark']) article.card:hover {
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+	}
+
+	/* ------------------------------------------------------- Expanded profile
+	   Same treatment as the subcontractor profile pane, deliberately: both are
+	   "open a contact and read their facts", and they were drifting into two
+	   different languages for the same job. Recessed pane, white panels with a
+	   titled band, hairline rows, values flush right. Token-driven, so dark needs
+	   no override block. */
+	.detail {
+		border-top: 1px solid var(--line);
+		background: var(--surface-inset);
+		padding: 0.85rem;
+		display: grid;
+		gap: 0.85rem;
+	}
+	/* Tabs left, actions right, sharing one underline — the same band and the same
+	   tab treatment as the subcontractor profile. */
+	.tab-row {
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		/* Generous, and wrapping rather than compressing: on a narrow card the
+		   actions drop under the tabs instead of crowding the last one. */
+		gap: 0.5rem 1.75rem;
+		flex-wrap: wrap;
+		border-bottom: 1px solid var(--line);
+	}
+	.tabs {
+		display: flex;
+		gap: 0.25rem;
+	}
+	.tab {
+		padding: 0.4rem 0.7rem;
+		border: none;
+		background: none;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-weight: 700;
+		font-size: 0.82rem;
+		cursor: pointer;
+		border-bottom: 2px solid transparent;
+		margin-bottom: -1px;
+	}
+	.tab:hover {
+		color: var(--fg);
+	}
+	.tab.active {
+		color: var(--fg);
+		border-bottom-color: var(--fg);
+	}
+	.pane-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-left: auto;
+		padding-bottom: 0.3rem;
+	}
+	/* Sized down from the card-head icon buttons: in the tab strip these sit
+	   beside 0.82rem tab labels, and at full size they read as the loudest thing
+	   in the pane. */
+	.pane-btn {
+		width: 2rem;
+		height: 2rem;
+		font-size: 1.05rem;
+	}
+	.profile {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 0.6rem;
+		align-items: start;
+		margin: 0;
+	}
+	.profile .wide {
+		grid-column: 1 / -1;
+	}
+	.fact-group {
+		display: grid;
+		align-content: start;
+		background: var(--surface);
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		overflow: hidden;
+	}
+	.fact-head {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0;
+		padding: 0.42rem 0.7rem;
+		background: var(--surface-sunken);
+		border-bottom: 1px solid var(--line);
+		font-size: 0.75rem;
+		font-weight: 700;
+		letter-spacing: 0.01em;
+		color: var(--fg-muted);
+	}
+	.fact-icon {
+		font-size: 0.8rem;
+		line-height: 1;
+		opacity: 0.75;
+	}
+	.fact-list {
+		margin: 0;
+		padding: 0 0.7rem;
+	}
+	.fact {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.4rem 0;
+		border-bottom: 1px solid var(--line);
+	}
+	.fact:last-child {
+		border-bottom: none;
+	}
+	.profile dt {
+		flex-shrink: 0;
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: var(--fg-muted);
+		font-weight: 700;
+	}
+	/* One size, one weight, one alignment for every value — present or absent. */
+	.profile dd {
+		margin: 0;
+		min-width: 0;
+		font-size: 0.85rem;
+		line-height: 1.35;
+		font-weight: 600;
+		text-align: right;
+		word-break: break-word;
+	}
+	.profile dd a {
+		color: inherit;
+		text-decoration: none;
+		border-bottom: 1px solid var(--line-strong);
+	}
+	.profile dd a:hover {
+		border-bottom-color: currentColor;
+	}
+	.unset {
+		color: var(--fg-muted);
+		font-weight: 500;
+	}
+	/* Notes are prose, so they keep their left edge and their line breaks. */
+	.notes-body {
+		margin: 0;
+		padding: 0.55rem 0.7rem;
+		font-size: 0.88rem;
+		line-height: 1.45;
+		color: var(--fg);
+		white-space: pre-wrap;
+	}
+
 	/* Count on the ✉️ invites button, so the badge carries the number the old
 	   always-visible panel header used to. */
 	.invite-badge {
@@ -1138,7 +1504,7 @@
 		border-radius: 999px;
 		background: var(--yellow);
 		border: 1.5px solid #14171c;
-		color: #14171c;
+		color: var(--on-yellow);
 		font-size: 0.68rem;
 		font-weight: 800;
 		line-height: 1;
@@ -1200,24 +1566,84 @@
 		font-weight: 700;
 	}
 
-	/* Add-customer footer. Wraps rather than squeezing: three buttons don't fit on
-	   one line on a phone, and this modal is reached from the getting-started guide
-	   where mobile is the likely case. */
+	/* Required-field marker and its legend. Red and bold so it survives being one
+	   character wide; hidden from screen readers everywhere, which get the real
+	   signal from `required` / `aria-required` on the input itself. */
+	.req {
+		color: var(--danger);
+		font-weight: 700;
+	}
+	.req-legend {
+		margin: -0.15rem 0 0.15rem;
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+	}
+
+	/* The import hand-off, at the top of the add form. Outlined and full width so
+	   it reads as the alternative to filling this in, not as its submit. */
+	.add-import {
+		width: 100%;
+		padding: 0.5rem 0.9rem;
+		border: 1px solid var(--line-strong);
+		border-radius: 999px;
+		background: var(--surface);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.85rem;
+		font-weight: 700;
+		text-transform: none;
+		letter-spacing: normal;
+		cursor: pointer;
+	}
+	.add-import:hover {
+		background: var(--surface-sunken);
+		border-color: var(--fg-muted);
+	}
+	.add-import:focus-visible {
+		outline: 2px solid var(--fg);
+		outline-offset: 2px;
+	}
+
+	/* The follow-on, offered as a choice rather than as a second save button. Full
+	   row so the whole strip is tappable, not just the 16px box. */
+	.add-also {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.15rem;
+		padding: 0.5rem 0.65rem;
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		background: var(--surface-sunken);
+		font-size: 0.85rem;
+		color: var(--fg);
+		cursor: pointer;
+	}
+	.add-also input {
+		width: 1rem;
+		height: 1rem;
+		accent-color: var(--yellow-deep);
+		cursor: pointer;
+		flex: none;
+	}
+
+	/* Add-customer footer: one save, with the way out beside it. */
 	.add-actions {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+		align-items: center;
 		justify-content: flex-end;
 	}
 	.add-actions button {
-		padding: 0.55rem 1rem;
+		padding: 0.55rem 1.1rem;
 		border-radius: 999px;
 		cursor: pointer;
 		font-family: inherit;
 		font-size: 0.88rem;
 	}
-	/* Cancel is the way out, not a third choice — plain text, no fill or border, so
-	   it carries none of the visual weight of the two submits beside it. */
+	/* Cancel is the way out, not a second choice — plain text, no fill or border,
+	   so it carries none of the visual weight of the submit beside it. */
 	.add-cancel {
 		border: none;
 		background: none;
@@ -1229,36 +1655,28 @@
 	.add-cancel:hover {
 		color: var(--fg);
 	}
-	/* Same weight as the primary, different fill: this is an equally valid finish,
-	   not a lesser one. */
-	.add-secondary {
-		border: 1px solid #0969da;
-		background: transparent;
-		color: #0969da;
-		font-weight: 600;
+	/* Pinned dark on yellow: yellow stays light in both themes. */
+	.add-actions .add-save {
+		border: 1px solid transparent;
+		background: var(--yellow);
+		color: var(--on-yellow);
+		font-weight: 700;
+		box-shadow: var(--pop-shadow-sm);
 	}
-	.add-secondary:hover {
-		background: rgba(9, 105, 218, 0.08);
+	.add-actions .add-save:hover {
+		background: var(--yellow-deep);
 	}
-	.add-primary {
-		border: 1px solid #0969da;
-		background: #0969da;
-		color: #fff;
-		font-weight: 600;
-	}
-	.add-primary:hover {
-		background: #0860c4;
-	}
+	/* Outlined in the foreground colour, not yellow: a yellow ring on a yellow
+	   button is no ring at all. */
 	.add-actions button:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--fg);
 		outline-offset: 2px;
 	}
 	@media (max-width: 420px) {
-		/* The two submits stack full-width; Cancel drops below them as a compact text
-		   link rather than a third slab. Selectors are (0,2,0) so they can't be
-		   outranked by the base rules — media queries add no specificity. */
-		.add-actions .add-secondary,
-		.add-actions .add-primary {
+		/* Save goes full-width where the thumb is; Cancel drops below it as a
+		   compact text link. Selectors are (0,2,0) so they can't be outranked by
+		   the base rules — media queries add no specificity. */
+		.add-actions .add-save {
 			flex: 1 1 100%;
 		}
 		.add-actions .add-cancel {
@@ -1267,12 +1685,98 @@
 			margin: 0.1rem auto 0;
 		}
 	}
-	/* Dark: the transparent secondary needs a lighter blue to stay legible. */
-	:global(:root[data-theme='dark']) .add-secondary {
-		border-color: #58a6ff;
-		color: #58a6ff;
+
+	/* --------------------------------------------------------- Edit overlay
+	   Editing a customer opens over the whole screen instead of expanding the card:
+	   a directory card never had the width for a full form, least of all on a phone.
+	   A sticky header sits over a scrolling form. */
+	.edit-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		display: flex;
+		align-items: stretch;
+		justify-content: center;
 	}
-	:global(:root[data-theme='dark']) .add-secondary:hover {
-		background: rgba(88, 166, 255, 0.12);
+	.edit-backdrop {
+		position: absolute;
+		inset: 0;
+		border: none;
+		background: rgba(20, 23, 28, 0.55);
+		cursor: pointer;
+	}
+	.edit-sheet {
+		position: relative;
+		z-index: 1;
+		width: 100%;
+		max-width: 640px;
+		max-height: 100dvh;
+		display: flex;
+		flex-direction: column;
+		background: var(--surface);
+		box-shadow: var(--card-shadow);
+		overflow: hidden;
+	}
+	/* On wider screens it's a tall centred panel with room either side, not an
+	   unreadably wide form stretched across the display. */
+	@media (min-width: 700px) {
+		.edit-sheet {
+			max-height: 92dvh;
+			margin: auto;
+			border-radius: 16px;
+		}
+	}
+	.edit-sheet-head {
+		flex: none;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.9rem 1.1rem;
+		border-bottom: 1px solid var(--line);
+		background: var(--surface);
+	}
+	.edit-sheet-title {
+		margin: 0;
+		font-size: 1.05rem;
+		font-weight: 800;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.edit-sheet-x {
+		flex: none;
+		border: none;
+		background: none;
+		font-size: 1.2rem;
+		line-height: 1;
+		color: var(--fg-muted);
+		cursor: pointer;
+		padding: 0.2rem 0.35rem;
+	}
+	.edit-sheet-x:hover {
+		color: var(--fg);
+	}
+	/* The form is the scrollable body beneath the header. */
+	.edit-sheet > form {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 1rem 1.1rem 1.25rem;
+	}
+	/* Save/Cancel stay pinned to the foot of the sheet so they're reachable without
+	   scrolling to the end of a long form; the fields scroll under them. */
+	.edit-sheet .add-actions {
+		position: sticky;
+		bottom: 0;
+		margin-top: 0.5rem;
+		padding: 0.85rem 0 0.35rem;
+		background: var(--surface);
+		border-top: 1px solid var(--line);
+	}
+	/* Group the pair together at the right rather than flinging Cancel to the far
+	   left — across a 640px sheet the split reads as two stranded buttons. */
+	.edit-sheet .add-cancel {
+		margin-right: 0;
 	}
 </style>

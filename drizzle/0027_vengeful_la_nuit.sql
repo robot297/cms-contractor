@@ -1,0 +1,1 @@
+ALTER TABLE "contractor_settings" ALTER COLUMN "follow_up_days" SET DEFAULT 14;

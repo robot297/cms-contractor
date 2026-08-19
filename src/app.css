@@ -1,6 +1,7 @@
 /* ============================================================
-   Contractor CRM — "Job Site" pop-art theme
-   Safety yellow + black + white borders, hard shadows.
+   Contractor CRM — "Job Site" theme
+   Safety-yellow accent on clean surfaces: hairline borders and
+   soft elevation rather than the original hard pop-art chrome.
    Layered over the app's existing inline styles by keying on
    the color literals those styles already use.
    ============================================================ */
@@ -9,12 +10,34 @@
 	--yellow: #ffcc00;
 	--yellow-deep: #e6b800;
 	--ink: #111111;
+	/* Text drawn ON the brand fill. Yellow is light in BOTH themes, so anything
+	   sitting on it must stay dark in both — which means it cannot follow --ink,
+	   --fg or any other token that flips. This one is defined once, outside the
+	   dark block, and is deliberately never overridden there.
+
+	   Use var(--on-yellow) for every foreground on a yellow/amber surface. Reaching
+	   for --ink instead is THE recurring dark-mode bug in this app — it renders
+	   near-white on yellow, which is unreadable, and it shipped four separate times
+	   before this token existed. src/lib/theme.contrast.test.ts fails the build if a
+	   flipping token turns up on the brand fill, so the next one is caught here
+	   rather than in someone's dark-mode screenshot. */
+	--on-yellow: #14171c;
+	/* Who said it. Each half of the product has a colour — the contractor's safety
+	   yellow, the portal's teal — and a message is tinted by WHOSE it is rather
+	   than by which app you are reading it in. So the contractor's own replies are
+	   yellow on both surfaces and the customer's are teal on both, and the two
+	   halves of one conversation look like one conversation.
+	   Defined at the root, not in either shell, because both surfaces need both. */
+	--who-contractor: #ffcc00;
+	--who-customer: #0f7d8c;
 	--paper: #fffdf5;
 	--muted: #4b5159;
 	--danger: #e5301a;
-	--pop-shadow: 4px 4px 0 var(--ink);
-	--pop-shadow-lg: 6px 6px 0 var(--ink);
-	--pop-shadow-sm: 2px 2px 0 var(--ink);
+	/* Once hard `4px 4px 0` offset blocks; now soft elevation. The names stay so
+	   every component keeps working — only the rendering modernized. */
+	--pop-shadow: 0 1px 2px rgba(27, 31, 36, 0.06), 0 4px 14px rgba(27, 31, 36, 0.1);
+	--pop-shadow-lg: 0 8px 24px rgba(27, 31, 36, 0.16);
+	--pop-shadow-sm: 0 1px 2px rgba(27, 31, 36, 0.08), 0 2px 6px rgba(27, 31, 36, 0.06);
 
 	/* Semantic surface tokens — components reference these in their dark blocks so
 	   the whole app shares one dark palette. Light values here; dark below. */
@@ -25,12 +48,31 @@
 	--fg-muted: #57606a;
 	--line: #e2e6ea;
 	--line-strong: #d0d7de;
-	--field-bg: #ffffff;
-	--field-border: #d9dde3;
+	/* Fields sit a shade below the card they're on — a quietly sunken well rather
+	   than white-on-white — and lift back to white when focused. */
+	--field-bg: #f9fafb;
+	--field-bg-focus: #ffffff;
+	--field-border: #dcdfe4;
+	/* Status palette — how a job or a record is doing, in three tones: on track,
+	   waiting on someone, stopped. These nine values were previously typed as raw
+	   literals in about ten files (`#e6f4ea`, `#1a7f37`, `#fff4d6`…), which is why
+	   the same "Active" pill was a slightly different green depending on which
+	   screen you were looking at. Named here once, with dark values below — the
+	   scattered copies had none, so every status pill stayed a bright pastel on a
+	   dark card. */
+	--ok-bg: #e6f4ea;
+	--ok-line: #4ea866;
+	--ok-fg: #1a7f37;
+	--wait-bg: #fff4d6;
+	--wait-line: #d4a72c;
+	--wait-fg: #8a5a00;
+	--stop-bg: #ffebe9;
+	--stop-line: #e5534b;
+	--stop-fg: #cf222e;
 	--card-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 4px 12px rgba(27, 31, 36, 0.06);
-	/* The bold pop-art border: black in light, a soft grey in dark. Routing the
-	   interception rules through this keeps light identical while dark just works. */
-	--pop-line: #111111;
+	/* Structural border for intercepted elements. Used to be solid black — the
+	   "heavy border" look — now a hairline grey in both themes. */
+	--pop-line: #d0d7de;
 
 	color-scheme: light;
 }
@@ -42,16 +84,22 @@
    / border literals rather than re-authoring every rule. */
 :root[data-theme='dark'] {
 	--paper: #14171c;
-	--ink: #e8ebf0;
-	--muted: #9aa4b0;
+	/* Body text runs near-white rather than the old #e8ebf0 — that grey read as
+	   washed out against these surfaces, especially at small sizes. Muted comes up
+	   with it so secondary text stays clearly legible instead of merely present. */
+	--ink: #f5f8fb;
+	--muted: #adb8c4;
+	/* The portal's teal lifts in dark exactly as its shell's --accent does. */
+	--who-customer: #45c2d3;
 	--surface: #1b1f26;
 	--surface-sunken: #232830;
 	--surface-inset: #14171c;
-	--fg: #e8ebf0;
-	--fg-muted: #9aa4b0;
+	--fg: #f5f8fb;
+	--fg-muted: #adb8c4;
 	--line: #333b45;
 	--line-strong: #3d4650;
 	--field-bg: #14171c;
+	--field-bg-focus: #171b21;
 	--field-border: #363d47;
 	--pop-line: #3d4650;
 	/* The pop-art hard offset shadows are drawn in --ink, which is light in dark —
@@ -62,6 +110,19 @@
 	--pop-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.45);
 	/* Soft elevation used by the shared .card (stronger in dark for separation). */
 	--card-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+	/* Status tones, restated for dark: a deep tinted fill with a light label,
+	   rather than the light theme's pale fill with a dark one. Inverting the
+	   relationship is the point — the pale fills read as glowing chips against
+	   these surfaces, which is what the scattered literals used to do. */
+	--ok-bg: #10261a;
+	--ok-line: #2f6b45;
+	--ok-fg: #6ee7a0;
+	--wait-bg: #2a2211;
+	--wait-line: #7a5f1e;
+	--wait-fg: #f0c674;
+	--stop-bg: #2b1416;
+	--stop-line: #7d3138;
+	--stop-fg: #ff8f88;
 	color-scheme: dark;
 }
 :root[data-theme='dark'] body {
@@ -110,17 +171,9 @@
 :root[data-theme='dark'] [style*='1px solid #eaeef2'] {
 	border-color: #333b45 !important;
 }
-/* Hazard stripe: the yellow/light stripes are painfully bright on a dark UI, so
-   dim to a muted amber over near-black. */
+/* Brand accent line: full yellow is glaring on a dark UI, so dim to amber. */
 :root[data-theme='dark'] .hazard {
-	background: repeating-linear-gradient(
-		-45deg,
-		#7a6100 0,
-		#7a6100 16px,
-		#15181d 16px,
-		#15181d 32px
-	);
-	border-color: #2a2f37;
+	background: linear-gradient(90deg, #6d5700, #8a6f00 25%, #8a6f00 75%, #6d5700);
 }
 
 /* Icon buttons: a raised dark surface instead of bright white. */
@@ -189,10 +242,11 @@ h3 {
 }
 
 h1 {
-	/* Chunky yellow highlight behind the page title */
+	/* Yellow highlight behind the page title — borderless now, floating on soft
+	   elevation instead of sitting in a black frame. */
 	display: inline-block;
 	background: var(--yellow);
-	border: 3px solid var(--ink);
+	color: var(--on-yellow);
 	border-radius: 10px;
 	padding: 0.15em 0.5em;
 	box-shadow: var(--pop-shadow);
@@ -220,7 +274,7 @@ h1.page-title {
    themes, so its text is always dark. */
 ::selection {
 	background: var(--yellow);
-	color: #14171c;
+	color: var(--on-yellow);
 }
 
 /* ------------------------------------------------------------ Buttons */
@@ -242,48 +296,49 @@ summary,
 	-webkit-tap-highlight-color: transparent;
 }
 
-/* Primary (was blue fill) → safety-yellow sticker button. Text/border pinned dark
-   (#14171c) rather than var(--ink): yellow is light in both themes, so its text
-   must always be dark — var(--ink) would flip light-on-yellow in dark mode. */
+/* Primary (was blue fill) → safety-yellow button. Borderless: the fill is the
+   emphasis, with soft elevation and a gentle lift on hover instead of the old
+   black frame + hard offset shadow. Text pinned dark (#14171c) rather than
+   var(--ink): yellow is light in both themes, so its text must always be dark. */
 button[style*='background: #0969da'],
 a[style*='background: #0969da'] {
 	background: var(--yellow) !important;
 	color: #14171c !important;
-	border: 2.5px solid #14171c !important;
-	box-shadow: var(--pop-shadow);
-	font-weight: 800 !important;
-	text-transform: uppercase;
-	letter-spacing: 0.01em;
+	border: none !important;
+	box-shadow: var(--pop-shadow-sm);
+	font-weight: 700 !important;
 	transition:
-		transform 0.05s ease,
-		box-shadow 0.05s ease;
+		transform 0.12s ease,
+		box-shadow 0.12s ease,
+		background 0.12s ease;
 }
 button[style*='background: #0969da']:hover,
 a[style*='background: #0969da']:hover {
-	transform: translate(-1px, -1px);
-	box-shadow: var(--pop-shadow-lg);
+	background: var(--yellow-deep) !important;
+	transform: translateY(-1px);
+	box-shadow: var(--pop-shadow);
 }
 button[style*='background: #0969da']:active,
 a[style*='background: #0969da']:active {
-	transform: translate(2px, 2px);
+	transform: translateY(0);
 	box-shadow: none;
 }
 
-/* Secondary / pill (light-gray fill) → surface with a bold outline. Surface + line
-   + shadow all come from tokens, so dark mode is automatic. */
+/* Secondary / pill (light-gray fill) → surface with a hairline outline. Surface +
+   line + shadow all come from tokens, so dark mode is automatic. */
 button[style*='background: #f6f8fa'],
 a[style*='background: #f6f8fa'] {
 	background: var(--surface) !important;
 	color: var(--ink) !important;
-	border: 2px solid var(--pop-line) !important;
-	font-weight: 700 !important;
+	border: 1px solid var(--pop-line) !important;
+	font-weight: 600 !important;
 	box-shadow: var(--pop-shadow-sm);
 }
 
 /* Outline / ghost buttons that only borrow the blue for their border+text */
 button[style*='border: 1px solid #0969da'],
 a[style*='border: 1px solid #0969da'] {
-	border: 2px solid var(--pop-line) !important;
+	border: 1px solid var(--pop-line) !important;
 }
 
 /* ------------------------------------------------------------ Icon buttons */
@@ -352,14 +407,14 @@ a[style*='border: 1px solid #0969da'] {
 
 article[style*='#d0d7de'],
 section[style*='#d0d7de'] {
-	border: 3px solid var(--pop-line) !important;
-	box-shadow: var(--pop-shadow);
+	border: 1px solid var(--line) !important;
+	box-shadow: var(--card-shadow);
 	background: var(--surface);
 }
 
-/* Any remaining hairline-gray bordered block gets the bold outline */
+/* Any remaining hairline-gray bordered block keeps a clean hairline. */
 div[style*='border: 1px solid #d0d7de'] {
-	border: 2px solid var(--pop-line) !important;
+	border: 1px solid var(--pop-line) !important;
 }
 
 /* ------------------------------------------------------------ Inputs */
@@ -367,16 +422,29 @@ div[style*='border: 1px solid #d0d7de'] {
 input[style*='#d0d7de'],
 select[style*='#d0d7de'],
 textarea[style*='#d0d7de'] {
-	border: 2px solid var(--pop-line) !important;
+	border: 1px solid var(--field-border) !important;
 	background: var(--field-bg) !important;
 	color: var(--fg);
-	font-weight: 600;
 }
+/* Base polish for every text field: smooth focus transitions everywhere, without
+   touching per-component sizing or radius. */
+input,
+select,
+textarea {
+	transition:
+		border-color 0.15s ease,
+		box-shadow 0.15s ease,
+		background 0.15s ease;
+}
+/* The app-wide focus treatment: the brand yellow as a soft ring + a live border,
+   replacing the hard outline. Element-level (0,1,1), so any component rule keyed
+   on a class still wins — those are being aligned to the same recipe. */
 input:focus,
 select:focus,
 textarea:focus {
-	outline: 3px solid var(--yellow);
-	outline-offset: 1px;
+	outline: none;
+	border-color: var(--yellow-deep);
+	box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
 }
 
 /* ------------------------------------------------------------ Links & chips */
@@ -386,29 +454,29 @@ a[style*='color: #0969da']:not([style*='background']) {
 	color: var(--ink) !important;
 	text-decoration: underline;
 	text-decoration-color: var(--yellow-deep);
-	text-decoration-thickness: 3px;
-	text-underline-offset: 2px;
-	font-weight: 800;
+	text-decoration-thickness: 2px;
+	text-underline-offset: 3px;
+	font-weight: 700;
 }
 
-/* Tag chips (light-blue) → yellow. Text pinned dark (yellow is light in both themes). */
+/* Tag chips (light-blue) → yellow. Text pinned dark (yellow is light in both
+   themes); no border — the fill carries it. */
 span[style*='background: #ddf4ff'] {
 	background: var(--yellow) !important;
 	color: #14171c !important;
-	border: 1.5px solid #14171c;
+	border: none;
 	font-weight: 700;
 }
 
 /* ------------------------------------------------------------ Dialogs */
 
 dialog {
-	border: 3px solid var(--pop-line) !important;
-	box-shadow: 10px 10px 0 var(--pop-line) !important;
+	border: 1px solid var(--line) !important;
+	box-shadow: 0 18px 50px rgba(27, 31, 36, 0.22) !important;
 	background: var(--surface);
 	color: var(--fg);
 }
 :root[data-theme='dark'] dialog {
-	/* The hard offset shadow reads as a grey block in dark — soften it. */
 	box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65) !important;
 }
 dialog::backdrop {
@@ -435,8 +503,10 @@ dialog::backdrop {
 	right: 0;
 	top: calc(100% + 8px);
 	z-index: 100;
-	width: 300px;
-	max-width: 82vw;
+	/* Wide enough for the composer's normalized pane — 300px squeezed the subject
+	   line and made the body feel like a chat input rather than an email. */
+	width: 360px;
+	max-width: 86vw;
 	background: #f6f4fc;
 	border: 1px solid #cdbff0;
 	border-radius: 12px;
@@ -449,34 +519,66 @@ dialog::backdrop {
 	top: auto;
 	bottom: calc(100% + 8px);
 }
+/* The variant that carries a conversation above the composer. Wider because a
+   thread at 360px wraps every line twice, and capped because the dashboard's
+   popover must never grow past the viewport it is anchored in. */
+.contact-pop.wide {
+	width: 440px;
+	max-height: min(80vh, 34rem);
+	overflow-y: auto;
+}
+/* Dark mode used to paint this #20222e, which is LIGHTER than --surface (#1b1f26).
+   Everything inside it — the message bubbles above all — tints itself against
+   --surface, so every child landed darker than its own container and the whole
+   popover read as mud on mud. Using the same surface the children mix from puts
+   the tints back in the range they were designed for; the border and shadow are
+   what separate the popover from the page, which is their job anyway. */
 :root[data-theme='dark'] .contact-pop {
-	background: #20222e;
-	border-color: #3a3550;
-	box-shadow: 0 12px 34px rgba(0, 0, 0, 0.6);
+	background: var(--surface);
+	border-color: var(--line-strong);
+	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
 }
 /* Phones get a bottom sheet instead of a popover.
 
-   `.contact-pop.up` MUST be named here too. Media queries add no specificity, so
-   this block is (0,1,0) while `.contact-pop.up` above is (0,2,0) — without it the
-   `.up` variant keeps its `bottom: calc(100% + 8px)`, and once `position: fixed`
-   applies that resolves against the viewport, parking the sheet a full screen
-   above the top edge. The scrim is its own fixed element, so the symptom is a
-   backdrop with nothing on it. */
+   `.contact-pop.up` and `.contact-pop.wide` MUST be named here too. Media queries
+   add no specificity, so this block is (0,1,0) while those are (0,2,0) — without
+   it the `.up` variant keeps its `bottom: calc(100% + 8px)`, and once
+   `position: fixed` applies that resolves against the viewport, parking the sheet
+   a full screen above the top edge. The scrim is its own fixed element, so the
+   symptom is a backdrop with nothing on it. `.wide` fails the same way through
+   its `width`, which would survive the sheet's `width: auto` and leave it hanging
+   off the right edge. */
+/* Phones get a centred modal card, and one SIZE — a fixed card rather than one that
+   shrinks to a three-line "Call" tab and grows for the thread, which made switching
+   channels feel like the modal was jumping around. It floats in the middle of the
+   screen (not stretched up from the bottom edge) with a little margin all round, and
+   scrolls inside; short tabs just leave room below rather than resizing the card.
+
+   `.contact-pop.up` and `.contact-pop.wide` MUST be named here too. Media queries add
+   no specificity, so this block is (0,1,0) while those are (0,2,0) — without it the
+   `.up` variant keeps its `bottom: calc(100% + 8px)` and, once `position: fixed`
+   applies, parks the card a full screen above the top edge. */
 @media (max-width: 480px) {
 	.contact-pop,
-	.contact-pop.up {
+	.contact-pop.up,
+	.contact-pop.wide {
 		position: fixed;
-		/* Longhands, not `inset`: the value being corrected here is `bottom`, and
-		   spelling it out keeps the override obvious instead of buried in a
-		   shorthand that a reader has to expand in their head. */
-		top: auto;
-		right: 0.6rem;
-		bottom: 0.6rem;
-		left: 0.6rem;
+		/* Centred vertically: top edge at the middle, pulled back up by half its own
+		   height. Longhands over `inset` so the `bottom` being corrected stays plain. */
+		top: 50%;
+		bottom: auto;
+		right: 0.75rem;
+		left: 0.75rem;
+		transform: translateY(-50%);
 		width: auto;
 		max-width: none;
-		max-height: 80vh;
+		height: 82vh;
+		max-height: 82vh;
+		/* Content stacks from the top; extra height stays empty rather than
+		   stretching the rows. */
+		align-content: start;
 		overflow-y: auto;
+		border-radius: 16px;
 	}
 }
 
@@ -506,17 +608,139 @@ dialog::backdrop {
 	text-overflow: ellipsis;
 }
 
-/* ------------------------------------------------------------ Hazard stripe */
+/* ---------------------------------------------------------------- Status pill
+   How a job or a record is doing. One shape, three tones, so the same state
+   reads the same on the orders list, the customer directory and the order
+   workspace — which it did not when each screen built its own from literals.
 
+   Tone names say what they MEAN, not what colour they are: a status can be
+   recoloured without every call site turning into a lie. */
+.status-pill {
+	display: inline-block;
+	border-radius: 999px;
+	padding: 0.15rem 0.65rem;
+	border: 1.5px solid;
+	font-size: 0.78rem;
+	font-weight: 700;
+	white-space: nowrap;
+}
+/* On track, or finished. */
+.status-pill.ok {
+	background: var(--ok-bg);
+	border-color: var(--ok-line);
+	color: var(--ok-fg);
+}
+/* Waiting on somebody — a quote out, a deposit due, a hold. */
+.status-pill.wait {
+	background: var(--wait-bg);
+	border-color: var(--wait-line);
+	color: var(--wait-fg);
+}
+/* Stopped: cancelled, failed, archived. */
+.status-pill.stop {
+	background: var(--stop-bg);
+	border-color: var(--stop-line);
+	color: var(--stop-fg);
+}
+
+/* --------------------------------------------------------- Overflow menu rows
+   A row inside a card's ⋯ menu. The orders list and the customer directory each
+   held this as the same 120-character inline-style string, copied byte for byte,
+   which is two places to edit and two places to forget. */
+.menu-item {
+	display: block;
+	width: 100%;
+	text-align: left;
+	padding: 0.55rem 0.8rem;
+	border: none;
+	background: none;
+	cursor: pointer;
+	font-size: 0.9rem;
+	color: inherit;
+	/* These menus mix <button> and <a>; without these two a link arrives
+	   underlined and in the wrong face, which is how the copies drifted. */
+	text-decoration: none;
+	font-family: inherit;
+}
+.menu-item:hover {
+	background: var(--surface-sunken);
+}
+/* The destructive row — always last, always fenced off from what precedes it. */
+.menu-item.danger {
+	color: var(--danger);
+	border-top: 1px solid var(--line);
+}
+
+/* ---------------------------------------------------------------- Text fields
+   The plain bordered input used inside cards and inline forms.
+
+   This was an inline `border: 1px solid #d0d7de`, duplicated in two files, which
+   the dark-theme layer above then had to intercept by matching on the literal
+   (`input[style*='#d0d7de']`). As a class it reads from the same field tokens as
+   everything else and needs no interception at all — one of the rules that hack
+   exists to serve, retired. Size and layout stay at the call site. */
+.field-input {
+	padding: 0.5rem;
+	border-radius: 8px;
+	border: 1px solid var(--field-border);
+	background: var(--field-bg);
+	color: var(--fg);
+	font-size: 1rem;
+	font-family: inherit;
+}
+
+/* ------------------------------------------------ Counts that want an answer
+   One treatment for "N customers are waiting on you", wherever it surfaces —
+   the nav's Orders link, the dashboard's waiting list, and the rows of the
+   orders list. These were three separate rules in three files, at three sizes,
+   in two different colours, which made one fact look like three unrelated ones.
+
+   The colour is the brand accent, not --danger. An unanswered message is the
+   work, not a fault: --danger is reserved for destructive actions and errors,
+   and spending it on a normal inbox count leaves nothing louder for the cases
+   that genuinely are alarming. See
+   docs/adr/0009-waiting-counts-use-the-accent-not-danger.md.
+
+   Add `.count-badge` and let the call site's own class carry only what is local
+   to it (margin against a nav label, a flex-shrink in a row). */
+.count-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.25rem;
+	min-width: 1.25rem;
+	padding: 0.1rem 0.5rem;
+	border-radius: 999px;
+	background: var(--yellow);
+	border: 1px solid var(--yellow-deep);
+	/* Never --ink: see the --on-yellow note at the top of this file. */
+	color: var(--on-yellow);
+	font-size: 0.72rem;
+	font-weight: 800;
+	line-height: 1.5;
+	white-space: nowrap;
+	/* Tabular figures so a count doesn't jitter its own pill as it ticks up. */
+	font-variant-numeric: tabular-nums;
+	/* The orders list renders its badge as a link to the job. */
+	text-decoration: none;
+	vertical-align: middle;
+}
+a.count-badge:hover {
+	background: var(--yellow-deep);
+}
+
+/* ------------------------------------------------------ Brand accent line
+   Formerly the yellow/black hazard stripe (10px of repeating diagonals framed in
+   black). Now a slim yellow rule — the brand color as an accent, not a costume.
+   The class name stays so the layout needs no edits. */
 .hazard {
-	height: 10px;
-	background: repeating-linear-gradient(
-		-45deg,
-		var(--yellow) 0,
-		var(--yellow) 16px,
-		var(--ink) 16px,
-		var(--ink) 32px
+	height: 3px;
+	background: linear-gradient(
+		90deg,
+		var(--yellow-deep),
+		var(--yellow) 25%,
+		var(--yellow) 75%,
+		var(--yellow-deep)
 	);
-	border-top: 2px solid var(--ink);
-	border-bottom: 2px solid var(--ink);
+	border: none;
 }

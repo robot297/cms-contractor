@@ -2,12 +2,28 @@ import { fail, redirect } from '@sveltejs/kit';
 import { APIError } from 'better-auth/api';
 import { auth } from '$lib/server/auth';
 import { isDemoEnabled, prepareDemoSession } from '$lib/server/demo.server';
+import { isEmailConfigured } from '$lib/server/email.server';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) redirect(302, '/');
 	return { demoEnabled: isDemoEnabled() };
 };
+
+/**
+ * Enough structure to be an address someone can receive mail at: one @, no
+ * whitespace, a dot in the domain. The real proof is the verification link —
+ * this only refuses obvious typos before an email gets sent to them.
+ */
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** Better Auth's "signed in before verifying" refusal, by code not message text. */
+function isUnverifiedError(error: unknown): boolean {
+	return (
+		error instanceof APIError &&
+		(error.body as { code?: string } | undefined)?.code === 'EMAIL_NOT_VERIFIED'
+	);
+}
 
 export const actions: Actions = {
 	demo: async (event) => {
@@ -35,6 +51,15 @@ export const actions: Actions = {
 		try {
 			await auth.api.signInEmail({ body: { email, password }, headers: event.request.headers });
 		} catch (error) {
+			// An unverified address is a state, not a mistake — surface it with the
+			// way through (a resend button) rather than a bare refusal.
+			if (isUnverifiedError(error))
+				return fail(403, {
+					mode: 'signIn',
+					unverified: true,
+					email,
+					message: 'That email address has not been verified yet.'
+				});
 			if (error instanceof APIError) return fail(400, { mode: 'signIn', message: error.message });
 			console.error('[login] signIn failed:', error);
 			return fail(500, {
@@ -47,9 +72,14 @@ export const actions: Actions = {
 
 	signUp: async (event) => {
 		const form = await event.request.formData();
-		const email = form.get('email')?.toString() ?? '';
+		const email = (form.get('email')?.toString() ?? '').trim();
 		const password = form.get('password')?.toString() ?? '';
-		const name = form.get('name')?.toString() ?? '';
+		const name = (form.get('name')?.toString() ?? '').trim();
+		if (!EMAIL_SHAPE.test(email))
+			return fail(400, {
+				mode: 'signUp',
+				message: 'Enter a real email address — a verification link will be sent to it.'
+			});
 		try {
 			// Self-signup on the login page is always a contractor; customers are
 			// created by contractors and join via an invite link.
@@ -65,7 +95,30 @@ export const actions: Actions = {
 				message: `Unexpected error: ${(error as Error)?.message ?? error}`
 			});
 		}
+		// With verification enforced there is no session yet — the account exists
+		// but stays locked until the emailed link is clicked. Tell them where to
+		// look instead of bouncing them to a login that would only refuse them.
+		if (isEmailConfigured()) return { mode: 'signUp' as const, verificationSent: true, email };
 		redirect(302, '/');
+	},
+
+	/** Re-send the verification link — offered when an unverified sign-in is refused. */
+	resendVerification: async (event) => {
+		const form = await event.request.formData();
+		const email = (form.get('email')?.toString() ?? '').trim();
+		if (!EMAIL_SHAPE.test(email))
+			return fail(400, { mode: 'signIn', message: 'Enter the email address you signed up with.' });
+		try {
+			await auth.api.sendVerificationEmail({
+				body: { email, callbackURL: '/' },
+				headers: event.request.headers
+			});
+		} catch (error) {
+			if (error instanceof APIError) return fail(400, { mode: 'signIn', message: error.message });
+			console.error('[login] resendVerification failed:', error);
+			return fail(500, { mode: 'signIn', message: 'Could not send the verification email.' });
+		}
+		return { mode: 'signIn' as const, verificationSent: true, email };
 	},
 
 	signInGithub: async (event) => {

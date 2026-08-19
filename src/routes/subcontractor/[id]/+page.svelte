@@ -1,16 +1,25 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { formatBytes, MAX_ATTACHMENT_BYTES } from '$lib/crm';
+	import { resolve } from '$app/paths';
+	import DocumentList from '$lib/DocumentList.svelte';
+	import DocumentViewer from '$lib/DocumentViewer.svelte';
+	import { formatBytes, MAX_DOCUMENT_BYTES, type DocumentRef } from '$lib/crm';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	const view = $derived(data.view);
+	/**
+	 * The document open in the shared viewer, or null. The same component the
+	 * customer portal and the contractor workspace use — a subcontractor opening a
+	 * site photo should not be a different experience from anyone else opening one.
+	 */
+	let preview = $state<DocumentRef | null>(null);
 </script>
 
 <svelte:head><title>{view.projectName ?? 'Job'} · Subcontractor</title></svelte:head>
 
 <div class="wrap">
-	<a class="back" href="/subcontractor">← My jobs</a>
+	<a class="back" href={resolve('/subcontractor')}>← My jobs</a>
 
 	<header class="head">
 		<div>
@@ -32,8 +41,14 @@
 				<div class="rows">
 					<div><span class="k">Name:</span> {view.customer.name}</div>
 					<div><span class="k">Email:</span> {view.customer.email}</div>
-					{#if view.customer.phone}<div><span class="k">Phone:</span> {view.customer.phone}</div>{/if}
-					{#if view.customer.address}<div><span class="k">Address:</span> {view.customer.address}</div>{/if}
+					{#if view.customer.phone}<div>
+							<span class="k">Phone:</span>
+							{view.customer.phone}
+						</div>{/if}
+					{#if view.customer.address}<div>
+							<span class="k">Address:</span>
+							{view.customer.address}
+						</div>{/if}
 				</div>
 			{:else}
 				<p class="muted">No customer linked to this job.</p>
@@ -69,6 +84,16 @@
 		{/if}
 	</section>
 
+	<!-- Documents: both Tiers read. Only the upload control below is Tier-gated. -->
+	<section class="card">
+		<h2>Documents</h2>
+		<DocumentList
+			documents={data.documents}
+			empty="No documents on this job yet."
+			onopen={(d) => (preview = d)}
+		/>
+	</section>
+
 	<!-- Write paths: Trusted only. Guest portal offers no write affordances. -->
 	{#if view.canWrite}
 		<section class="card">
@@ -76,28 +101,44 @@
 			<form
 				method="POST"
 				action="?/addNote"
-				use:enhance={() => async ({ update }) => update()}
+				use:enhance={() =>
+					async ({ update }) =>
+						update()}
 			>
-				<textarea name="note" rows="2" placeholder="Add a note for the contractor…" required></textarea>
+				<textarea name="note" rows="2" placeholder="Add a note for the contractor…" required
+				></textarea>
 				<button class="btn primary" type="submit">Add note</button>
 			</form>
 
-			<h2 style="margin-top:1rem;">Upload a job photo</h2>
+			<h2 style="margin-top:1rem;">Upload photos and files</h2>
 			<form
 				method="POST"
-				action="?/uploadPhoto"
+				action="?/uploadDocuments"
 				enctype="multipart/form-data"
-				use:enhance={() => async ({ update }) => update()}
+				use:enhance={() =>
+					async ({ update }) =>
+						update()}
 			>
-				<input type="file" name="file" accept="image/*,application/pdf" required />
+				<!-- Several at once, and one refusal never costs the rest of the batch. -->
+				<input
+					type="file"
+					name="file"
+					multiple
+					accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+					required
+				/>
 				<button class="btn" type="submit">Upload</button>
-				<span class="muted small">Max {formatBytes(MAX_ATTACHMENT_BYTES)}</span>
+				<span class="muted small"
+					>Images and PDFs, up to {formatBytes(MAX_DOCUMENT_BYTES)} each</span
+				>
 			</form>
 		</section>
 	{:else}
 		<p class="muted read-only">Read-only access — Guest Contractors can’t post updates.</p>
 	{/if}
 </div>
+
+<DocumentViewer bind:open={preview} />
 
 <style>
 	.wrap {
@@ -131,17 +172,22 @@
 		font-size: 0.72rem;
 		font-weight: 800;
 		text-transform: uppercase;
-		background: #ffcc00;
-		border: 2px solid #111;
+		background: var(--yellow);
+		/* Stated, not inherited: the pill's fill is light in both themes, so it must
+		   not pick up the shell's text colour, which flips to near-white in dark. */
+		color: var(--on-yellow);
+		border: none;
 		border-radius: 999px;
 		padding: 0.15rem 0.6rem;
 		white-space: nowrap;
 	}
 	.card {
-		border: 3px solid #111;
+		border: 1px solid #e2e6ea;
 		border-radius: 14px;
 		background: #fff;
-		box-shadow: 5px 5px 0 #111;
+		box-shadow:
+			0 1px 2px rgba(27, 31, 36, 0.06),
+			0 4px 14px rgba(27, 31, 36, 0.08);
 		padding: 0.9rem;
 	}
 	.card h2 {
@@ -178,7 +224,7 @@
 		gap: 0.6rem;
 	}
 	.timeline li {
-		border-left: 3px solid #111;
+		border-left: 3px solid #ffcc00;
 		padding: 0.1rem 0 0.1rem 0.7rem;
 	}
 	.t-top {
@@ -199,19 +245,22 @@
 	textarea,
 	input[type='file'] {
 		width: 100%;
+		box-sizing: border-box;
 		padding: 0.5rem;
-		border: 2px solid #111;
-		border-radius: 8px;
+		border: 1px solid #dcdfe4;
+		background: #f9fafb;
+		border-radius: 10px;
 		margin-bottom: 0.5rem;
 		font-size: 0.95rem;
 	}
 	.btn {
 		padding: 0.5rem 0.9rem;
-		border: 2px solid #111;
-		border-radius: 8px;
+		border: 1px solid #d0d7de;
+		border-radius: 10px;
 		background: #fff;
-		font-weight: 800;
+		font-weight: 700;
 		cursor: pointer;
+		box-shadow: 0 1px 2px rgba(27, 31, 36, 0.08);
 	}
 	.btn.primary {
 		background: #0969da;

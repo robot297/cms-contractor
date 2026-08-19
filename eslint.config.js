@@ -10,6 +10,12 @@ const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
 export default defineConfig(
 	includeIgnoreFile(gitignorePath),
+	{
+		// varlock regenerates env.d.ts on every dev/build from .env.schema, and emits
+		// it with its own `@ts-nocheck`. Linting a generated file only ever produces
+		// errors nobody can act on — the fix would be overwritten by the next build.
+		ignores: ['env.d.ts']
+	},
 	js.configs.recommended,
 	ts.configs.recommended,
 	svelte.configs.recommended,

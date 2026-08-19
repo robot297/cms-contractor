@@ -1,22 +1,14 @@
-import { error } from '@sveltejs/kit';
-import { getAttachment } from '$lib/server/crm.server';
+import { redirect } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-/** Serve an attachment's bytes, scoped to the owning contractor and order. */
-export const GET: RequestHandler = async ({ locals, params }) => {
-	if (!locals.user || locals.user.role !== 'contractor') error(403);
-	const att = await getAttachment(params.attachmentId, locals.user.id);
-	if (!att || att.orderId !== params.id) error(404, 'Attachment not found');
-
-	// Quote-safe filename for the Content-Disposition header.
-	const safeName = att.filename.replace(/["\\]/g, '');
-	// Wrap the Buffer in a plain Uint8Array so it's a valid Response body type.
-	return new Response(new Uint8Array(att.data), {
-		headers: {
-			'Content-Type': att.mimeType,
-			'Content-Length': String(att.size),
-			'Content-Disposition': `inline; filename="${safeName}"`,
-			'Cache-Control': 'private, max-age=3600'
-		}
-	});
+/**
+ * Superseded by `/documents/[documentId]`, which authorizes every role through
+ * one rule instead of each surface carrying its own copy.
+ *
+ * Kept as a redirect for one release: these URLs are in browser history and in
+ * any tab a contractor left open. 307 rather than 301 so nothing caches a
+ * permanent mapping we intend to delete — see tasks 7.3.
+ */
+export const GET: RequestHandler = ({ params, url }) => {
+	redirect(307, `/documents/${params.attachmentId}${url.search}`);
 };

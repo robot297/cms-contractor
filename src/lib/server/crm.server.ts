@@ -1,33 +1,32 @@
-import { and, desc, eq, isNull, ne } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, ne } from 'drizzle-orm';
 import { db } from './db';
-import {
-	attachment,
-	customer,
-	customerInvite,
-	notification,
-	order,
-	timelineEntry
-} from './db/schema';
+import { customer, customerInvite, notification, order, timelineEntry, user } from './db/schema';
 import {
 	defaultFollowUp,
+	customerStateLabel,
 	getVisibleCustomerState,
+	isCustomerActionState,
 	isActiveState,
 	isCustomerLinked,
 	isFollowUpDue,
 	isValidAvatarDataUrl,
+	formatCents,
 	normalizeEmail,
 	normalizePreferredContact,
+	paymentMethodLabel,
 	snoozeDate,
 	type ContractorOrderState,
 	type PreferredContact,
-	type SnoozePreset,
-	type TimelineKind
+	type SnoozePreset
 } from '$lib/crm';
 // Billing gate. Every contractor-initiated mutation below calls one of these
 // before touching the database. It is deliberately NOT a single guard on the
 // /contractor layout: a lapsed contractor must still be able to read everything
 // they built. See docs/adr/0005-lapsing-never-reaches-customers.md.
-import { assertCanCreate, assertCanWrite } from './billing.server';
+import { assertCanCreate, assertCanWrite, isBillingError } from './billing.server';
+// A new order's first follow-up lands at the contractor's own interval, so
+// creating one has to read their settings.
+import { getContractorSettings } from './templates.server';
 
 /** How long a customer invite / magic link stays valid. */
 const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -43,8 +42,12 @@ export type ContractorOrderView = OrderRow & {
 	customerEmail: string;
 	customerPhone: string | null;
 	customerAddress: string | null;
+	customerCity: string | null;
+	customerState: string | null;
 	customerPreferredContact: PreferredContact;
 	customerVisibleState: string;
+	/** Whether a portal reply can reach them — see the note in toContractorView. */
+	customerLinked: boolean;
 	followUpDue: boolean;
 };
 
@@ -75,8 +78,14 @@ function toContractorView(row: OrderRow, cust: CustomerRow | null): ContractorOr
 		customerEmail: cust?.email ?? '',
 		customerPhone: cust?.phone ?? null,
 		customerAddress: cust?.address ?? null,
+		customerCity: cust?.city ?? null,
+		customerState: cust?.state ?? null,
 		customerPreferredContact: normalizePreferredContact(cust?.preferredContact),
 		customerVisibleState: getVisibleCustomerState(row.state as ContractorOrderState),
+		// Whether there is a portal to deliver a reply to. A customer with no login
+		// behind them can still be emailed or called — they just cannot be answered
+		// in the thread, and a surface offering that would be lying.
+		customerLinked: cust?.userId != null,
 		followUpDue: isFollowUpDue(row.nextFollowUpAt)
 	};
 }
@@ -109,9 +118,12 @@ export type CustomerDetailsInput = {
 	name: string;
 	email: string;
 	phone?: string | null;
+	/** Street line only; city/state/postalCode are captured separately. */
 	address?: string | null;
+	city?: string | null;
+	state?: string | null;
+	postalCode?: string | null;
 	notes?: string | null;
-	tags?: string[];
 	preferredContact?: PreferredContact;
 };
 
@@ -136,12 +148,68 @@ export async function createCustomer(
 			email,
 			phone: input.phone ?? null,
 			address: input.address ?? null,
+			city: input.city ?? null,
+			state: input.state ?? null,
+			postalCode: input.postalCode ?? null,
 			notes: input.notes ?? null,
-			tags: input.tags ?? [],
 			preferredContact: input.preferredContact ?? 'email'
 		})
 		.returning();
 	return row;
+}
+
+/** What a bulk import did, per contact and in total. */
+export type ImportSummary = {
+	imported: number;
+	/** Contacts already in the directory under the same email. */
+	duplicates: number;
+	/** Contacts that couldn't be created, and why — named so they can be found. */
+	rejected: { name: string; message: string }[];
+	/**
+	 * Set when a trial limit stopped the run partway. Everything before it was
+	 * still created: an import that rolled back forty good contacts because the
+	 * forty-first hit a cap would be a worse outcome than a partial one it
+	 * reports honestly.
+	 */
+	stoppedAt: string | null;
+};
+
+/**
+ * Create many customers in one go, from the contact-import review list.
+ *
+ * Deliberately not a transaction, and deliberately tolerant. The input is
+ * somebody's address book: a few entries in it will be malformed, already
+ * present, or beyond what a trial allows, and none of those is a reason to
+ * refuse the rest. Every contact is attempted on its own and the outcome is
+ * reported back per row.
+ */
+export async function importCustomers(
+	contractorId: string,
+	contacts: CustomerDetailsInput[]
+): Promise<ImportSummary> {
+	const summary: ImportSummary = { imported: 0, duplicates: 0, rejected: [], stoppedAt: null };
+	for (const contact of contacts) {
+		try {
+			await createCustomer(contractorId, contact);
+			summary.imported++;
+		} catch (err) {
+			if (err instanceof DuplicateCustomerEmailError) {
+				summary.duplicates++;
+				continue;
+			}
+			// A billing refusal applies to every remaining contact too, so stop
+			// rather than grinding through the rest collecting the same message.
+			if (isBillingError(err)) {
+				summary.stoppedAt = err.message;
+				break;
+			}
+			summary.rejected.push({
+				name: contact.name,
+				message: err instanceof Error ? err.message : 'Could not be saved'
+			});
+		}
+	}
+	return summary;
 }
 
 export async function editCustomer(
@@ -175,8 +243,10 @@ export async function editCustomer(
 			email: emailChanged ? email : current.email,
 			phone: input.phone ?? null,
 			address: input.address ?? null,
+			city: input.city ?? null,
+			state: input.state ?? null,
+			postalCode: input.postalCode ?? null,
 			notes: input.notes ?? null,
-			tags: input.tags ?? [],
 			preferredContact: input.preferredContact ?? 'email'
 		})
 		.where(eq(customer.id, id))
@@ -327,7 +397,10 @@ export async function createOrder(
 	input: CreateOrderInput
 ): Promise<OrderRow> {
 	await assertCanCreate(contractorId, 'order');
-	const owned = await ownedCustomer(contractorId, input.customerId);
+	const [owned, settings] = await Promise.all([
+		ownedCustomer(contractorId, input.customerId),
+		getContractorSettings(contractorId)
+	]);
 	if (!owned) throw new Error('Customer not found');
 	const [row] = await db
 		.insert(order)
@@ -338,8 +411,8 @@ export async function createOrder(
 			projectType: input.projectType ?? null,
 			state: input.state ?? 'Inquiry',
 			tags: input.tags ?? [],
-			// New orders get a default follow-up 3 days out.
-			nextFollowUpAt: defaultFollowUp()
+			// New orders get a follow-up at the contractor's default interval.
+			nextFollowUpAt: defaultFollowUp(settings.followUpDays)
 		})
 		.returning();
 
@@ -368,6 +441,24 @@ export async function setOrderTags(
 	const owned = await contractorOrder(orderId, contractorId);
 	if (!owned) throw new Error('Order not found');
 	await db.update(order).set({ tags }).where(eq(order.id, orderId));
+
+	// Log what actually changed rather than the fact that the picker was saved —
+	// closing it without touching anything shouldn't leave a trace in the history.
+	const before = owned.tags ?? [];
+	const added = tags.filter((tag) => !before.includes(tag));
+	const removed = before.filter((tag) => !tags.includes(tag));
+	if (added.length === 0 && removed.length === 0) return;
+	const parts: string[] = [];
+	if (added.length > 0) parts.push(`Added ${added.join(', ')}`);
+	if (removed.length > 0) parts.push(`Removed ${removed.join(', ')}`);
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'note',
+		title: 'Tags updated',
+		detail: parts.join(' · '),
+		authorRole: 'contractor',
+		internal: true
+	});
 }
 
 /** Set (or clear, with null) an order's next follow-up date. */
@@ -380,6 +471,39 @@ export async function setFollowUp(
 	const existing = await contractorOrder(orderId, contractorId);
 	if (!existing) throw new Error('Order not found');
 	await db.update(order).set({ nextFollowUpAt: date }).where(eq(order.id, orderId));
+}
+
+/**
+ * Push an order's follow-up out by the contractor's own cadence, because they
+ * have just been in touch with the customer.
+ *
+ * The point of a follow-up is "nobody has spoken to this person lately". The
+ * moment somebody does, the reminder has served its purpose and asking for it
+ * again tomorrow is noise — so every path that represents the contractor
+ * communicating (a status update, an email we sent, a portal reply) ends here.
+ *
+ * Unconditional, not "only if the new date is later". A contractor who set a
+ * date for tomorrow and then emailed the customer today has answered the thing
+ * they were reminding themselves to do; keeping the earlier date would chase
+ * them for a conversation that already happened. Their own date is one click
+ * away in the follow-up panel if they meant it as something else.
+ *
+ * Quiet by design: it never throws. A follow-up failing to move is not a reason
+ * to fail the send that has already gone out.
+ */
+export async function bumpFollowUpAfterContact(
+	orderId: string,
+	contractorId: string
+): Promise<void> {
+	try {
+		const settings = await getContractorSettings(contractorId);
+		await db
+			.update(order)
+			.set({ nextFollowUpAt: defaultFollowUp(settings.followUpDays) })
+			.where(and(eq(order.id, orderId), eq(order.contractorId, contractorId)));
+	} catch (err) {
+		console.warn(`[follow-up] could not reschedule order ${orderId}:`, err);
+	}
 }
 
 /** Set or clear (null) an order's construction icon. */
@@ -474,6 +598,140 @@ export async function updateOrderState(
 			internal: true
 		});
 	}
+
+	// A status change is an update the customer sees, so it counts as being in
+	// touch. An internal note alone does not — that is the contractor talking to
+	// themselves, and it should not silence a reminder to call someone.
+	if (newState !== existing.state) await bumpFollowUpAfterContact(orderId, contractorId);
+}
+
+/** Notify a linked customer (no-op when the order has no linked portal account). */
+async function notifyLinkedCustomer(
+	customerId: string | null,
+	orderId: string,
+	title: string,
+	priority: 'standard' | 'high'
+): Promise<void> {
+	if (!customerId) return;
+	const [cust] = await db.select().from(customer).where(eq(customer.id, customerId)).limit(1);
+	if (cust?.userId) await createNotification({ userId: cust.userId, orderId, title, priority });
+}
+
+/**
+ * Close an order out as complete, recording the final invoice and payment.
+ *
+ * The app RECORDS money here but never processes it (ADR-0010): the contractor
+ * keys in the invoice total and how the customer paid. The figures land on the
+ * order (customer-visible on the portal) and on the timeline, and the customer is
+ * notified. Cents in, whole cents stored.
+ */
+export async function completeOrder(
+	orderId: string,
+	contractorId: string,
+	opts: {
+		amountCents: number | null;
+		notes: string | null;
+		paymentMethod: string | null;
+		markPaid: boolean;
+	}
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+
+	const notes = opts.notes?.trim() || null;
+	await db
+		.update(order)
+		.set({
+			state: 'Work Complete',
+			finalAmountCents: opts.amountCents,
+			finalNotes: notes,
+			paymentMethod: opts.markPaid ? opts.paymentMethod : null,
+			paidAt: opts.markPaid ? new Date() : null
+		})
+		.where(eq(order.id, orderId));
+
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'milestone',
+		title: 'Work Complete',
+		detail:
+			existing.state === 'Work Complete'
+				? 'Order completed'
+				: `Status changed from ${existing.state} to Work Complete`,
+		authorRole: 'contractor',
+		internal: false
+	});
+	// The invoice figure and the payment record each get their own `invoice`-kind
+	// entry so the history shows the numbers rather than burying them in a note.
+	if (opts.amountCents != null) {
+		await db.insert(timelineEntry).values({
+			orderId,
+			kind: 'invoice',
+			title: 'Final invoice',
+			detail: `${formatCents(opts.amountCents)}${notes ? ` — ${notes}` : ''}`,
+			authorRole: 'contractor',
+			internal: false
+		});
+	}
+	if (opts.markPaid) {
+		const amount = opts.amountCents != null ? formatCents(opts.amountCents) : 'Final payment';
+		const via = opts.paymentMethod ? ` · ${paymentMethodLabel(opts.paymentMethod)}` : '';
+		await db.insert(timelineEntry).values({
+			orderId,
+			kind: 'invoice',
+			title: 'Payment received',
+			detail: `${amount}${via}`,
+			authorRole: 'contractor',
+			internal: false
+		});
+	}
+	await notifyLinkedCustomer(existing.customerId, orderId, 'Order update: Work Complete', 'high');
+	await bumpFollowUpAfterContact(orderId, contractorId);
+}
+
+/**
+ * Cancel an order. No invoice or payment — a cancellation just needs a reason
+ * (kept as an internal note) and, optionally, a heads-up to the customer.
+ */
+export async function cancelOrder(
+	orderId: string,
+	contractorId: string,
+	opts: { reason: string | null; notify: boolean }
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+
+	await db.update(order).set({ state: 'Work Cancelled' }).where(eq(order.id, orderId));
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'milestone',
+		title: 'Work Cancelled',
+		detail: `Status changed from ${existing.state} to Work Cancelled`,
+		authorRole: 'contractor',
+		internal: false
+	});
+	const reason = opts.reason?.trim();
+	if (reason) {
+		await db.insert(timelineEntry).values({
+			orderId,
+			kind: 'note',
+			title: 'Note · Work Cancelled',
+			detail: reason,
+			authorRole: 'contractor',
+			internal: true
+		});
+	}
+	if (opts.notify) {
+		await notifyLinkedCustomer(
+			existing.customerId,
+			orderId,
+			'Order update: Work Cancelled',
+			'high'
+		);
+	}
+	await bumpFollowUpAfterContact(orderId, contractorId);
 }
 
 export type OrderNote = { id: string; orderId: string; detail: string; createdAt: Date };
@@ -493,21 +751,18 @@ export async function listOrderNotes(contractorId: string): Promise<OrderNote[]>
 		.orderBy(desc(timelineEntry.createdAt));
 }
 
-/** Attachment listing shape — metadata only, never the blob. */
-export type AttachmentMeta = {
-	id: string;
-	orderId: string;
-	filename: string;
-	mimeType: string;
-	size: number;
-	createdAt: Date;
-};
-
+/**
+ * Full detail for one Order, minus its Documents.
+ *
+ * Documents deliberately do not live here: they are their own entity with their
+ * own authorization rule, and every surface reaches them through
+ * `documents.server.ts`. Returning them from the contractor's order query is how
+ * the contractor came to have a different set of rules from everyone else.
+ */
 export type OrderDetail = {
 	order: ContractorOrderView;
 	customer: CustomerRow | null;
 	timeline: TimelineRow[];
-	attachments: AttachmentMeta[];
 };
 
 /** Full detail for a single order the contractor owns, or null if not theirs. */
@@ -524,76 +779,52 @@ export async function getOrderDetail(
 		)
 		.limit(1);
 	if (!row) return null;
-	const [timeline, attachments] = await Promise.all([
-		db
-			.select()
-			.from(timelineEntry)
-			.where(eq(timelineEntry.orderId, orderId))
-			.orderBy(desc(timelineEntry.createdAt)),
-		listOrderAttachments(orderId, contractorId)
-	]);
+	const timeline = await db
+		.select()
+		.from(timelineEntry)
+		.where(eq(timelineEntry.orderId, orderId))
+		.orderBy(desc(timelineEntry.createdAt));
 	return {
 		order: toContractorView(row.order, row.customer),
 		customer: row.customer,
-		timeline,
-		attachments
+		timeline
 	};
 }
 
-/** Metadata for an order's attachments (no bytes), newest first. */
-export function listOrderAttachments(
-	orderId: string,
-	contractorId: string
-): Promise<AttachmentMeta[]> {
-	return db
-		.select({
-			id: attachment.id,
-			orderId: attachment.orderId,
-			filename: attachment.filename,
-			mimeType: attachment.mimeType,
-			size: attachment.size,
-			createdAt: attachment.createdAt
-		})
-		.from(attachment)
-		.where(and(eq(attachment.orderId, orderId), eq(attachment.contractorId, contractorId)))
-		.orderBy(desc(attachment.createdAt));
-}
-
-/** Store an uploaded file against an order the contractor owns. */
-export async function addAttachment(
+/**
+ * Record that a message was emailed to this order's customer.
+ *
+ * Only ever called after the provider has accepted the message, so the timeline
+ * says "we sent this" and means it — the ordering matters, because a false record
+ * of contact is worse than a missing one (a contractor acts on it). The `mailto:`
+ * fallback writes nothing at all: the app can't know whether the contractor
+ * actually pressed send in their own mail client.
+ *
+ * Not internal. The customer receiving the mail already knows it was sent, so
+ * hiding it from their portal would make their history disagree with their inbox.
+ *
+ * Returns false when the order isn't this contractor's — the caller has already
+ * sent the mail by then, so an unknown `orderId` costs the record, not the message.
+ */
+export async function recordEmailSent(
 	orderId: string,
 	contractorId: string,
-	file: { filename: string; mimeType: string; size: number; data: Buffer }
-): Promise<void> {
+	message: { customerName: string; subject: string }
+): Promise<boolean> {
 	await assertCanWrite(contractorId);
 	const owned = await contractorOrder(orderId, contractorId);
-	if (!owned) throw new Error('Order not found');
-	await db.insert(attachment).values({
+	if (!owned) return false;
+	await db.insert(timelineEntry).values({
 		orderId,
-		contractorId,
-		filename: file.filename,
-		mimeType: file.mimeType,
-		size: file.size,
-		data: file.data
+		kind: 'message',
+		title: `Emailed ${message.customerName}`.trim(),
+		detail: message.subject.trim(),
+		authorRole: 'contractor',
+		internal: false
 	});
-}
-
-/** Fetch one attachment (including its bytes) scoped to its owning contractor. */
-export async function getAttachment(id: string, contractorId: string) {
-	const [row] = await db
-		.select()
-		.from(attachment)
-		.where(and(eq(attachment.id, id), eq(attachment.contractorId, contractorId)))
-		.limit(1);
-	return row ?? null;
-}
-
-/** Delete an attachment owned by the contractor. */
-export async function deleteAttachment(id: string, contractorId: string): Promise<void> {
-	await assertCanWrite(contractorId);
-	await db
-		.delete(attachment)
-		.where(and(eq(attachment.id, id), eq(attachment.contractorId, contractorId)));
+	// They have been in touch — restart the clock.
+	await bumpFollowUpAfterContact(orderId, contractorId);
+	return true;
 }
 
 /** Append an internal, contractor-only note to an order's timeline. */
@@ -620,7 +851,7 @@ export async function addOrderNote(
 /**
  * Archive an order (soft delete). We never hard-delete the record; instead we
  * stamp `deletedAt`, and every read path filters those out so it disappears
- * from the app while the data (timeline, attachments) is preserved.
+ * from the app while the data (timeline, documents) is preserved.
  */
 export async function deleteOrder(orderId: string, contractorId: string): Promise<void> {
 	await assertCanWrite(contractorId);
@@ -631,92 +862,127 @@ export async function deleteOrder(orderId: string, contractorId: string): Promis
 
 // ------------------------------------------------------------------ Customer portal
 
-export type CustomerPortal = {
-	active:
-		| (OrderRow & { customerName: string; customerVisibleState: string; timeline: TimelineRow[] })
-		| null;
-	past: (OrderRow & { customerName: string; customerVisibleState: string })[];
+/**
+ * Who the portal is being rendered for.
+ *
+ * `user` is the real case: a signed-in customer, whose orders are read across
+ * EVERY customer record linked to their login — the same person working with two
+ * contractors holds two customer records and one User, and both sets of work is
+ * theirs to see.
+ *
+ * `customer` is the development view-as case, pinned to one customer record.
+ * Keeping it in the same type means the portal has exactly one read path rather
+ * than a real one and a debug one that can disagree.
+ */
+export type PortalSubject =
+	{ kind: 'user'; userId: string } | { kind: 'customer'; customerId: string };
+
+function portalScope(subject: PortalSubject) {
+	return subject.kind === 'user'
+		? eq(customer.userId, subject.userId)
+		: eq(customer.id, subject.customerId);
+}
+
+export type PortalOrderSummary = {
+	id: string;
+	projectName: string | null;
+	projectType: string | null;
+	/** Coarse stage, for the progress rail. */
+	customerVisibleState: string;
+	/** What the customer is waiting on, in words. See `customerStateLabel`. */
+	customerStateLabel: string;
+	contractorId: string;
+	updatedAt: Date;
+	active: boolean;
 };
 
-export async function getCustomerPortal(userId: string): Promise<CustomerPortal> {
+/** Every order this subject may see, newest first. Drives the portal's order rail. */
+export async function listPortalOrders(subject: PortalSubject): Promise<PortalOrderSummary[]> {
 	const rows = await db
-		.select()
+		.select({ order, customerName: customer.name })
 		.from(order)
 		.innerJoin(customer, eq(order.customerId, customer.id))
-		.where(and(eq(customer.userId, userId), isNull(order.deletedAt)))
+		.where(and(portalScope(subject), isNull(order.deletedAt)))
 		.orderBy(desc(order.updatedAt));
 
-	const active = rows.find((r) => isActiveState(r.order.state as ContractorOrderState)) ?? null;
-	const past = rows
-		.filter((r) => r.order.id !== active?.order.id)
-		.map((r) => ({
-			...r.order,
-			customerName: r.customer.name,
-			customerVisibleState: getVisibleCustomerState(r.order.state as ContractorOrderState)
-		}));
+	return rows.map((r) => ({
+		id: r.order.id,
+		projectName: r.order.projectName,
+		projectType: r.order.projectType,
+		customerVisibleState: getVisibleCustomerState(r.order.state as ContractorOrderState),
+		customerStateLabel: customerStateLabel(r.order.state as ContractorOrderState),
+		contractorId: r.order.contractorId,
+		updatedAt: r.order.updatedAt,
+		active: isActiveState(r.order.state as ContractorOrderState)
+	}));
+}
 
-	if (!active) return { active: null, past };
+export type PortalOrderDetail = OrderRow & {
+	customerName: string;
+	/** Coarse stage, for the progress rail. */
+	customerVisibleState: string;
+	/** What the customer is waiting on, in words. See `customerStateLabel`. */
+	customerStateLabel: string;
+	/** True when the ball is in the CUSTOMER's court — drives the headline's emphasis. */
+	customerMustAct: boolean;
+	contractorName: string;
+	/** Null while the customer has not accepted an invite. */
+	customerUserId: string | null;
+	timeline: TimelineRow[];
+};
+
+/**
+ * One order for the portal, or null when it is not this subject's to see.
+ *
+ * The timeline is filtered on `internal = false` in the QUERY, not in the
+ * component: an internal note must never reach the browser at all, and a
+ * template that forgets the filter is a leak rather than a rendering bug.
+ */
+export async function getPortalOrder(
+	subject: PortalSubject,
+	orderId: string
+): Promise<PortalOrderDetail | null> {
+	const [row] = await db
+		.select({
+			order,
+			customerName: customer.name,
+			customerUserId: customer.userId,
+			contractorName: user.name
+		})
+		.from(order)
+		.innerJoin(customer, eq(order.customerId, customer.id))
+		.innerJoin(user, eq(order.contractorId, user.id))
+		.where(and(eq(order.id, orderId), portalScope(subject), isNull(order.deletedAt)))
+		.limit(1);
+	if (!row) return null;
 
 	const timeline = await db
 		.select()
 		.from(timelineEntry)
-		.where(and(eq(timelineEntry.orderId, active.order.id), eq(timelineEntry.internal, false)))
+		.where(and(eq(timelineEntry.orderId, orderId), eq(timelineEntry.internal, false)))
 		.orderBy(desc(timelineEntry.createdAt));
 
 	return {
-		active: {
-			...active.order,
-			customerName: active.customer.name,
-			customerVisibleState: getVisibleCustomerState(active.order.state as ContractorOrderState),
-			timeline
-		},
-		past
+		...row.order,
+		customerName: row.customerName,
+		customerUserId: row.customerUserId,
+		contractorName: row.contractorName,
+		customerVisibleState: getVisibleCustomerState(row.order.state as ContractorOrderState),
+		customerStateLabel: customerStateLabel(row.order.state as ContractorOrderState),
+		customerMustAct: isCustomerActionState(row.order.state as ContractorOrderState),
+		timeline
 	};
 }
 
-const REQUEST_TITLES: Record<
-	'question' | 'service' | 'issue',
-	{ title: string; kind: TimelineKind }
-> = {
-	question: { title: 'Question from customer', kind: 'message' },
-	service: { title: 'Service request', kind: 'message' },
-	issue: { title: 'Issue reported', kind: 'issue' }
-};
-
-export async function addCustomerRequest(
-	orderId: string,
-	account: { id: string },
-	type: 'question' | 'service' | 'issue',
-	detail: string
-): Promise<void> {
-	const [row] = await db
-		.select({
-			contractorId: order.contractorId,
-			customerName: customer.name
-		})
-		.from(order)
-		.innerJoin(customer, eq(order.customerId, customer.id))
-		.where(and(eq(order.id, orderId), eq(customer.userId, account.id), isNull(order.deletedAt)))
-		.limit(1);
-	if (!row) throw new Error('Order not found');
-
-	const meta = REQUEST_TITLES[type];
-	await db.insert(timelineEntry).values({
-		orderId,
-		kind: meta.kind,
-		title: meta.title,
-		detail,
-		authorRole: 'customer'
-	});
-
-	await createNotification({
-		userId: row.contractorId,
-		orderId,
-		title: `${meta.title}: ${row.customerName}`,
-		detail,
-		priority: type === 'issue' ? 'high' : 'standard'
-	});
-}
+/**
+ * Documents on a portal Order live in `documents.server.ts`.
+ *
+ * They used to be listed, stored and served from here, with the contractor's
+ * copies of the same three operations sitting a few hundred lines up the file.
+ * That duplication is what the `order-documents` change removed: one entity, one
+ * upload path, one authorization rule, reached through a `Viewer` rather than
+ * through a per-surface subject.
+ */
 
 // ------------------------------------------------------------- Notifications
 
@@ -768,11 +1034,89 @@ export function listInvites(contractorId: string): Promise<InviteRow[]> {
 		.orderBy(desc(customerInvite.createdAt));
 }
 
+/**
+ * Where one customer stands with the portal, as one value.
+ *
+ * The order workspace and the directory were both deriving this from a customer
+ * row plus a list of invites, and disagreeing: the workspace only ever asked
+ * "are they linked", so it offered "Invite customer to portal" to somebody who
+ * had already been sent one — and pressing it sent a second link.
+ *
+ * `linked` beats everything: an accepted invite is history once the account
+ * exists. Otherwise the newest live invite decides, and one that has lapsed is
+ * reported as expired rather than pending, because "invite sent" is not a useful
+ * thing to read about a link that no longer opens.
+ */
+export type PortalStanding =
+	| { state: 'linked' }
+	| { state: 'none' }
+	| { state: 'pending'; inviteId: string; sentAt: Date; expiresAt: Date }
+	| { state: 'expired'; inviteId: string; sentAt: Date };
+
+export async function portalStanding(
+	contractorId: string,
+	customerId: string | null,
+	linked: boolean,
+	now: Date = new Date()
+): Promise<PortalStanding> {
+	if (linked) return { state: 'linked' };
+	if (!customerId) return { state: 'none' };
+	const [invite] = await db
+		.select()
+		.from(customerInvite)
+		.where(
+			and(
+				eq(customerInvite.contractorId, contractorId),
+				eq(customerInvite.customerId, customerId),
+				eq(customerInvite.status, 'pending')
+			)
+		)
+		.orderBy(desc(customerInvite.createdAt))
+		.limit(1);
+	if (!invite) return { state: 'none' };
+	return invite.expiresAt.getTime() > now.getTime()
+		? {
+				state: 'pending',
+				inviteId: invite.id,
+				sentAt: invite.createdAt,
+				expiresAt: invite.expiresAt
+			}
+		: { state: 'expired', inviteId: invite.id, sentAt: invite.createdAt };
+}
+
+/**
+ * Thrown when a still-valid invite already exists for a customer and a second one
+ * is attempted. One open invite at a time: a fresh invite can only go out once the
+ * current one has expired, so the customer never juggles two live links.
+ */
+export class InviteStillOpenError extends Error {
+	constructor(readonly expiresAt: Date) {
+		super('An invite is already open for this customer.');
+		this.name = 'InviteStillOpenError';
+	}
+}
+
 /** Send an invite to one of the contractor's own customers (directory-level). */
 export async function createInvite(contractorId: string, customerId: string): Promise<InviteRow> {
 	await assertCanWrite(contractorId);
 	const cust = await ownedCustomer(contractorId, customerId);
 	if (!cust) throw new Error('Customer not found');
+	// One open invite at a time: refuse a new one while a still-valid pending invite
+	// is out. Expiry is by time, not a status flip, so this checks expiresAt rather
+	// than trusting `status` alone.
+	const [open] = await db
+		.select({ expiresAt: customerInvite.expiresAt })
+		.from(customerInvite)
+		.where(
+			and(
+				eq(customerInvite.contractorId, contractorId),
+				eq(customerInvite.customerId, customerId),
+				eq(customerInvite.status, 'pending'),
+				gt(customerInvite.expiresAt, new Date())
+			)
+		)
+		.limit(1);
+	if (open) throw new InviteStillOpenError(open.expiresAt);
 	const [row] = await db
 		.insert(customerInvite)
 		.values({

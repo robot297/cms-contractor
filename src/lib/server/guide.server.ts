@@ -1,11 +1,13 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
+import { DEFAULT_SIGNATURE, STARTER_EMAIL_TEMPLATES } from '$lib/crm';
 import { db } from './db';
 import {
 	contractorSettings,
 	customer,
 	customerInvite,
+	emailTemplate,
 	order,
-	orderSubcontractor
+	subcontractor
 } from './db/schema';
 import { getContractorSettings } from './templates.server';
 
@@ -14,9 +16,8 @@ import { getContractorSettings } from './templates.server';
  *
  * Progress is never stored: each step asks the domain whether the thing actually
  * happened, so the checklist can't disagree with the account it describes. The
- * only persisted values are the contractor's continue-or-dismiss choice and the
- * acknowledgement of the follow-up step (which teaches rather than asks, because
- * every Order is born with a 3-day follow-up and would tick itself).
+ * only persisted values are the contractor's own choices — continue-or-dismiss,
+ * and which optional steps they waved away.
  *
  * See docs/adr/0004-derive-guide-progress-from-domain-data.md.
  */
@@ -29,7 +30,7 @@ export function isGuideState(value: string): value is GuideState {
 }
 
 export type GuideStep = {
-	id: 'customer' | 'order' | 'invite' | 'followUp' | 'subcontractor';
+	id: 'customer' | 'order' | 'invite' | 'templates' | 'subcontractor';
 	/** One line. If it needs a paragraph, it isn't a checklist item. */
 	title: string;
 	/**
@@ -45,6 +46,10 @@ export type GuideStep = {
 	cta?: string;
 	/** Blocked steps say why in a few words instead of linking nowhere. */
 	blockedBy?: string;
+	/** Offered a "Skip" — optional steps a contractor may never want. */
+	skippable?: boolean;
+	/** They took that offer. Resolved, but honestly labelled rather than ticked. */
+	skipped?: boolean;
 };
 
 export type Guide = {
@@ -64,39 +69,72 @@ async function exists(query: Promise<unknown | undefined>): Promise<boolean> {
 	return (await query) != null;
 }
 
+/**
+ * A template's content, flattened so a starter can be recognised by value.
+ *
+ * Joined on NUL because it is the one character that cannot appear in template
+ * text, so no combination of real fields can collide with the separator and make
+ * an edited template look like an untouched starter. Spelled as an escape rather
+ * than the raw byte: as a literal it is invisible in review and makes this whole
+ * module read as binary to grep — see src/lib/source-hygiene.test.ts.
+ */
+function wording(t: { name: string; subject: string; body: string }): string {
+	return `${t.name}\u0000${t.subject}\u0000${t.body}`;
+}
+
+const STARTER_WORDING = new Set(STARTER_EMAIL_TEMPLATES.map(wording));
+
 export async function loadGuide(contractorId: string): Promise<Guide> {
-	const [settings, hasCustomer, hasOrder, hasInvite, hasAssignment] = await Promise.all([
-		getContractorSettings(contractorId),
-		exists(
-			db.query.customer.findFirst({
-				where: eq(customer.contractorId, contractorId),
-				columns: { id: true }
+	const [settings, hasCustomer, hasOrder, hasInvite, hasSubcontractor, templates] =
+		await Promise.all([
+			getContractorSettings(contractorId),
+			exists(
+				db.query.customer.findFirst({
+					where: eq(customer.contractorId, contractorId),
+					columns: { id: true }
+				})
+			),
+			exists(
+				db.query.order.findFirst({
+					where: eq(order.contractorId, contractorId),
+					columns: { id: true }
+				})
+			),
+			exists(
+				db.query.customerInvite.findFirst({
+					where: eq(customerInvite.contractorId, contractorId),
+					columns: { id: true }
+				})
+			),
+			// Archived subs are out of the roster, so they don't count — the Guide
+			// describes the account as it is now.
+			exists(
+				db.query.subcontractor.findFirst({
+					where: and(
+						eq(subcontractor.contractorId, contractorId),
+						isNull(subcontractor.archivedAt)
+					),
+					columns: { id: true }
+				})
+			),
+			db.query.emailTemplate.findMany({
+				where: eq(emailTemplate.contractorId, contractorId),
+				columns: { name: true, subject: true, body: true }
 			})
-		),
-		exists(
-			db.query.order.findFirst({
-				where: eq(order.contractorId, contractorId),
-				columns: { id: true }
-			})
-		),
-		exists(
-			db.query.customerInvite.findFirst({
-				where: eq(customerInvite.contractorId, contractorId),
-				columns: { id: true }
-			})
-		),
-		// Assignments have no contractor column of their own — they're scoped through
-		// the Order they belong to.
-		db
-			.select({ orderId: orderSubcontractor.orderId })
-			.from(orderSubcontractor)
-			.innerJoin(order, eq(order.id, orderSubcontractor.orderId))
-			.where(eq(order.contractorId, contractorId))
-			.limit(1)
-			.then((rows) => rows.length > 0)
-	]);
+		]);
 
 	const state: GuideState = isGuideState(settings.guideState) ? settings.guideState : 'active';
+	const skipped = new Set(settings.guideSkippedSteps);
+
+	// "Has templates" would tick itself: every contractor is seeded with the starter
+	// set and the default signature (see `ensureStarterTemplates`). What is genuinely
+	// derivable — and what the step is actually asking for — is whether they've made
+	// the wording theirs: a template that isn't a starter verbatim, or a signature or
+	// business name of their own.
+	const hasOwnWording =
+		templates.some((t) => !STARTER_WORDING.has(wording(t))) ||
+		settings.businessName.trim() !== '' ||
+		settings.signature !== DEFAULT_SIGNATURE;
 
 	const core: GuideStep[] = [
 		{
@@ -127,40 +165,74 @@ export async function loadGuide(contractorId: string): Promise<Guide> {
 			id: 'invite',
 			title: 'Invite them to their portal',
 			description:
-				'Send a magic link and they can follow progress themselves — which is usually the end of "any update?" phone calls.',
+				'Send a magic link to your client so they can to view updates and ask questions (this can be done later, too!)',
 			done: hasInvite,
 			href: '/contractor/customers',
-			cta: 'Send an invite'
+			cta: 'Send an invite',
+			// Plenty of contractors keep their customers off the portal entirely, so
+			// this one can be waved away rather than sitting unticked forever.
+			skippable: true,
+			skipped: skipped.has('invite')
 		},
 		{
-			id: 'followUp',
-			title: 'Let follow-ups chase you',
-			// The one line worth spending: it explains why the dashboard looks empty.
+			id: 'templates',
+			title: 'Make the communications sound like you',
+			// Says what "done" means, because the starter set arriving pre-filled
+			// makes this the one step where it isn't obvious.
 			description:
-				'Every new order sets a reminder three days out. When one comes due it appears at the top of this dashboard, so nothing goes quiet by accident.',
-			done: settings.guideFollowUpAckAt != null
+				'You start with three ready-made emails and a signature. Edit the wording or add your own so every message you send from an order goes out in your voice.',
+			done: hasOwnWording,
+			href: '/contractor/settings/templates',
+			cta: 'Open templates',
+			// A contractor happy with the starters as written has already finished
+			// this in spirit — let them say so rather than edit a word to tick it.
+			skippable: true,
+			skipped: skipped.has('templates')
 		},
 		{
 			id: 'subcontractor',
 			title: 'Bring in a subcontractor',
 			description:
-				'Assign a trade partner to an order. Trusted subs see the whole job; guests see the work with your customer’s details hidden.',
-			done: hasAssignment,
-			href: '/contractor/subcontractors',
-			cta: 'Add a subcontractor'
+				'Add a trade partner to your roster, then assign them to any order. Trusted subs see the whole job; guests see the work with your customer’s details hidden.',
+			// The roster, not an assignment. This step's own button says "Add a
+			// subcontractor" — completing it has to mean doing what the button says,
+			// or the contractor does exactly what was asked and nothing ticks.
+			done: hasSubcontractor,
+			// `?new` opens the add form on arrival — the step asks for a subcontractor,
+			// so landing on the roster and hunting for the ＋ is a step too many.
+			href: '/contractor/subcontractors?new=1',
+			cta: 'Add a subcontractor',
+			// Plenty of contractors work alone. Same reasoning as the invite step.
+			skippable: true,
+			skipped: skipped.has('subcontractor')
 		}
 	];
 
 	const coreDone = core.every((s) => s.done);
+	// A skipped step is resolved: it must not hold the guide open forever.
+	const settled = (s: GuideStep) => s.done || s.skipped === true;
 
 	return {
 		state,
 		core,
 		extended,
 		coreDone,
-		allDone: coreDone && extended.every((s) => s.done),
+		allDone: coreDone && extended.every(settled),
 		atFork: coreDone && state === 'active'
 	};
+}
+
+/** Record that a contractor waved a step away. Idempotent. */
+export async function skipGuideStep(contractorId: string, stepId: string): Promise<void> {
+	const settings = await getContractorSettings(contractorId);
+	if (settings.guideSkippedSteps.includes(stepId)) return;
+	await db
+		.insert(contractorSettings)
+		.values({ contractorId, guideSkippedSteps: [stepId] })
+		.onConflictDoUpdate({
+			target: contractorSettings.contractorId,
+			set: { guideSkippedSteps: [...settings.guideSkippedSteps, stepId] }
+		});
 }
 
 /**
@@ -175,16 +247,5 @@ export async function setGuideState(contractorId: string, state: GuideState): Pr
 		.onConflictDoUpdate({
 			target: contractorSettings.contractorId,
 			set: { guideState: state }
-		});
-}
-
-/** Mark the follow-up step read. Idempotent: the first acknowledgement stands. */
-export async function ackGuideFollowUp(contractorId: string): Promise<void> {
-	await db
-		.insert(contractorSettings)
-		.values({ contractorId, guideFollowUpAckAt: new Date() })
-		.onConflictDoUpdate({
-			target: contractorSettings.contractorId,
-			set: { guideFollowUpAckAt: new Date() }
 		});
 }

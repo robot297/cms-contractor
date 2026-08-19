@@ -65,19 +65,19 @@
 
 	const features = [
 		{
-			icon: '🔒',
 			title: 'Secure',
-			body: 'Role-based access keeps customer details safe — trusted subcontractors see the job, guests never see personal info. Your data stays yours.'
+			body: 'Role-based access keeps customer details safe — trusted subcontractors see the job, guests never see personal info. Your data stays yours.',
+			variant: 'variant-a'
 		},
 		{
-			icon: '✨',
 			title: 'Simple',
-			body: 'No enterprise bloat. Search, tap, done — an interface that gets out of the way so you can get back to the work.'
+			body: 'No enterprise bloat. Search, tap, done — an interface that gets out of the way so you can get back to the work.',
+			variant: 'variant-b'
 		},
 		{
-			icon: '⚡',
 			title: 'Streamlined',
-			body: 'Customers, orders, subcontractors, and follow-ups in one flow — from the first inquiry to the final invoice.'
+			body: 'Customers, orders, subcontractors, and follow-ups in one flow — from the first inquiry to the final invoice.',
+			variant: 'variant-c'
 		}
 	];
 </script>
@@ -100,8 +100,7 @@
 				Manage client relationships<br /><span class="accent">with ease.</span>
 			</h1>
 			<p class="subhead">
-				Simple, powerful contractor enablement — customers, orders, subcontractors and follow-ups in
-				one place, so you spend your day on projects instead of tedium.
+				Simple, powerful contractor enablement to enable you to focus on projects, not tedium.
 			</p>
 
 			<div class="cta-row">
@@ -131,13 +130,13 @@
 	<!-- Features -->
 	<section class="features">
 		<div class="features-inner">
-			<h2 class="section-title reveal">Everything a working contractor actually needs</h2>
-			<p class="section-sub reveal">Focused tools, none of the enterprise bloat.</p>
+			<h2 class="section-title reveal">
+				Tools to enable contractors to keep clients updated with minimal hassle.
+			</h2>
+			<p class="section-sub reveal">Focused tools with none of the enterprise bloat.</p>
 			<div class="grid">
 				{#each features as f, i (f.title)}
-					<article class="card reveal" style="--reveal-delay: {i * 90}ms">
-						<span class="card-num">{String(i + 1).padStart(2, '0')}</span>
-						<div class="card-icon">{f.icon}</div>
+					<article class="card reveal {f.variant}" style="--reveal-delay: {i * 90}ms">
 						<h3 class="card-title">{f.title}</h3>
 						<p class="card-body">{f.body}</p>
 					</article>
@@ -206,7 +205,13 @@
 		   footer are dark by design in both themes, so they stay literal. */
 		--panel: var(--surface);
 		--panel-line: var(--line);
-		--icon-wash: #f3eeff;
+
+		/* Feature-card accents. One hue per card, mixed against --panel for the wash
+		   and border — so the dark block only has to restate the three hues (the
+		   blue and purple need lifting to hold up on a dark surface). */
+		--accent-a: var(--yellow-deep);
+		--accent-b: #7c5cf0;
+		--accent-c: #0079bf;
 
 		/* Hero. It used to be dark in both themes; now it follows the theme, which
 		   means the accent needs two treatments — see .accent below. */
@@ -241,8 +246,23 @@
 		background: var(--hero-bg);
 		overflow: hidden;
 	}
+	/* Seam blur: the hero's glows end wherever the viewport cuts them, which drew
+	   a hard line against the features band. This strip fades whatever the hero is
+	   doing into the next section's exact surface, so the two read as one page. */
+	.hero::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: clamp(90px, 18vh, 170px);
+		background: linear-gradient(180deg, transparent, var(--surface-sunken));
+		pointer-events: none;
+	}
 	.hero-inner {
 		position: relative;
+		/* Above the seam fade, which paints after it in the stacking order. */
+		z-index: 1;
 		max-width: 780px;
 		text-align: center;
 		color: var(--hero-fg);
@@ -323,7 +343,7 @@
 	}
 	.btn.primary {
 		background: #ffcc00;
-		color: #1a1a1a;
+		color: var(--on-yellow);
 		box-shadow: 0 8px 24px rgba(255, 204, 0, 0.28);
 	}
 	.btn.primary:hover:not(:disabled) {
@@ -350,8 +370,15 @@
 	/* ---------- Features ---------- */
 	.features {
 		padding: clamp(3.5rem, 8vw, 6rem) clamp(1rem, 5vw, 3rem);
-		background: var(--surface-sunken);
-		border-bottom: 1px solid var(--line);
+		/* Holds the sunken tone through the cards, then eases into the closing
+		   section's surface — a gradient hand-off instead of the old hairline,
+		   which split the page into three obvious slabs. */
+		background: linear-gradient(
+			180deg,
+			var(--surface-sunken) 0%,
+			var(--surface-sunken) 72%,
+			var(--surface) 100%
+		);
 	}
 	.features-inner {
 		max-width: 1080px;
@@ -380,15 +407,19 @@
 		gap: 1.1rem;
 	}
 	/* Sticker card, same family as the buttons: hard outline, hard offset shadow,
-	   and a press-in lift on hover. The yellow rule across the top only paints on
-	   hover, so a row of cards stays calm until you point at one. */
+	   and a press-in lift on hover. The top accent rule stays quiet until hover. */
 	.card {
 		position: relative;
 		overflow: hidden;
-		background: var(--panel);
-		border: 2.5px solid var(--pop-line);
-		border-radius: 16px;
-		padding: 1.6rem 1.5rem 1.5rem;
+		--card-accent: var(--accent-a);
+		background: linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--card-accent) 12%, var(--panel)),
+			color-mix(in srgb, var(--card-accent) 4%, var(--panel))
+		);
+		border: 1px solid color-mix(in srgb, var(--card-accent) 45%, var(--panel-line));
+		border-radius: 18px;
+		padding: 1.8rem 1.5rem 1.5rem;
 		box-shadow: var(--pop-shadow-sm);
 		transition:
 			transform 0.12s ease,
@@ -400,8 +431,8 @@
 		top: 0;
 		left: 0;
 		right: 0;
-		height: 5px;
-		background: var(--yellow);
+		height: 4px;
+		background: var(--card-accent);
 		transform: scaleX(0);
 		transform-origin: left;
 		transition: transform 0.25s ease;
@@ -413,30 +444,20 @@
 	.card:hover::before {
 		transform: scaleX(1);
 	}
-	/* Editorial index, sitting behind the content in the corner. */
-	.card-num {
-		position: absolute;
-		top: 0.5rem;
-		right: 0.9rem;
-		font-family: var(--font-display);
-		font-size: 2.6rem;
-		line-height: 1;
-		color: var(--fg);
-		opacity: 0.07;
-		pointer-events: none;
+	.card > * {
+		position: relative;
+		z-index: 1;
 	}
-	.card-icon {
-		width: 3rem;
-		height: 3rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 1.4rem;
-		border-radius: 12px;
-		border: 2px solid var(--pop-line);
-		background: var(--icon-wash);
-		box-shadow: var(--pop-shadow-sm);
-		margin-bottom: 1rem;
+	/* Each variant only picks its accent; the wash and border are both mixed from it
+	   against --panel, so the same rules hold in light and dark. */
+	.card.variant-a {
+		--card-accent: var(--accent-a);
+	}
+	.card.variant-b {
+		--card-accent: var(--accent-b);
+	}
+	.card.variant-c {
+		--card-accent: var(--accent-c);
 	}
 	.card-title {
 		margin: 0 0 0.4rem;
@@ -454,11 +475,41 @@
 		line-height: 1.55;
 	}
 
-	/* ---------- Closing CTA ---------- */
+	/* ---------- Closing CTA ----------
+	   The section is just the gutter; the panel inside it is a feature card scaled
+	   up — same accent border, same mixed wash, same radius — so the page ends on
+	   the shape it spent the middle establishing. It used to be --surface-sunken on
+	   --surface behind a hairline border, which read as a stray rounded rectangle. */
 	.closing {
 		padding: clamp(3.5rem, 8vw, 6rem) clamp(1rem, 5vw, 3rem);
+	}
+	.closing-inner {
+		--card-accent: var(--accent-a);
+		position: relative;
+		overflow: hidden;
+		max-width: 960px;
+		margin: 0 auto;
+		padding: clamp(2.5rem, 6vw, 3.75rem) clamp(1.5rem, 5vw, 3rem);
 		text-align: center;
-		background: var(--surface);
+		background: linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--card-accent) 12%, var(--panel)),
+			color-mix(in srgb, var(--card-accent) 4%, var(--panel))
+		);
+		border: 1px solid color-mix(in srgb, var(--card-accent) 45%, var(--panel-line));
+		border-radius: 18px;
+		box-shadow: var(--pop-shadow-sm);
+	}
+	/* The feature cards wipe this rule in on hover; the CTA isn't hoverable, so it
+	   just wears it. */
+	.closing-inner::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 4px;
+		background: var(--card-accent);
 	}
 	.closing-title {
 		margin: 0;
@@ -478,9 +529,11 @@
 	.closing form {
 		display: inline-block;
 	}
-	/* Pricing sits under the demo CTA as the quieter second option. */
+	.closing .btn.primary {
+		min-width: 15rem;
+	}
 	.closing-secondary {
-		margin-top: 0.85rem;
+		margin-top: 1.2rem;
 	}
 
 	/* ---------- Footer ---------- */
@@ -529,11 +582,13 @@
 
 	/* ---- Dark theme ----------------------------------------------------------
 	   Feature cards sit a step ABOVE the section they're on, matching the light
-	   white-on-grey stack; the icon wash drops to the app's dark-purple accent. */
+	   white-on-grey stack. */
 	:global(:root[data-theme='dark']) .landing {
 		--panel: #2c333d;
 		--panel-line: #3d4650;
-		--icon-wash: #2e2a44;
+		--accent-a: var(--yellow);
+		--accent-b: #a78bfa;
+		--accent-c: #4aa8e0;
 
 		/* The hero keeps the dark treatment it has always had, and the accent goes
 		   back to plain yellow type — it has the contrast for it here. */

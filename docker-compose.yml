@@ -24,12 +24,26 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Local secrets (Resend key, EMAIL_FROM, GitHub OAuth…) ride along when the
+    # file exists. Without mail credentials the app cannot send, so email
+    # verification is NOT enforced — any sign-up goes straight in and the
+    # verification link only appears in this container's logs.
+    env_file:
+      - path: .env.local
+        required: false
     environment:
+      # Explicit values beat env_file: the container keeps its own DB host,
+      # origin and port even though .env.local carries dev values for them.
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://postgres:postgres@db:5432/contractor-crm
       ORIGIN: http://localhost:3000
       BETTER_AUTH_SECRET: development-secret-change-me
+      # Provision the pre-verified local login (contractor@upliftcollective.dev /
+      # test#123) at boot, so the email-verification gate doesn't require a real
+      # inbox loop against a compose stack. This whole file is a local stack —
+      # never carry this flag onto a reachable deployment.
+      SEED_DEV_LOGIN: 'true'
     ports:
       - '3000:3000'
 

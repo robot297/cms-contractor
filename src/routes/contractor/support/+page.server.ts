@@ -2,10 +2,13 @@ import { fail, redirect } from '@sveltejs/kit';
 import { validateFeedback } from '$lib/crm';
 import {
 	captchaSiteKey,
+	isAllowedScreenshotType,
 	isSupportConfigured,
+	MAX_SCREENSHOT_BYTES,
 	submitFeedback,
 	SupportError,
-	verifyCaptcha
+	verifyCaptcha,
+	type SupportScreenshot
 } from '$lib/server/support.server';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -43,15 +46,43 @@ export const actions: Actions = {
 			return fail(400, { message: 'Please complete the verification challenge and try again.' });
 		}
 
-		const parsed = validateFeedback({
-			type: form.get('type')?.toString(),
-			title: form.get('title')?.toString(),
-			detail: form.get('detail')?.toString()
-		});
+		const parsed = validateFeedback(
+			{
+				type: form.get('type')?.toString(),
+				title: form.get('title')?.toString(),
+				detail: form.get('detail')?.toString()
+			},
+			// Set here, not read from the form: which pane filed this is a fact about
+			// the route, and a browser-supplied value could claim anything.
+			'contractor'
+		);
 		if (!parsed.ok) return fail(400, { field: parsed.field, message: parsed.message });
 
+		// Optional screenshot. The client pre-checks type and size; this is the half
+		// that holds when the request is stale or hand-rolled.
+		let screenshot: SupportScreenshot | null = null;
+		const shot = form.get('screenshot');
+		if (shot instanceof File && shot.size > 0) {
+			if (!isAllowedScreenshotType(shot.type))
+				return fail(400, {
+					field: 'screenshot',
+					message: 'Screenshots must be a PNG, JPEG, WebP or GIF image.'
+				});
+			if (shot.size > MAX_SCREENSHOT_BYTES)
+				return fail(400, { field: 'screenshot', message: 'Keep screenshots under 5 MB.' });
+			screenshot = {
+				name: shot.name,
+				type: shot.type,
+				bytes: new Uint8Array(await shot.arrayBuffer())
+			};
+		}
+
 		try {
-			const issue = await submitFeedback(parsed.value, { name: user.name, email: user.email });
+			const issue = await submitFeedback(
+				parsed.value,
+				{ name: user.name, email: user.email },
+				screenshot
+			);
 			return {
 				success: true,
 				issueUrl: issue.url,
