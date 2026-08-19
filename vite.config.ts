@@ -33,6 +33,12 @@ export default defineConfig({
 				]
 			: []),
 		sveltekit({
+			// Required for src/instrumentation.server.ts to be picked up. Without it
+			// the file is present but unregistered, and `vite build` refuses outright
+			// rather than ignoring it — so the whole production build fails.
+			experimental: {
+				instrumentation: { server: true }
+			},
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
 				runes: ({ filename }) =>
