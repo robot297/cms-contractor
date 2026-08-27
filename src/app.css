@@ -1,204 +1,1514 @@
 /* ============================================================
-   Contractor CRM — "Job Site" theme
-   Safety-yellow accent on clean surfaces: hairline borders and
-   soft elevation rather than the original hard pop-art chrome.
-   Layered over the app's existing inline styles by keying on
-   the color literals those styles already use.
+   Contractor CRM — themes
+
+   THIRTEEN THEMES, one shape. `<html>` carries two stamps, both written pre-paint
+   by the inline script in app.html:
+
+       data-theme   = light | dark
+       data-palette = voltage | outrun | circuit | overdrive
+                      | abyss | vapor | halogen | blueprint
+                      | ember | timber | highvis | ledger | nocturne
+
+   The last five are the second round of candidates, added because the first
+   eight all argue for the same thing — a neon accent on a near-black ground.
+   They deliberately leave that basin: two warm (Ember, Timber), one that takes
+   the site-safety palette literally (Highvis), and two that are quiet on
+   purpose, one in a serif (Ledger, Nocturne).
+
+   A theme is FOUR things here, not one:
+
+     1. colour   — the token ladder below, two accents per theme
+     2. geometry — --radius-*, which runs from 0 (Halogen, Blueprint) to 14px
+                   (Vapor). A theme that only recolours reads as the same app.
+                   Nocturne is the one that splits them: 10px cards with fully
+                   round controls.
+     3. type     — --font-display and its tracking/weight/case. A typeface is
+                   not a voice on its own: Michroma at Inter's tracking is just
+                   a wide font, so each face ships with the setting it was
+                   drawn for.
+     4. air      — --atmos, a background-image list painted behind the whole app
+                   (Outrun's horizon, Blueprint's drafting grid, Circuit's
+                   traces). This is what makes a theme a place.
+
+   Every component reads the tokens and knows none of the theme names. The
+   first sixteen blocks were GENERATED from a validated table — 26 blocks x ~30
+   tokens is far past the point where hand-transcription is safe; the five
+   newest palettes were written by hand and then run through the same contrast
+   sweep, which is the part that actually matters. All 26 clear WCAG AA on every
+   text pair and AA-large on every accent surface. The five newest go
+   further and clear full AA on the status chips too, which is why their
+   --ok-fg / --wait-fg / --stop-fg sit a shade darker than the older eight's:
+   those chips are a 14% wash of the text colour, and a cream surface eats the
+   margin a white one leaves.
+
+   SPECIFICITY, because it is load-bearing. The bare `:root` holds Voltage's
+   light values as a floor (0,1,0). Each theme's light block is
+   `:root[data-palette='x']` (0,2,0); each dark block is
+   `:root[data-palette='x'][data-theme='dark']` (0,3,0). Light blocks are
+   mutually exclusive by attribute value so they never race, and every dark
+   block outranks every light one regardless of source order. Adding a bare
+   `:root[data-theme='dark']` block would tie at (0,2,0) with the light blocks
+   and hand the result to source order — don't.
    ============================================================ */
 
+/* ------------------------------------------------------------ Shared shape
+   True of every theme. What VARIES per theme is in the blocks below. */
 :root {
-	--yellow: #ffcc00;
-	--yellow-deep: #e6b800;
-	--ink: #111111;
-	/* Text drawn ON the brand fill. Yellow is light in BOTH themes, so anything
-	   sitting on it must stay dark in both — which means it cannot follow --ink,
-	   --fg or any other token that flips. This one is defined once, outside the
-	   dark block, and is deliberately never overridden there.
+	/* Avatars and the order-icon bubble opt out of --radius-* — a face is the
+	   one thing in the app that should not be a rectangle. */
+	--radius-round: 999px;
 
-	   Use var(--on-yellow) for every foreground on a yellow/amber surface. Reaching
-	   for --ink instead is THE recurring dark-mode bug in this app — it renders
-	   near-white on yellow, which is unreadable, and it shipped four separate times
-	   before this token existed. src/lib/theme.contrast.test.ts fails the build if a
-	   flipping token turns up on the brand fill, so the next one is caught here
-	   rather than in someone's dark-mode screenshot. */
-	--on-yellow: #14171c;
-	/* Who said it. Each half of the product has a colour — the contractor's safety
-	   yellow, the portal's teal — and a message is tinted by WHOSE it is rather
-	   than by which app you are reading it in. So the contractor's own replies are
-	   yellow on both surfaces and the customer's are teal on both, and the two
-	   halves of one conversation look like one conversation.
-	   Defined at the root, not in either shell, because both surfaces need both. */
-	--who-contractor: #ffcc00;
-	--who-customer: #0f7d8c;
-	--paper: #fffdf5;
-	--muted: #4b5159;
-	--danger: #e5301a;
-	/* Once hard `4px 4px 0` offset blocks; now soft elevation. The names stay so
-	   every component keeps working — only the rendering modernized. */
-	--pop-shadow: 0 1px 2px rgba(27, 31, 36, 0.06), 0 4px 14px rgba(27, 31, 36, 0.1);
-	--pop-shadow-lg: 0 8px 24px rgba(27, 31, 36, 0.16);
-	--pop-shadow-sm: 0 1px 2px rgba(27, 31, 36, 0.08), 0 2px 6px rgba(27, 31, 36, 0.06);
+	/* Status fills and rules are MIXED from their own text colour and the
+	   surface behind them, so a theme names three status foregrounds instead of
+	   nine values — and they land on that theme's ground rather than on a pastel
+	   inherited from some other palette. */
+	--ok-bg: color-mix(in srgb, var(--ok-fg) 14%, var(--surface));
+	--ok-line: color-mix(in srgb, var(--ok-fg) 55%, var(--surface));
+	--wait-bg: color-mix(in srgb, var(--wait-fg) 14%, var(--surface));
+	--wait-line: color-mix(in srgb, var(--wait-fg) 55%, var(--surface));
+	--stop-bg: color-mix(in srgb, var(--stop-fg) 14%, var(--surface));
+	--stop-line: color-mix(in srgb, var(--stop-fg) 55%, var(--surface));
 
-	/* Semantic surface tokens — components reference these in their dark blocks so
-	   the whole app shares one dark palette. Light values here; dark below. */
+	/* Chart marks that follow the brand. The categorical --viz-1..5 are a
+	   validated set of their own and deliberately do NOT follow it: a series
+	   colour means identity, not brand. */
+	--viz-accent: var(--brand);
+	--viz-accent-soft: color-mix(in srgb, var(--brand) 42%, var(--surface));
+	--viz-grid: var(--line);
+	--viz-axis: var(--line-strong);
+	--viz-ink: var(--fg);
+	--viz-ink-muted: var(--fg-muted);
+	--viz-gap: var(--surface);
+	--viz-1: var(--brand);
+	--viz-2: var(--brand-2);
+	--viz-3: #1baf7a;
+	--viz-4: #eb6834;
+	--viz-5: #e87ba4;
+	--viz-other: color-mix(in srgb, var(--fg-muted) 70%, var(--surface));
+}
+
+/* ---------------------------------------------------------- VOLTAGE
+   Electric azure on blue-black. */
+:root,
+:root[data-palette='voltage'] {
+	--brand: #0069d9;
+	--brand-deep: #0052ab;
+	--brand-2: #5b3fd1;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #0069d9 30%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #0069d9 55%, transparent);
+	--brand-sweep: linear-gradient(135deg, #0069d9, #5b3fd1);
+	--paper: #eef4fb;
 	--surface: #ffffff;
-	--surface-sunken: #f6f8fa;
-	--surface-inset: #f9fafb;
-	--fg: #1f2328;
-	--fg-muted: #57606a;
-	--line: #e2e6ea;
-	--line-strong: #d0d7de;
-	/* Fields sit a shade below the card they're on — a quietly sunken well rather
-	   than white-on-white — and lift back to white when focused. */
-	--field-bg: #f9fafb;
+	--surface-sunken: #e3ecf7;
+	--surface-inset: #f2f7fc;
+	--ink: #0b1622;
+	--fg: #0b1622;
+	--muted: #48596e;
+	--fg-muted: #48596e;
+	--line: #cfdcea;
+	--line-strong: #a9bdd3;
+	--pop-line: #a9bdd3;
+	--field-bg: #f2f7fc;
 	--field-bg-focus: #ffffff;
-	--field-border: #dcdfe4;
-	/* Status palette — how a job or a record is doing, in three tones: on track,
-	   waiting on someone, stopped. These nine values were previously typed as raw
-	   literals in about ten files (`#e6f4ea`, `#1a7f37`, `#fff4d6`…), which is why
-	   the same "Active" pill was a slightly different green depending on which
-	   screen you were looking at. Named here once, with dark values below — the
-	   scattered copies had none, so every status pill stayed a bright pastel on a
-	   dark card. */
-	--ok-bg: #e6f4ea;
-	--ok-line: #4ea866;
-	--ok-fg: #1a7f37;
-	--wait-bg: #fff4d6;
-	--wait-line: #d4a72c;
-	--wait-fg: #8a5a00;
-	--stop-bg: #ffebe9;
-	--stop-line: #e5534b;
-	--stop-fg: #cf222e;
-	--card-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 4px 12px rgba(27, 31, 36, 0.06);
-	/* Structural border for intercepted elements. Used to be solid black — the
-	   "heavy border" look — now a hairline grey in both themes. */
-	--pop-line: #d0d7de;
-
+	--field-border: #a9bdd3;
+	--who-contractor: #0069d9;
+	--who-customer: #6d3fd1;
+	--ok-fg: #0a7d52;
+	--wait-fg: #a15600;
+	--stop-fg: #c92a42;
+	--danger: #c92a42;
+	--radius-card: 4px;
+	--radius-control: 3px;
+	--radius-pill: 3px;
+	--font-display: 'Chakra Petch', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: 0.02em;
+	--display-transform: uppercase;
+	--display-size: 1em;
+	--atmos:
+		radial-gradient(
+			1200px 520px at 50% -12%,
+			color-mix(in srgb, #0069d9 12%, transparent),
+			transparent 70%
+		),
+		linear-gradient(color-mix(in srgb, #0069d9 4%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #0069d9 4%, transparent) 1px, transparent 1px);
+	--atmos-size: 100% 100%, 64px 64px, 64px 64px;
 	color-scheme: light;
 }
-
-/* ------------------------------------------------------------ Dark theme
-   Toggled via [data-theme='dark'] on <html> (set pre-paint in app.html, flipped
-   by the nav toggle). The app leans on hardcoded color literals in inline styles,
-   so — like the pop-art layer below — dark mode flips the dominant surface / text
-   / border literals rather than re-authoring every rule. */
-:root[data-theme='dark'] {
-	--paper: #14171c;
-	/* Body text runs near-white rather than the old #e8ebf0 — that grey read as
-	   washed out against these surfaces, especially at small sizes. Muted comes up
-	   with it so secondary text stays clearly legible instead of merely present. */
-	--ink: #f5f8fb;
-	--muted: #adb8c4;
-	/* The portal's teal lifts in dark exactly as its shell's --accent does. */
-	--who-customer: #45c2d3;
-	--surface: #1b1f26;
-	--surface-sunken: #232830;
-	--surface-inset: #14171c;
-	--fg: #f5f8fb;
-	--fg-muted: #adb8c4;
-	--line: #333b45;
-	--line-strong: #3d4650;
-	--field-bg: #14171c;
-	--field-bg-focus: #171b21;
-	--field-border: #363d47;
-	--pop-line: #3d4650;
-	/* The pop-art hard offset shadows are drawn in --ink, which is light in dark —
-	   that painted a bright block ("backdrop") behind cards/buttons. Swap them for
-	   soft dark shadows. */
-	--pop-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-	--pop-shadow-lg: 0 8px 22px rgba(0, 0, 0, 0.6);
-	--pop-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.45);
-	/* Soft elevation used by the shared .card (stronger in dark for separation). */
-	--card-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-	/* Status tones, restated for dark: a deep tinted fill with a light label,
-	   rather than the light theme's pale fill with a dark one. Inverting the
-	   relationship is the point — the pale fills read as glowing chips against
-	   these surfaces, which is what the scattered literals used to do. */
-	--ok-bg: #10261a;
-	--ok-line: #2f6b45;
-	--ok-fg: #6ee7a0;
-	--wait-bg: #2a2211;
-	--wait-line: #7a5f1e;
-	--wait-fg: #f0c674;
-	--stop-bg: #2b1416;
-	--stop-line: #7d3138;
-	--stop-fg: #ff8f88;
+:root[data-palette='voltage'][data-theme='dark'] {
+	--brand: #2ec9ff;
+	--brand-deep: #0b8fd1;
+	--brand-2: #8b6cff;
+	--on-brand: #04121c;
+	--brand-glow: color-mix(in srgb, #2ec9ff 30%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #2ec9ff 55%, transparent);
+	--brand-sweep: linear-gradient(135deg, #2ec9ff, #8b6cff);
+	--paper: #060911;
+	--surface: #0b111a;
+	--surface-sunken: #101823;
+	--surface-inset: #05080f;
+	--ink: #e6edf6;
+	--fg: #e6edf6;
+	--muted: #8598ad;
+	--fg-muted: #8598ad;
+	--line: #1a2534;
+	--line-strong: #2a3a4f;
+	--pop-line: #2a3a4f;
+	--field-bg: #05080f;
+	--field-bg-focus: #101823;
+	--field-border: #2a3a4f;
+	--who-contractor: #2ec9ff;
+	--who-customer: #a97bff;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 4px;
+	--radius-control: 3px;
+	--radius-pill: 3px;
+	--font-display: 'Chakra Petch', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: 0.02em;
+	--display-transform: uppercase;
+	--display-size: 1em;
+	--atmos:
+		radial-gradient(
+			1200px 520px at 50% -12%,
+			color-mix(in srgb, #2ec9ff 16%, transparent),
+			transparent 70%
+		),
+		linear-gradient(color-mix(in srgb, #2ec9ff 5%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #2ec9ff 5%, transparent) 1px, transparent 1px);
+	--atmos-size: 100% 100%, 64px 64px, 64px 64px;
 	color-scheme: dark;
 }
-:root[data-theme='dark'] body {
-	background-color: var(--paper);
-	color: var(--ink);
-	/* Cooler, dimmer glow so the dark canvas stays sleek, not muddy. */
-	background-image: radial-gradient(
-		1100px 480px at 50% -160px,
-		rgba(255, 204, 0, 0.05),
-		transparent 60%
-	);
+
+/* ---------------------------------------------------------- OUTRUN
+   Magenta and cyan over an indigo horizon. */
+:root[data-palette='outrun'] {
+	--brand: #c11a8f;
+	--brand-deep: #9c126f;
+	--brand-2: #0e6f84;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #c11a8f 41%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #c11a8f 74%, transparent);
+	--brand-sweep: linear-gradient(135deg, #c11a8f, #0e6f84);
+	--paper: #faf0fa;
+	--surface: #ffffff;
+	--surface-sunken: #f3e4f3;
+	--surface-inset: #fdf6fd;
+	--ink: #1e0a1c;
+	--fg: #1e0a1c;
+	--muted: #6b4468;
+	--fg-muted: #6b4468;
+	--line: #e8cfe6;
+	--line-strong: #cfa8cb;
+	--pop-line: #cfa8cb;
+	--field-bg: #fdf6fd;
+	--field-bg-focus: #ffffff;
+	--field-border: #cfa8cb;
+	--who-contractor: #c11a8f;
+	--who-customer: #0e6f84;
+	--ok-fg: #0a7d52;
+	--wait-fg: #a15600;
+	--stop-fg: #c92a42;
+	--danger: #c92a42;
+	--radius-card: 2px;
+	--radius-control: 2px;
+	--radius-pill: 2px;
+	--font-display: 'Michroma', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 400;
+	--display-tracking: 0.08em;
+	--display-transform: uppercase;
+	--display-size: 0.82em;
+	--atmos:
+		radial-gradient(
+			900px 400px at 50% 112%,
+			color-mix(in srgb, #c11a8f 16%, transparent),
+			transparent 68%
+		),
+		radial-gradient(
+			1000px 460px at 50% -10%,
+			color-mix(in srgb, #0e6f84 10%, transparent),
+			transparent 72%
+		),
+		repeating-linear-gradient(
+			180deg,
+			transparent 0 3px,
+			color-mix(in srgb, #0e6f84 4%, transparent) 3px 4px
+		);
+	--atmos-size: 100% 100%, 100% 100%, 100% 100%;
+	color-scheme: light;
 }
-/* White / near-white surfaces → dark card. */
-:root[data-theme='dark'] [style*='background: #fff'],
-:root[data-theme='dark'] [style*='background:#fff'],
-:root[data-theme='dark'] [style*='background: #ffffff'],
-:root[data-theme='dark'] [style*='background: white'] {
-	background-color: #1b1f26 !important;
-}
-/* Light-grey fills → a slightly raised dark surface. */
-:root[data-theme='dark'] [style*='background: #f6f8fa'],
-:root[data-theme='dark'] [style*='background: #f9fafb'],
-:root[data-theme='dark'] [style*='background: #fbfcfd'],
-:root[data-theme='dark'] [style*='background: #f9fbfd'],
-:root[data-theme='dark'] [style*='background: #eef1f5'] {
-	background-color: #232830 !important;
-}
-/* Primary text → light. */
-:root[data-theme='dark'] [style*='color: #1f2328'],
-:root[data-theme='dark'] [style*='color: #24292f'],
-:root[data-theme='dark'] [style*='color: #1b1f24'] {
-	color: #e8ebf0 !important;
-}
-/* Muted text → lighter grey. */
-:root[data-theme='dark'] [style*='color: #57606a'],
-:root[data-theme='dark'] [style*='color: #8c959f'],
-:root[data-theme='dark'] [style*='color: #8b949e'],
-:root[data-theme='dark'] [style*='color: #6e7781'] {
-	color: #9aa4b0 !important;
-}
-/* Hairline borders → dark borders. */
-:root[data-theme='dark'] [style*='1px solid #d0d7de'],
-:root[data-theme='dark'] [style*='1px solid #e2e6ea'],
-:root[data-theme='dark'] [style*='1px solid #e4e8ee'],
-:root[data-theme='dark'] [style*='1px solid #eef1f4'],
-:root[data-theme='dark'] [style*='1px solid #eaeef2'] {
-	border-color: #333b45 !important;
-}
-/* Brand accent line: full yellow is glaring on a dark UI, so dim to amber. */
-:root[data-theme='dark'] .hazard {
-	background: linear-gradient(90deg, #6d5700, #8a6f00 25%, #8a6f00 75%, #6d5700);
+:root[data-palette='outrun'][data-theme='dark'] {
+	--brand: #ff4ecd;
+	--brand-deep: #e13aae;
+	--brand-2: #2de2e6;
+	--on-brand: #1a0212;
+	--brand-glow: color-mix(in srgb, #ff4ecd 41%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #ff4ecd 74%, transparent);
+	--brand-sweep: linear-gradient(135deg, #ff4ecd, #2de2e6);
+	--paper: #0b0418;
+	--surface: #150a2b;
+	--surface-sunken: #1d1039;
+	--surface-inset: #0a0415;
+	--ink: #f6ecff;
+	--fg: #f6ecff;
+	--muted: #a893c9;
+	--fg-muted: #a893c9;
+	--line: #2e1a52;
+	--line-strong: #472a78;
+	--pop-line: #472a78;
+	--field-bg: #0a0415;
+	--field-bg-focus: #1d1039;
+	--field-border: #472a78;
+	--who-contractor: #ff4ecd;
+	--who-customer: #2de2e6;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 2px;
+	--radius-control: 2px;
+	--radius-pill: 2px;
+	--font-display: 'Michroma', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 400;
+	--display-tracking: 0.08em;
+	--display-transform: uppercase;
+	--display-size: 0.82em;
+	--atmos:
+		radial-gradient(
+			900px 400px at 50% 112%,
+			color-mix(in srgb, #ff4ecd 30%, transparent),
+			transparent 68%
+		),
+		radial-gradient(
+			1000px 460px at 50% -10%,
+			color-mix(in srgb, #2de2e6 16%, transparent),
+			transparent 72%
+		),
+		repeating-linear-gradient(
+			180deg,
+			transparent 0 3px,
+			color-mix(in srgb, #2de2e6 6%, transparent) 3px 4px
+		);
+	--atmos-size: 100% 100%, 100% 100%, 100% 100%;
+	color-scheme: dark;
 }
 
-/* Icon buttons: a raised dark surface instead of bright white. */
-:root[data-theme='dark'] .icon-btn {
-	background: #232830;
-	border-color: #363d47;
-	color: var(--ink);
-	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+/* ---------------------------------------------------------- CIRCUIT
+   Acid mint traces on carbon. */
+:root[data-palette='circuit'] {
+	--brand: #00875a;
+	--brand-deep: #006b47;
+	--brand-2: #0369a1;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #00875a 23%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #00875a 41%, transparent);
+	--brand-sweep: linear-gradient(135deg, #00875a, #0369a1);
+	--paper: #eef7f2;
+	--surface: #ffffff;
+	--surface-sunken: #e2f1e9;
+	--surface-inset: #f4fbf7;
+	--ink: #08150f;
+	--fg: #08150f;
+	--muted: #3d5c50;
+	--fg-muted: #3d5c50;
+	--line: #cde5da;
+	--line-strong: #a5ccbb;
+	--pop-line: #a5ccbb;
+	--field-bg: #f4fbf7;
+	--field-bg-focus: #ffffff;
+	--field-border: #a5ccbb;
+	--who-contractor: #00875a;
+	--who-customer: #6d3fd1;
+	--ok-fg: #064d31;
+	--wait-fg: #a15600;
+	--stop-fg: #c92a42;
+	--danger: #c92a42;
+	--radius-card: 2px;
+	--radius-control: 2px;
+	--radius-pill: 2px;
+	--font-display: 'JetBrains Mono', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: -0.01em;
+	--display-transform: uppercase;
+	--display-size: 0.92em;
+	--atmos:
+		linear-gradient(color-mix(in srgb, #00875a 5%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #00875a 5%, transparent) 1px, transparent 1px),
+		radial-gradient(
+			800px 500px at 88% 4%,
+			color-mix(in srgb, #0369a1 7%, transparent),
+			transparent 70%
+		);
+	--atmos-size: 28px 28px, 28px 28px, 100% 100%;
+	color-scheme: light;
 }
+:root[data-palette='circuit'][data-theme='dark'] {
+	--brand: #2ff2a8;
+	--brand-deep: #0fb87a;
+	--brand-2: #38bdf8;
+	--on-brand: #04170f;
+	--brand-glow: color-mix(in srgb, #2ff2a8 23%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #2ff2a8 41%, transparent);
+	--brand-sweep: linear-gradient(135deg, #2ff2a8, #38bdf8);
+	--paper: #040a08;
+	--surface: #0a1310;
+	--surface-sunken: #0e1a16;
+	--surface-inset: #030807;
+	--ink: #e4f0eb;
+	--fg: #e4f0eb;
+	--muted: #7e9a91;
+	--fg-muted: #7e9a91;
+	--line: #182a24;
+	--line-strong: #264038;
+	--pop-line: #264038;
+	--field-bg: #030807;
+	--field-bg-focus: #0e1a16;
+	--field-border: #264038;
+	--who-contractor: #2ff2a8;
+	--who-customer: #a97bff;
+	--ok-fg: #159e68;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 2px;
+	--radius-control: 2px;
+	--radius-pill: 2px;
+	--font-display: 'JetBrains Mono', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: -0.01em;
+	--display-transform: uppercase;
+	--display-size: 0.92em;
+	--atmos:
+		linear-gradient(color-mix(in srgb, #2ff2a8 7%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #2ff2a8 7%, transparent) 1px, transparent 1px),
+		radial-gradient(
+			800px 500px at 88% 4%,
+			color-mix(in srgb, #38bdf8 10%, transparent),
+			transparent 70%
+		);
+	--atmos-size: 28px 28px, 28px 28px, 100% 100%;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- OVERDRIVE
+   Electric violet bloom on plum. */
+:root[data-palette='overdrive'] {
+	--brand: #6d3fd1;
+	--brand-deep: #5730ad;
+	--brand-2: #0e7490;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #6d3fd1 38%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #6d3fd1 69%, transparent);
+	--brand-sweep: linear-gradient(135deg, #6d3fd1, #0e7490);
+	--paper: #f4f1fd;
+	--surface: #ffffff;
+	--surface-sunken: #eae4fa;
+	--surface-inset: #f8f6fe;
+	--ink: #130d21;
+	--fg: #130d21;
+	--muted: #514670;
+	--fg-muted: #514670;
+	--line: #dbd3f1;
+	--line-strong: #bcaee2;
+	--pop-line: #bcaee2;
+	--field-bg: #f8f6fe;
+	--field-bg-focus: #ffffff;
+	--field-border: #bcaee2;
+	--who-contractor: #6d3fd1;
+	--who-customer: #0e7490;
+	--ok-fg: #0a7d52;
+	--wait-fg: #a15600;
+	--stop-fg: #c92a42;
+	--danger: #c92a42;
+	--radius-card: 4px;
+	--radius-control: 3px;
+	--radius-pill: 3px;
+	--font-display: 'Orbitron', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 800;
+	--display-tracking: 0.04em;
+	--display-transform: uppercase;
+	--display-size: 0.92em;
+	--atmos:
+		radial-gradient(
+			900px 600px at 12% -8%,
+			color-mix(in srgb, #6d3fd1 14%, transparent),
+			transparent 66%
+		),
+		radial-gradient(
+			760px 520px at 92% 8%,
+			color-mix(in srgb, #0e7490 10%, transparent),
+			transparent 68%
+		);
+	--atmos-size: 100% 100%, 100% 100%;
+	color-scheme: light;
+}
+:root[data-palette='overdrive'][data-theme='dark'] {
+	--brand: #a97bff;
+	--brand-deep: #8d63e2;
+	--brand-2: #4ce0ff;
+	--on-brand: #0d0718;
+	--brand-glow: color-mix(in srgb, #a97bff 38%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #a97bff 69%, transparent);
+	--brand-sweep: linear-gradient(135deg, #a97bff, #4ce0ff);
+	--paper: #0a0616;
+	--surface: #120c22;
+	--surface-sunken: #1a1130;
+	--surface-inset: #080513;
+	--ink: #ece9f7;
+	--fg: #ece9f7;
+	--muted: #9a91b8;
+	--fg-muted: #9a91b8;
+	--line: #271d40;
+	--line-strong: #3c2d5e;
+	--pop-line: #3c2d5e;
+	--field-bg: #080513;
+	--field-bg-focus: #1a1130;
+	--field-border: #3c2d5e;
+	--who-contractor: #a97bff;
+	--who-customer: #4ce0ff;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 4px;
+	--radius-control: 3px;
+	--radius-pill: 3px;
+	--font-display: 'Orbitron', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 800;
+	--display-tracking: 0.04em;
+	--display-transform: uppercase;
+	--display-size: 0.92em;
+	--atmos:
+		radial-gradient(
+			900px 600px at 12% -8%,
+			color-mix(in srgb, #a97bff 24%, transparent),
+			transparent 66%
+		),
+		radial-gradient(
+			760px 520px at 92% 8%,
+			color-mix(in srgb, #4ce0ff 16%, transparent),
+			transparent 68%
+		);
+	--atmos-size: 100% 100%, 100% 100%;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- ABYSS
+   Bioluminescence at depth. */
+:root[data-palette='abyss'] {
+	--brand: #00736b;
+	--brand-deep: #005a54;
+	--brand-2: #1d4ed8;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #00736b 33%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #00736b 61%, transparent);
+	--brand-sweep: linear-gradient(135deg, #00736b, #1d4ed8);
+	--paper: #ecf6f7;
+	--surface: #ffffff;
+	--surface-sunken: #dcedef;
+	--surface-inset: #f4fafb;
+	--ink: #04171b;
+	--fg: #04171b;
+	--muted: #3a5f67;
+	--fg-muted: #3a5f67;
+	--line: #c6e0e3;
+	--line-strong: #9cc4ca;
+	--pop-line: #9cc4ca;
+	--field-bg: #f4fafb;
+	--field-bg-focus: #ffffff;
+	--field-border: #9cc4ca;
+	--who-contractor: #00736b;
+	--who-customer: #1d4ed8;
+	--ok-fg: #0a7d52;
+	--wait-fg: #a15600;
+	--stop-fg: #c92a42;
+	--danger: #c92a42;
+	--radius-card: 10px;
+	--radius-control: 8px;
+	--radius-pill: 999px;
+	--font-display: 'Rajdhani', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: 0.04em;
+	--display-transform: uppercase;
+	--display-size: 1.12em;
+	--atmos:
+		linear-gradient(180deg, color-mix(in srgb, #00736b 9%, transparent), transparent 46%),
+		radial-gradient(
+			700px 700px at 76% 88%,
+			color-mix(in srgb, #1d4ed8 9%, transparent),
+			transparent 66%
+		),
+		radial-gradient(
+			520px 520px at 16% 34%,
+			color-mix(in srgb, #00736b 7%, transparent),
+			transparent 64%
+		);
+	--atmos-size: 100% 100%, 100% 100%, 100% 100%;
+	color-scheme: light;
+}
+:root[data-palette='abyss'][data-theme='dark'] {
+	--brand: #22e0d0;
+	--brand-deep: #0aa89b;
+	--brand-2: #4d8bff;
+	--on-brand: #001714;
+	--brand-glow: color-mix(in srgb, #22e0d0 33%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #22e0d0 61%, transparent);
+	--brand-sweep: linear-gradient(135deg, #22e0d0, #4d8bff);
+	--paper: #01080d;
+	--surface: #051219;
+	--surface-sunken: #081c25;
+	--surface-inset: #01070b;
+	--ink: #dcf2f4;
+	--fg: #dcf2f4;
+	--muted: #7ba0aa;
+	--fg-muted: #7ba0aa;
+	--line: #0f2c38;
+	--line-strong: #174454;
+	--pop-line: #174454;
+	--field-bg: #01070b;
+	--field-bg-focus: #081c25;
+	--field-border: #174454;
+	--who-contractor: #22e0d0;
+	--who-customer: #4d8bff;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 10px;
+	--radius-control: 8px;
+	--radius-pill: 999px;
+	--font-display: 'Rajdhani', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: 0.04em;
+	--display-transform: uppercase;
+	--display-size: 1.12em;
+	--atmos:
+		linear-gradient(180deg, color-mix(in srgb, #22e0d0 12%, transparent), transparent 46%),
+		radial-gradient(
+			700px 700px at 76% 88%,
+			color-mix(in srgb, #4d8bff 14%, transparent),
+			transparent 66%
+		),
+		radial-gradient(
+			520px 520px at 16% 34%,
+			color-mix(in srgb, #22e0d0 10%, transparent),
+			transparent 64%
+		);
+	--atmos-size: 100% 100%, 100% 100%, 100% 100%;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- VAPOR
+   Lavender and rose at dusk. */
+:root[data-palette='vapor'] {
+	--brand: #7340bd;
+	--brand-deep: #5b3199;
+	--brand-2: #b32d76;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #7340bd 42%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #7340bd 77%, transparent);
+	--brand-sweep: linear-gradient(135deg, #7340bd, #b32d76);
+	--paper: #f8f1fb;
+	--surface: #ffffff;
+	--surface-sunken: #efe3f6;
+	--surface-inset: #fbf7fd;
+	--ink: #1a0f28;
+	--fg: #1a0f28;
+	--muted: #5c4676;
+	--fg-muted: #5c4676;
+	--line: #e2d2ee;
+	--line-strong: #c4abd8;
+	--pop-line: #c4abd8;
+	--field-bg: #fbf7fd;
+	--field-bg-focus: #ffffff;
+	--field-border: #c4abd8;
+	--who-contractor: #7340bd;
+	--who-customer: #b32d76;
+	--ok-fg: #0a7d52;
+	--wait-fg: #a15600;
+	--stop-fg: #c92a42;
+	--danger: #c92a42;
+	--radius-card: 14px;
+	--radius-control: 10px;
+	--radius-pill: 999px;
+	--font-display: 'Syncopate', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: 0.16em;
+	--display-transform: uppercase;
+	--display-size: 0.76em;
+	--atmos:
+		radial-gradient(
+			820px 620px at 18% 6%,
+			color-mix(in srgb, #b32d76 15%, transparent),
+			transparent 62%
+		),
+		radial-gradient(
+			900px 680px at 84% 22%,
+			color-mix(in srgb, #7340bd 15%, transparent),
+			transparent 64%
+		),
+		linear-gradient(180deg, transparent 60%, color-mix(in srgb, #b32d76 7%, transparent));
+	--atmos-size: 100% 100%, 100% 100%, 100% 100%;
+	color-scheme: light;
+}
+:root[data-palette='vapor'][data-theme='dark'] {
+	--brand: #c9a7ff;
+	--brand-deep: #9d72e0;
+	--brand-2: #ff9ecd;
+	--on-brand: #160a26;
+	--brand-glow: color-mix(in srgb, #c9a7ff 42%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #c9a7ff 77%, transparent);
+	--brand-sweep: linear-gradient(135deg, #c9a7ff, #ff9ecd);
+	--paper: #100a1e;
+	--surface: #1a1130;
+	--surface-sunken: #241740;
+	--surface-inset: #0d0819;
+	--ink: #f4ecff;
+	--fg: #f4ecff;
+	--muted: #a794c4;
+	--fg-muted: #a794c4;
+	--line: #33224f;
+	--line-strong: #4b3470;
+	--pop-line: #4b3470;
+	--field-bg: #0d0819;
+	--field-bg-focus: #241740;
+	--field-border: #4b3470;
+	--who-contractor: #c9a7ff;
+	--who-customer: #ff9ecd;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 14px;
+	--radius-control: 10px;
+	--radius-pill: 999px;
+	--font-display: 'Syncopate', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: 0.16em;
+	--display-transform: uppercase;
+	--display-size: 0.76em;
+	--atmos:
+		radial-gradient(
+			820px 620px at 18% 6%,
+			color-mix(in srgb, #ff9ecd 22%, transparent),
+			transparent 62%
+		),
+		radial-gradient(
+			900px 680px at 84% 22%,
+			color-mix(in srgb, #c9a7ff 22%, transparent),
+			transparent 64%
+		),
+		linear-gradient(180deg, transparent 60%, color-mix(in srgb, #ff9ecd 10%, transparent));
+	--atmos-size: 100% 100%, 100% 100%, 100% 100%;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- HALOGEN
+   Cold light on graphite. */
+:root[data-palette='halogen'] {
+	--brand: #1f3b4d;
+	--brand-deep: #132836;
+	--brand-2: #4a6d84;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #1f3b4d 11%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #1f3b4d 19%, transparent);
+	--brand-sweep: linear-gradient(135deg, #1f3b4d, #4a6d84);
+	--paper: #eceff2;
+	--surface: #ffffff;
+	--surface-sunken: #e0e5ea;
+	--surface-inset: #f4f6f8;
+	--ink: #0c1116;
+	--fg: #0c1116;
+	--muted: #4a555f;
+	--fg-muted: #4a555f;
+	--line: #ccd3da;
+	--line-strong: #a3aeb9;
+	--pop-line: #a3aeb9;
+	--field-bg: #f4f6f8;
+	--field-bg-focus: #ffffff;
+	--field-border: #a3aeb9;
+	--who-contractor: #1f3b4d;
+	--who-customer: #2f5a72;
+	--ok-fg: #0a7d52;
+	--wait-fg: #a15600;
+	--stop-fg: #c92a42;
+	--danger: #c92a42;
+	--radius-card: 0px;
+	--radius-control: 0px;
+	--radius-pill: 0px;
+	--font-display: 'Space Grotesk', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: -0.02em;
+	--display-transform: none;
+	--display-size: 1em;
+	--atmos:
+		linear-gradient(color-mix(in srgb, #4a555f 9%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #4a555f 9%, transparent) 1px, transparent 1px),
+		linear-gradient(180deg, color-mix(in srgb, #1f3b4d 5%, transparent), transparent 34%);
+	--atmos-size: 16px 16px, 16px 16px, 100% 100%;
+	color-scheme: light;
+}
+:root[data-palette='halogen'][data-theme='dark'] {
+	--brand: #d6ecff;
+	--brand-deep: #8fb7d4;
+	--brand-2: #5f7d92;
+	--on-brand: #0a1017;
+	--brand-glow: color-mix(in srgb, #d6ecff 11%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #d6ecff 19%, transparent);
+	--brand-sweep: linear-gradient(135deg, #d6ecff, #5f7d92);
+	--paper: #08090b;
+	--surface: #121518;
+	--surface-sunken: #191d21;
+	--surface-inset: #060708;
+	--ink: #eef2f6;
+	--fg: #eef2f6;
+	--muted: #93a0ac;
+	--fg-muted: #93a0ac;
+	--line: #242a30;
+	--line-strong: #3a434c;
+	--pop-line: #3a434c;
+	--field-bg: #060708;
+	--field-bg-focus: #191d21;
+	--field-border: #3a434c;
+	--who-contractor: #d6ecff;
+	--who-customer: #9ec5e0;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 0px;
+	--radius-control: 0px;
+	--radius-pill: 0px;
+	--font-display: 'Space Grotesk', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: -0.02em;
+	--display-transform: none;
+	--display-size: 1em;
+	--atmos:
+		linear-gradient(color-mix(in srgb, #93a0ac 7%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #93a0ac 7%, transparent) 1px, transparent 1px),
+		linear-gradient(180deg, color-mix(in srgb, #d6ecff 6%, transparent), transparent 34%);
+	--atmos-size: 16px 16px, 16px 16px, 100% 100%;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- BLUEPRINT
+   Cyanotype drafting paper. */
+:root[data-palette='blueprint'] {
+	--brand: #0b4f8a;
+	--brand-deep: #083c6a;
+	--brand-2: #16709e;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #0b4f8a 17%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #0b4f8a 30%, transparent);
+	--brand-sweep: linear-gradient(135deg, #0b4f8a, #16709e);
+	--paper: #e6eff7;
+	--surface: #ffffff;
+	--surface-sunken: #d8e6f2;
+	--surface-inset: #f1f6fa;
+	--ink: #062033;
+	--fg: #062033;
+	--muted: #3d5f7a;
+	--fg-muted: #3d5f7a;
+	--line: #c2d6e6;
+	--line-strong: #95b5cf;
+	--pop-line: #95b5cf;
+	--field-bg: #f1f6fa;
+	--field-bg-focus: #ffffff;
+	--field-border: #95b5cf;
+	--who-contractor: #0b4f8a;
+	--who-customer: #9a4a00;
+	--ok-fg: #0a7d52;
+	--wait-fg: #a15600;
+	--stop-fg: #c92a42;
+	--danger: #c92a42;
+	--radius-card: 0px;
+	--radius-control: 0px;
+	--radius-pill: 0px;
+	--font-display: 'Space Grotesk', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: -0.02em;
+	--display-transform: none;
+	--display-size: 1em;
+	--atmos:
+		linear-gradient(color-mix(in srgb, #0b4f8a 9%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #0b4f8a 9%, transparent) 1px, transparent 1px),
+		linear-gradient(color-mix(in srgb, #0b4f8a 16%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #0b4f8a 16%, transparent) 1px, transparent 1px);
+	--atmos-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+	color-scheme: light;
+}
+:root[data-palette='blueprint'][data-theme='dark'] {
+	--brand: #7fdbff;
+	--brand-deep: #3ba9d6;
+	--brand-2: #ffffff;
+	--on-brand: #02121d;
+	--brand-glow: color-mix(in srgb, #7fdbff 17%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #7fdbff 30%, transparent);
+	--brand-sweep: linear-gradient(135deg, #7fdbff, #ffffff);
+	--paper: #031526;
+	--surface: #072135;
+	--surface-sunken: #0a2c45;
+	--surface-inset: #02101e;
+	--ink: #e2f1fb;
+	--fg: #e2f1fb;
+	--muted: #87aec7;
+	--fg-muted: #87aec7;
+	--line: #123c58;
+	--line-strong: #1d5779;
+	--pop-line: #1d5779;
+	--field-bg: #02101e;
+	--field-bg-focus: #0a2c45;
+	--field-border: #1d5779;
+	--who-contractor: #7fdbff;
+	--who-customer: #ffd6a5;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 0px;
+	--radius-control: 0px;
+	--radius-pill: 0px;
+	--font-display: 'Space Grotesk', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: -0.02em;
+	--display-transform: none;
+	--display-size: 1em;
+	--atmos:
+		linear-gradient(color-mix(in srgb, #7fdbff 8%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #7fdbff 8%, transparent) 1px, transparent 1px),
+		linear-gradient(color-mix(in srgb, #7fdbff 16%, transparent) 1px, transparent 1px),
+		linear-gradient(90deg, color-mix(in srgb, #7fdbff 16%, transparent) 1px, transparent 1px);
+	--atmos-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- EMBER
+   Forge orange over cooling iron. */
+:root[data-palette='ember'] {
+	--brand: #b8380a;
+	--brand-deep: #8f2b06;
+	--brand-2: #a3611b;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #b8380a 28%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #b8380a 52%, transparent);
+	--brand-sweep: linear-gradient(135deg, #b8380a, #a3611b);
+	--paper: #f6efe8;
+	--surface: #fffcf9;
+	--surface-sunken: #ebdfd4;
+	--surface-inset: #faf3ed;
+	--ink: #1d1209;
+	--fg: #1d1209;
+	--muted: #5d4735;
+	--fg-muted: #5d4735;
+	--line: #e2d3c4;
+	--line-strong: #bda58c;
+	--pop-line: #bda58c;
+	--field-bg: #faf3ed;
+	--field-bg-focus: #fffcf9;
+	--field-border: #bda58c;
+	--who-contractor: #b8380a;
+	--who-customer: #0f5f6b;
+	--ok-fg: #087048;
+	--wait-fg: #8f4c00;
+	--stop-fg: #bb2439;
+	--danger: #bb2439;
+	--radius-card: 6px;
+	--radius-control: 4px;
+	--radius-pill: 999px;
+	--font-display: 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 400;
+	--display-tracking: 0.04em;
+	--display-transform: uppercase;
+	--display-size: 0.92em;
+	--atmos:
+		radial-gradient(
+			1100px 480px at 50% 108%,
+			color-mix(in srgb, #b8380a 16%, transparent),
+			transparent 68%
+		),
+		radial-gradient(
+			700px 380px at 12% -6%,
+			color-mix(in srgb, #a3611b 12%, transparent),
+			transparent 66%
+		);
+	--atmos-size: 100% 100%, 100% 100%;
+	color-scheme: light;
+}
+:root[data-palette='ember'][data-theme='dark'] {
+	--brand: #ff7a2f;
+	--brand-deep: #cf5510;
+	--brand-2: #ffc14d;
+	--on-brand: #1c0902;
+	--brand-glow: color-mix(in srgb, #ff7a2f 28%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #ff7a2f 52%, transparent);
+	--brand-sweep: linear-gradient(135deg, #ff7a2f, #ffc14d);
+	--paper: #0f0a07;
+	--surface: #1a1210;
+	--surface-sunken: #241916;
+	--surface-inset: #0a0605;
+	--ink: #f8ece2;
+	--fg: #f8ece2;
+	--muted: #b39683;
+	--fg-muted: #b39683;
+	--line: #2c1e19;
+	--line-strong: #4a342b;
+	--pop-line: #4a342b;
+	--field-bg: #0a0605;
+	--field-bg-focus: #241916;
+	--field-border: #4a342b;
+	--who-contractor: #ff7a2f;
+	--who-customer: #45d6e0;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 6px;
+	--radius-control: 4px;
+	--radius-pill: 999px;
+	--font-display: 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 400;
+	--display-tracking: 0.04em;
+	--display-transform: uppercase;
+	--display-size: 0.92em;
+	--atmos:
+		radial-gradient(
+			1100px 480px at 50% 108%,
+			color-mix(in srgb, #ff7a2f 20%, transparent),
+			transparent 68%
+		),
+		radial-gradient(
+			700px 380px at 12% -6%,
+			color-mix(in srgb, #ffc14d 12%, transparent),
+			transparent 66%
+		);
+	--atmos-size: 100% 100%, 100% 100%;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- TIMBER
+   Pine and cedar on kraft paper. */
+:root[data-palette='timber'] {
+	--brand: #2f6b3f;
+	--brand-deep: #23522f;
+	--brand-2: #96551f;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #2f6b3f 24%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #2f6b3f 45%, transparent);
+	--brand-sweep: linear-gradient(135deg, #2f6b3f, #96551f);
+	--paper: #f2ece0;
+	--surface: #fffdf7;
+	--surface-sunken: #e6dccb;
+	--surface-inset: #faf5e9;
+	--ink: #211a10;
+	--fg: #211a10;
+	--muted: #5a4a33;
+	--fg-muted: #5a4a33;
+	--line: #ded1b9;
+	--line-strong: #b7a486;
+	--pop-line: #b7a486;
+	--field-bg: #faf5e9;
+	--field-bg-focus: #fffdf7;
+	--field-border: #b7a486;
+	--who-contractor: #2f6b3f;
+	--who-customer: #96551f;
+	--ok-fg: #087048;
+	--wait-fg: #8f4c00;
+	--stop-fg: #bb2439;
+	--danger: #bb2439;
+	--radius-card: 12px;
+	--radius-control: 8px;
+	--radius-pill: 999px;
+	--font-display: 'Bitter', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: -0.01em;
+	--display-transform: none;
+	--display-size: 1em;
+	--atmos:
+		radial-gradient(
+			900px 520px at 76% -8%,
+			color-mix(in srgb, #96551f 12%, transparent),
+			transparent 64%
+		),
+		repeating-linear-gradient(
+			90deg,
+			color-mix(in srgb, #5a4a33 5%, transparent) 0 1px,
+			transparent 1px 7px
+		);
+	--atmos-size: 100% 100%, auto;
+	color-scheme: light;
+}
+:root[data-palette='timber'][data-theme='dark'] {
+	--brand: #7fca8d;
+	--brand-deep: #4d9a61;
+	--brand-2: #e0a15f;
+	--on-brand: #0c1a10;
+	--brand-glow: color-mix(in srgb, #7fca8d 24%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #7fca8d 45%, transparent);
+	--brand-sweep: linear-gradient(135deg, #7fca8d, #e0a15f);
+	--paper: #12100b;
+	--surface: #1c1913;
+	--surface-sunken: #262119;
+	--surface-inset: #0d0b08;
+	--ink: #f2ead9;
+	--fg: #f2ead9;
+	--muted: #b0a289;
+	--fg-muted: #b0a289;
+	--line: #2d271d;
+	--line-strong: #48402f;
+	--pop-line: #48402f;
+	--field-bg: #0d0b08;
+	--field-bg-focus: #262119;
+	--field-border: #48402f;
+	--who-contractor: #7fca8d;
+	--who-customer: #e0a15f;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 12px;
+	--radius-control: 8px;
+	--radius-pill: 999px;
+	--font-display: 'Bitter', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: -0.01em;
+	--display-transform: none;
+	--display-size: 1em;
+	--atmos:
+		radial-gradient(
+			900px 520px at 76% -8%,
+			color-mix(in srgb, #e0a15f 12%, transparent),
+			transparent 64%
+		),
+		repeating-linear-gradient(
+			90deg,
+			color-mix(in srgb, #b0a289 6%, transparent) 0 1px,
+			transparent 1px 7px
+		);
+	--atmos-size: 100% 100%, auto;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- HIGHVIS
+   Safety orange on wet asphalt. */
+:root[data-palette='highvis'] {
+	--brand: #b23b00;
+	--brand-deep: #8b2e00;
+	--brand-2: #55670a;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #b23b00 26%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #b23b00 48%, transparent);
+	--brand-sweep: linear-gradient(135deg, #b23b00, #55670a);
+	--paper: #ebedee;
+	--surface: #ffffff;
+	--surface-sunken: #dee1e3;
+	--surface-inset: #f4f5f6;
+	--ink: #0f1214;
+	--fg: #0f1214;
+	--muted: #4b5257;
+	--fg-muted: #4b5257;
+	--line: #ced3d6;
+	--line-strong: #a2aab0;
+	--pop-line: #a2aab0;
+	--field-bg: #f4f5f6;
+	--field-bg-focus: #ffffff;
+	--field-border: #a2aab0;
+	--who-contractor: #b23b00;
+	--who-customer: #2b5f7d;
+	--ok-fg: #087048;
+	--wait-fg: #8f4c00;
+	--stop-fg: #bb2439;
+	--danger: #bb2439;
+	--radius-card: 2px;
+	--radius-control: 2px;
+	--radius-pill: 2px;
+	--font-display: 'Oswald', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: 0.06em;
+	--display-transform: uppercase;
+	--display-size: 1.04em;
+	--atmos:
+		repeating-linear-gradient(
+			45deg,
+			color-mix(in srgb, #b23b00 6%, transparent) 0 14px,
+			transparent 14px 28px
+		),
+		linear-gradient(180deg, color-mix(in srgb, #0f1214 5%, transparent), transparent 30%);
+	--atmos-size: auto, 100% 100%;
+	color-scheme: light;
+}
+:root[data-palette='highvis'][data-theme='dark'] {
+	--brand: #ff8a1f;
+	--brand-deep: #cc6a0d;
+	--brand-2: #d6ff3d;
+	--on-brand: #150800;
+	--brand-glow: color-mix(in srgb, #ff8a1f 26%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #ff8a1f 48%, transparent);
+	--brand-sweep: linear-gradient(135deg, #ff8a1f, #d6ff3d);
+	--paper: #0b0c0d;
+	--surface: #16181a;
+	--surface-sunken: #1e2124;
+	--surface-inset: #08090a;
+	--ink: #eef1f3;
+	--fg: #eef1f3;
+	--muted: #98a1a7;
+	--fg-muted: #98a1a7;
+	--line: #23272b;
+	--line-strong: #3b4147;
+	--pop-line: #3b4147;
+	--field-bg: #08090a;
+	--field-bg-focus: #1e2124;
+	--field-border: #3b4147;
+	--who-contractor: #ff8a1f;
+	--who-customer: #6fc3ee;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 2px;
+	--radius-control: 2px;
+	--radius-pill: 2px;
+	--font-display: 'Oswald', 'Archivo Black', system-ui, sans-serif;
+	--display-weight: 700;
+	--display-tracking: 0.06em;
+	--display-transform: uppercase;
+	--display-size: 1.04em;
+	--atmos:
+		repeating-linear-gradient(
+			45deg,
+			color-mix(in srgb, #ff8a1f 5%, transparent) 0 14px,
+			transparent 14px 28px
+		),
+		linear-gradient(180deg, color-mix(in srgb, #d6ff3d 5%, transparent), transparent 30%);
+	--atmos-size: auto, 100% 100%;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- LEDGER
+   Ink and rule on accounting paper. */
+:root[data-palette='ledger'] {
+	--brand: #15603a;
+	--brand-deep: #0f4a2c;
+	--brand-2: #8a1c1c;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #15603a 20%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #15603a 38%, transparent);
+	--brand-sweep: linear-gradient(135deg, #15603a, #8a1c1c);
+	--paper: #f3f0e6;
+	--surface: #fffdf6;
+	--surface-sunken: #e8e4d5;
+	--surface-inset: #f8f6ee;
+	--ink: #131a1f;
+	--fg: #131a1f;
+	--muted: #4c5760;
+	--fg-muted: #4c5760;
+	--line: #ddd8c6;
+	--line-strong: #b2ab97;
+	--pop-line: #b2ab97;
+	--field-bg: #f8f6ee;
+	--field-bg-focus: #fffdf6;
+	--field-border: #b2ab97;
+	--who-contractor: #15603a;
+	--who-customer: #8a1c1c;
+	--ok-fg: #087048;
+	--wait-fg: #8f4c00;
+	--stop-fg: #bb2439;
+	--danger: #bb2439;
+	--radius-card: 2px;
+	--radius-control: 2px;
+	--radius-pill: 2px;
+	--font-display: 'Source Serif 4', Georgia, serif;
+	--display-weight: 700;
+	--display-tracking: 0em;
+	--display-transform: none;
+	--display-size: 1.04em;
+	--atmos:
+		repeating-linear-gradient(
+			180deg,
+			transparent 0 27px,
+			color-mix(in srgb, #4c5760 8%, transparent) 27px 28px
+		),
+		linear-gradient(
+			90deg,
+			transparent 0 72px,
+			color-mix(in srgb, #8a1c1c 14%, transparent) 72px 73px,
+			transparent 73px
+		);
+	--atmos-size: auto, 100% 100%;
+	color-scheme: light;
+}
+:root[data-palette='ledger'][data-theme='dark'] {
+	--brand: #4fce8f;
+	--brand-deep: #2a9c66;
+	--brand-2: #ff8a80;
+	--on-brand: #04150c;
+	--brand-glow: color-mix(in srgb, #4fce8f 20%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #4fce8f 38%, transparent);
+	--brand-sweep: linear-gradient(135deg, #4fce8f, #ff8a80);
+	--paper: #0c0e0f;
+	--surface: #15181a;
+	--surface-sunken: #1d2124;
+	--surface-inset: #08090a;
+	--ink: #ecebe1;
+	--fg: #ecebe1;
+	--muted: #9e9c8f;
+	--fg-muted: #9e9c8f;
+	--line: #24282b;
+	--line-strong: #3c4246;
+	--pop-line: #3c4246;
+	--field-bg: #08090a;
+	--field-bg-focus: #1d2124;
+	--field-border: #3c4246;
+	--who-contractor: #4fce8f;
+	--who-customer: #ff8a80;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 2px;
+	--radius-control: 2px;
+	--radius-pill: 2px;
+	--font-display: 'Source Serif 4', Georgia, serif;
+	--display-weight: 700;
+	--display-tracking: 0em;
+	--display-transform: none;
+	--display-size: 1.04em;
+	--atmos:
+		repeating-linear-gradient(
+			180deg,
+			transparent 0 27px,
+			color-mix(in srgb, #9e9c8f 7%, transparent) 27px 28px
+		),
+		linear-gradient(
+			90deg,
+			transparent 0 72px,
+			color-mix(in srgb, #ff8a80 12%, transparent) 72px 73px,
+			transparent 73px
+		);
+	--atmos-size: auto, 100% 100%;
+	color-scheme: dark;
+}
+
+/* ---------------------------------------------------------- NOCTURNE
+   Brass on midnight plum. */
+:root[data-palette='nocturne'] {
+	--brand: #8a641c;
+	--brand-deep: #6b4d13;
+	--brand-2: #6d2a52;
+	--on-brand: #ffffff;
+	--brand-glow: color-mix(in srgb, #8a641c 22%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #8a641c 40%, transparent);
+	--brand-sweep: linear-gradient(135deg, #8a641c, #6d2a52);
+	--paper: #f5f0ef;
+	--surface: #fffdfc;
+	--surface-sunken: #eae1e2;
+	--surface-inset: #faf6f5;
+	--ink: #1c1218;
+	--fg: #1c1218;
+	--muted: #574650;
+	--fg-muted: #574650;
+	--line: #e0d5d6;
+	--line-strong: #b8a7ab;
+	--pop-line: #b8a7ab;
+	--field-bg: #faf6f5;
+	--field-bg-focus: #fffdfc;
+	--field-border: #b8a7ab;
+	--who-contractor: #8a641c;
+	--who-customer: #6d2a52;
+	--ok-fg: #087048;
+	--wait-fg: #8f4c00;
+	--stop-fg: #bb2439;
+	--danger: #bb2439;
+	--radius-card: 10px;
+	--radius-control: 999px;
+	--radius-pill: 999px;
+	--font-display: 'Playfair Display', Georgia, serif;
+	--display-weight: 700;
+	--display-tracking: 0.01em;
+	--display-transform: none;
+	--display-size: 1.06em;
+	--atmos:
+		radial-gradient(
+			1000px 600px at 84% -10%,
+			color-mix(in srgb, #6d2a52 12%, transparent),
+			transparent 62%
+		),
+		radial-gradient(
+			800px 500px at 6% 12%,
+			color-mix(in srgb, #8a641c 10%, transparent),
+			transparent 60%
+		);
+	--atmos-size: 100% 100%, 100% 100%;
+	color-scheme: light;
+}
+:root[data-palette='nocturne'][data-theme='dark'] {
+	--brand: #e8c07a;
+	--brand-deep: #b8914f;
+	--brand-2: #c48cd8;
+	--on-brand: #1a1104;
+	--brand-glow: color-mix(in srgb, #e8c07a 22%, transparent);
+	--brand-glow-strong: color-mix(in srgb, #e8c07a 40%, transparent);
+	--brand-sweep: linear-gradient(135deg, #e8c07a, #c48cd8);
+	--paper: #0f0a12;
+	--surface: #1a1220;
+	--surface-sunken: #241830;
+	--surface-inset: #0a0610;
+	--ink: #f4ecf6;
+	--fg: #f4ecf6;
+	--muted: #ab9ab7;
+	--fg-muted: #ab9ab7;
+	--line: #2c1f3a;
+	--line-strong: #453259;
+	--pop-line: #453259;
+	--field-bg: #0a0610;
+	--field-bg-focus: #241830;
+	--field-border: #453259;
+	--who-contractor: #e8c07a;
+	--who-customer: #c48cd8;
+	--ok-fg: #3ddc97;
+	--wait-fg: #ffa94d;
+	--stop-fg: #ff5c72;
+	--danger: #ff5c72;
+	--radius-card: 10px;
+	--radius-control: 999px;
+	--radius-pill: 999px;
+	--font-display: 'Playfair Display', Georgia, serif;
+	--display-weight: 700;
+	--display-tracking: 0.01em;
+	--display-transform: none;
+	--display-size: 1.06em;
+	--atmos:
+		radial-gradient(
+			1000px 600px at 84% -10%,
+			color-mix(in srgb, #c48cd8 16%, transparent),
+			transparent 62%
+		),
+		radial-gradient(
+			800px 500px at 6% 12%,
+			color-mix(in srgb, #e8c07a 12%, transparent),
+			transparent 60%
+		);
+	--atmos-size: 100% 100%, 100% 100%;
+	color-scheme: dark;
+}
+
+/* --------------------------------------------------------- Elevation
+   Light: a hairline plus the faintest lift. Dark: no lift at all — on a
+   near-black ground a drop shadow is invisible and only muddies the edge, so
+   depth is the rule and nothing else. The token names stay because every
+   component already references them. */
+:root {
+	--pop-shadow: 0 1px 2px rgba(10, 20, 35, 0.06), 0 2px 8px rgba(10, 20, 35, 0.07);
+	--pop-shadow-lg: 0 6px 20px rgba(10, 20, 35, 0.14);
+	--pop-shadow-sm: 0 1px 2px rgba(10, 20, 35, 0.07);
+	--card-shadow: 0 1px 2px rgba(10, 20, 35, 0.05);
+}
+:root[data-theme='dark'] {
+	--pop-shadow: none;
+	--pop-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+	--pop-shadow-sm: none;
+	--card-shadow: none;
+}
+
+/* ---------------------------------------------------- Literal interception
+
+   The app carries a lot of inline `style="background: #f6f8fa"` from before the
+   token system existed. These rules catch those literals and repaint them from
+   the palette.
+
+   NOT scoped to dark any more, and that is the change that makes three palettes
+   possible. While there was one theme with one accent, a light-mode literal was
+   already the right colour and only dark needed correcting. With a palette that
+   can be blue, green or violet, `#f6f8fa` is a cool grey sitting on a carbon-green
+   page — wrong in LIGHT mode too. Mapping literal → token unconditionally means
+   both themes and all three palettes come out right from one rule.
+
+   `!important` is load-bearing: an inline style is (1,0,0,0) and these selectors
+   are (0,1,0), so without it nothing here would ever apply. */
+
+/* White / near-white fills → the card surface. */
+[style*='background: #fff'],
+[style*='background:#fff'],
+[style*='background: #ffffff'],
+[style*='background: white'] {
+	background-color: var(--surface) !important;
+}
+/* Light-grey fills → the sunken surface a card sits on. */
+[style*='background: #f6f8fa'],
+[style*='background: #f9fafb'],
+[style*='background: #fbfcfd'],
+[style*='background: #f9fbfd'],
+[style*='background: #eef1f5'] {
+	background-color: var(--surface-sunken) !important;
+}
+/* Primary text. */
+[style*='color: #1f2328'],
+[style*='color: #24292f'],
+[style*='color: #1b1f24'] {
+	color: var(--fg) !important;
+}
+/* Secondary text. */
+[style*='color: #57606a'],
+[style*='color: #8c959f'],
+[style*='color: #8b949e'],
+[style*='color: #6e7781'] {
+	color: var(--fg-muted) !important;
+}
+/* Hairline borders. */
+[style*='1px solid #d0d7de'],
+[style*='1px solid #e2e6ea'],
+[style*='1px solid #e4e8ee'],
+[style*='1px solid #eef1f4'],
+[style*='1px solid #eaeef2'] {
+	border-color: var(--line) !important;
+}
+/* The legacy GitHub blue, wherever it is still doing accent duty on something
+   that is not a button or a link — a section heading, a badge on an avatar.
+   Those two ARE handled further down; this catches everything else, which
+   otherwise stays blue no matter which palette is on. */
+[style*='color: #0969da']:not([style*='background']) {
+	color: var(--brand-deep) !important;
+}
+[style*='background: #0969da'] {
+	background-color: var(--brand) !important;
+	color: var(--on-brand) !important;
+}
+
+/* The accent rule needs no dark variant any more: `--brand` already steps to
+   its dark value, so the gradient in the Base section is correct in both
+   themes. The old override existed only because yellow did not flip. */
+
+/* Icon buttons in dark. The base is borderless and unfilled in both themes now
+   (see the `.icon-btn` block below), so all that is left here is the hover wash:
+   `--surface-sunken` is the light-mode hover and is nearly invisible against a
+   near-black ground, so dark mixes the brand in instead. */
 :root[data-theme='dark'] .icon-btn:hover:not(:disabled) {
-	background: #2b313a;
-	border-color: #48515d;
-	box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
+	background: color-mix(in srgb, var(--brand) 14%, var(--surface));
+	border-color: var(--line-strong);
 }
 :root[data-theme='dark'] .icon-btn:active:not(:disabled) {
-	background: #1a1e24;
-	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+	background: color-mix(in srgb, var(--brand) 22%, var(--surface));
 }
-/* Active/"open" toggle icon buttons (purple wash) → a dark purple. */
-:root[data-theme='dark'] .icon-btn.on {
-	background: #2e2a44 !important;
-	border-color: #4a3f6b !important;
-	color: #cabff5 !important;
+/* The labelled card action is borderless on the same reasoning and needs the
+   same treatment: its light-mode wash does not register on a dark ground. */
+:root[data-theme='dark'] .card-btn:hover {
+	background: color-mix(in srgb, var(--brand) 14%, var(--surface));
+	border-color: var(--line-strong);
 }
-/* NOTE: primary/secondary buttons, tags, cards, dialogs and inputs are now
+/* The "open"/active toggle state. Was a hardcoded purple wash, which is now
+   either the brand or a clash depending on the palette — so it is the brand. */
+:root[data-theme='dark'] .icon-btn.on,
+:root[data-theme='dark'] .icon-btn.on:hover {
+	background: color-mix(in srgb, var(--brand) 20%, var(--surface));
+	border-color: var(--brand);
+	color: var(--brand);
+}
+/* NOTE: primary/secondary buttons, cards, dialogs and inputs are now
    token-driven in the pop-art layer below (var(--surface), var(--pop-line),
    var(--pop-shadow*)), so they need no separate dark overrides here. */
 
@@ -212,18 +1522,14 @@ html {
 body {
 	margin: 0;
 	color: var(--ink);
-	background-color: var(--paper);
-	/* Sleek, subtle warm glow anchored to the top of the viewport — no busy pattern. */
-	background-image: radial-gradient(
-		1100px 480px at 50% -160px,
-		rgba(255, 204, 0, 0.1),
-		transparent 65%
-	);
-	background-repeat: no-repeat;
-	background-attachment: fixed;
+	/* Deliberately NOT painted here. `body::before` below carries both the ground
+	   and the theme's atmosphere, and it sits at z-index -1 — which paints beneath
+	   its own parent's background. An opaque body would hide the whole layer, and
+	   the symptom is a theme that looks like a flat recolour. `html` keeps the
+	   ground so the canvas is still correct while the page is loading. */
+	background-color: transparent;
 	font-family:
-		'Arial Black',
-		'Helvetica Neue',
+		'Inter',
 		system-ui,
 		-apple-system,
 		'Segoe UI',
@@ -232,24 +1538,58 @@ body {
 	-webkit-font-smoothing: antialiased;
 }
 
+/* ------------------------------------------------------------- Atmosphere
+   The theme's air, painted once behind the entire app.
+
+   A fixed pseudo-element rather than a background on <body>: a background-image
+   on a scrolling element either travels with the content (wrong — a horizon
+   should not scroll away) or needs `background-attachment: fixed`, which forces
+   a repaint of the whole image on every scroll frame and is a known jank source
+   on mobile Safari. A fixed layer at z-index -1 is composited once and simply
+   sits there.
+
+   `pointer-events: none` so it never eats a click, and it is invisible to
+   assistive tech because it has no content to expose. */
+body::before {
+	content: '';
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background-color: var(--paper);
+	background-image: var(--atmos, none);
+	background-size: var(--atmos-size, auto);
+	background-position: center;
+	background-repeat: repeat;
+}
+
+/* Headings wear the theme's display face; body text never does. Several of
+   these faces (Michroma, Syncopate) are unreadable below about 14px and none of
+   them were drawn for paragraphs — the split is what keeps a loud theme
+   legible. Every value here is a token, so a theme changes its voice without
+   touching a single rule. */
 h1,
 h2,
 h3 {
-	text-transform: uppercase;
-	letter-spacing: -0.01em;
-	font-weight: 900;
-	line-height: 1.05;
+	font-family: var(--font-display);
+	font-weight: var(--display-weight, 900);
+	letter-spacing: var(--display-tracking, -0.01em);
+	text-transform: var(--display-transform, uppercase);
+	/* The faces differ wildly in optical size — Syncopate at 1em next to
+	   Rajdhani at 1em is a two-step jump — so each carries its own correction. */
+	font-size: var(--display-size, 1em);
+	line-height: 1.08;
 }
 
 h1 {
 	/* Yellow highlight behind the page title — borderless now, floating on soft
 	   elevation instead of sitting in a black frame. */
 	display: inline-block;
-	background: var(--yellow);
-	color: var(--on-yellow);
-	border-radius: 10px;
+	background: var(--brand-sweep);
+	color: var(--on-brand);
+	border-radius: var(--radius-control);
 	padding: 0.15em 0.5em;
-	box-shadow: var(--pop-shadow);
+	box-shadow: 0 0 24px var(--brand-glow);
 }
 
 /* Quiet section title. The navbar's active link already announces which
@@ -264,8 +1604,10 @@ h1.page-title {
 	box-shadow: none;
 	padding: 0;
 	font-size: 0.95rem;
-	letter-spacing: 0.06em;
-	color: var(--muted);
+	letter-spacing: var(--display-tracking, 0.06em);
+	/* The accent, as text. On the loud themes this is the one place the display
+	   face gets to be a colour rather than a shape. */
+	color: var(--brand);
 }
 
 /* Text selection. The label is pinned dark rather than var(--ink): --ink flips to
@@ -273,8 +1615,8 @@ h1.page-title {
    inside form fields where selection is used constantly. Yellow is light in both
    themes, so its text is always dark. */
 ::selection {
-	background: var(--yellow);
-	color: var(--on-yellow);
+	background: var(--brand);
+	color: var(--on-brand);
 }
 
 /* ------------------------------------------------------------ Buttons */
@@ -302,10 +1644,16 @@ summary,
    var(--ink): yellow is light in both themes, so its text must always be dark. */
 button[style*='background: #0969da'],
 a[style*='background: #0969da'] {
-	background: var(--yellow) !important;
-	color: #14171c !important;
+	background: var(--brand-sweep) !important;
+	color: var(--on-brand) !important;
 	border: none !important;
-	box-shadow: var(--pop-shadow-sm);
+	border-radius: var(--radius-control) !important;
+	/* Emission, not elevation: a ring of the accent tight to the edge plus a
+	   soft bloom past it. On the cold themes --brand-glow is scaled right down,
+	   so the same rule reads as a hairline there and as neon on Vapor. */
+	box-shadow:
+		0 0 0 1px var(--brand-glow-strong),
+		0 0 20px var(--brand-glow);
 	font-weight: 700 !important;
 	transition:
 		transform 0.12s ease,
@@ -314,9 +1662,11 @@ a[style*='background: #0969da'] {
 }
 button[style*='background: #0969da']:hover,
 a[style*='background: #0969da']:hover {
-	background: var(--yellow-deep) !important;
+	filter: brightness(1.12) saturate(1.05);
 	transform: translateY(-1px);
-	box-shadow: var(--pop-shadow);
+	box-shadow:
+		0 0 0 1px var(--brand-glow-strong),
+		0 0 30px var(--brand-glow);
 }
 button[style*='background: #0969da']:active,
 a[style*='background: #0969da']:active {
@@ -344,43 +1694,59 @@ a[style*='border: 1px solid #0969da'] {
 /* ------------------------------------------------------------ Icon buttons */
 
 /* Shared treatment for every icon button — dashboard, orders and the customer
-   directory all use `.icon-btn`. No standing fill: the bold glyph carries it,
-   with only a faint wash on hover/press. Size (width/height/font-size) stays
-   inline since it varies per use. */
+   directory all use `.icon-btn`.
+
+   NO BORDER and no standing fill. A 1.9rem square with an outline around it is a
+   box you have to read past to get to the glyph, and a row of them turns a card
+   into a control panel. The glyph IS the button: it carries the weight, and the
+   only chrome is a wash that appears under the pointer. The border is kept as a
+   transparent 1px so hover can bring one in without shifting layout by a pixel.
+
+   Size stays at the call site (width/height vary per use); the glyph size below
+   is the floor, which a call site only overrides to go bigger. */
 .icon-btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	border: 1px solid #e4e8ee;
-	border-radius: 10px;
-	background: #fff;
+	border: 1px solid transparent;
+	border-radius: var(--radius-control);
+	background: none;
 	color: var(--ink);
 	cursor: pointer;
 	line-height: 1;
 	padding: 0;
-	/* Light border + soft shadow so it reads as a raised, pressable chip. */
-	box-shadow: 0 1px 2px rgba(27, 31, 36, 0.09);
+	/* Bigger than it was. With the border gone the glyph has the whole square to
+	   itself, and at the old size it read as small type floating in space. */
+	font-size: 1.15rem;
 	transition:
-		box-shadow 0.14s ease,
-		transform 0.1s ease,
+		background 0.14s ease,
 		border-color 0.14s ease,
-		background 0.12s ease;
+		color 0.14s ease,
+		transform 0.1s ease;
 }
-/* Lift on hover, press in on click. Skipped when disabled. */
+/* Hover brings in the wash and the border; press sinks it. Skipped when disabled. */
 .icon-btn:hover:not(:disabled) {
-	border-color: #d0d7de;
-	box-shadow: 0 4px 10px rgba(27, 31, 36, 0.15);
-	transform: translateY(-1px);
+	background: var(--surface-sunken);
+	border-color: var(--line);
+	color: var(--brand);
 }
 .icon-btn:active:not(:disabled) {
-	background: #f6f8fa;
-	box-shadow: 0 1px 2px rgba(27, 31, 36, 0.12);
+	background: var(--surface-inset);
+	border-color: var(--line-strong);
 	transform: translateY(1px);
 }
 .icon-btn:disabled {
 	opacity: 0.4;
 	cursor: default;
-	box-shadow: none;
+}
+/* The "open"/pressed toggle state, for the buttons that open a panel and stay
+   lit while it is up. Brand-driven in both themes — see the dark block above,
+   which only has to restate the mix against a darker ground. */
+.icon-btn.on,
+.icon-btn.on:hover {
+	background: color-mix(in srgb, var(--brand) 14%, var(--surface));
+	border-color: var(--brand);
+	color: var(--brand);
 }
 .icon-btn:focus-visible {
 	outline: 2px solid var(--ink);
@@ -398,9 +1764,12 @@ a[style*='border: 1px solid #0969da'] {
 .card {
 	background: var(--surface);
 	border: 1px solid var(--line);
-	border-radius: 16px;
+	border-radius: var(--radius-card);
 	padding: 1.1rem 1.2rem;
 	box-shadow: var(--card-shadow);
+	/* Cards sit ON the atmosphere, so they need a ground of their own or the
+	   grid shows through and every card looks like a window. */
+	background-clip: padding-box;
 	display: grid;
 	gap: 0.85rem;
 }
@@ -443,8 +1812,12 @@ input:focus,
 select:focus,
 textarea:focus {
 	outline: none;
-	border-color: var(--yellow-deep);
-	box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+	border-color: var(--brand);
+	/* A lit edge, not a soft halo: a hard 2px of the accent, then a bloom that
+	   the cold themes barely spend. */
+	box-shadow:
+		0 0 0 2px var(--brand-glow-strong),
+		0 0 14px var(--brand-glow);
 }
 
 /* ------------------------------------------------------------ Links & chips */
@@ -453,7 +1826,7 @@ textarea:focus {
 a[style*='color: #0969da']:not([style*='background']) {
 	color: var(--ink) !important;
 	text-decoration: underline;
-	text-decoration-color: var(--yellow-deep);
+	text-decoration-color: var(--brand-deep);
 	text-decoration-thickness: 2px;
 	text-underline-offset: 3px;
 	font-weight: 700;
@@ -462,8 +1835,8 @@ a[style*='color: #0969da']:not([style*='background']) {
 /* Tag chips (light-blue) → yellow. Text pinned dark (yellow is light in both
    themes); no border — the fill carries it. */
 span[style*='background: #ddf4ff'] {
-	background: var(--yellow) !important;
-	color: #14171c !important;
+	background: var(--brand) !important;
+	color: var(--on-brand) !important;
 	border: none;
 	font-weight: 700;
 }
@@ -471,8 +1844,9 @@ span[style*='background: #ddf4ff'] {
 /* ------------------------------------------------------------ Dialogs */
 
 dialog {
-	border: 1px solid var(--line) !important;
-	box-shadow: 0 18px 50px rgba(27, 31, 36, 0.22) !important;
+	border: 1px solid var(--line-strong) !important;
+	border-radius: var(--radius-card);
+	box-shadow: 0 18px 50px rgba(10, 20, 35, 0.22) !important;
 	background: var(--surface);
 	color: var(--fg);
 }
@@ -507,9 +1881,9 @@ dialog::backdrop {
 	   line and made the body feel like a chat input rather than an email. */
 	width: 360px;
 	max-width: 86vw;
-	background: #f6f4fc;
-	border: 1px solid #cdbff0;
-	border-radius: 12px;
+	background: var(--surface);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-card);
 	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
 	padding: 0.8rem;
 	display: grid;
@@ -578,34 +1952,8 @@ dialog::backdrop {
 		   stretching the rows. */
 		align-content: start;
 		overflow-y: auto;
-		border-radius: 16px;
+		border-radius: var(--radius-card);
 	}
-}
-
-/* ------------------------------------------------------------------- Tags
-   One chip treatment for order, customer and subcontractor tags. These used to
-   be three different inline styles (grey pill, blue pill, and none on orders),
-   which made the same idea look like three. Token-driven so dark works too. */
-.tag-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.3rem;
-	min-width: 0;
-}
-.tag-chip {
-	display: inline-block;
-	max-width: 100%;
-	padding: 0.1rem 0.55rem;
-	border-radius: 999px;
-	background: var(--surface-sunken);
-	border: 1px solid var(--line-strong);
-	color: var(--fg-muted);
-	font-size: 0.72rem;
-	font-weight: 700;
-	line-height: 1.5;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 }
 
 /* ---------------------------------------------------------------- Status pill
@@ -617,9 +1965,9 @@ dialog::backdrop {
    recoloured without every call site turning into a lie. */
 .status-pill {
 	display: inline-block;
-	border-radius: 999px;
+	border-radius: var(--radius-pill);
 	padding: 0.15rem 0.65rem;
-	border: 1.5px solid;
+	border: 1px solid;
 	font-size: 0.78rem;
 	font-weight: 700;
 	white-space: nowrap;
@@ -681,7 +2029,7 @@ dialog::backdrop {
    exists to serve, retired. Size and layout stay at the call site. */
 .field-input {
 	padding: 0.5rem;
-	border-radius: 8px;
+	border-radius: var(--radius-control);
 	border: 1px solid var(--field-border);
 	background: var(--field-bg);
 	color: var(--fg);
@@ -710,11 +2058,12 @@ dialog::backdrop {
 	gap: 0.25rem;
 	min-width: 1.25rem;
 	padding: 0.1rem 0.5rem;
-	border-radius: 999px;
-	background: var(--yellow);
-	border: 1px solid var(--yellow-deep);
-	/* Never --ink: see the --on-yellow note at the top of this file. */
-	color: var(--on-yellow);
+	border-radius: var(--radius-pill);
+	background: var(--brand-sweep);
+	border: none;
+	box-shadow: 0 0 12px var(--brand-glow);
+	/* Never --ink: see the --on-brand note at the top of this file. */
+	color: var(--on-brand);
 	font-size: 0.72rem;
 	font-weight: 800;
 	line-height: 1.5;
@@ -726,7 +2075,7 @@ dialog::backdrop {
 	vertical-align: middle;
 }
 a.count-badge:hover {
-	background: var(--yellow-deep);
+	background: var(--brand-deep);
 }
 
 /* ------------------------------------------------------ Brand accent line
@@ -735,12 +2084,411 @@ a.count-badge:hover {
    The class name stays so the layout needs no edits. */
 .hazard {
 	height: 3px;
-	background: linear-gradient(
-		90deg,
-		var(--yellow-deep),
-		var(--yellow) 25%,
-		var(--yellow) 75%,
-		var(--yellow-deep)
-	);
+	background: linear-gradient(90deg, var(--brand-deep), var(--brand) 40%, var(--brand-2));
+	box-shadow: 0 0 12px var(--brand-glow);
 	border: none;
+}
+
+/* ============================================================
+   Larger viewports
+   ============================================================
+
+   The app was authored phone-first, and every contractor page opened with the
+   same hardcoded `max-width: 860px` column. That is the right measure on a
+   phone and a waste on anything bigger: on a 1440px display two thirds of the
+   screen was empty paper either side of a single stack of cards.
+
+   The column is now a token that steps up with the viewport, so widening a page
+   is one class rather than a per-file media query, and every surface widens in
+   step instead of drifting apart. Reading surfaces (settings, billing, support)
+   deliberately do NOT use it — a form or a paragraph has an ideal measure and
+   growing it past ~70ch makes it harder to read, not easier.
+   ------------------------------------------------------------ */
+
+:root {
+	/* The working column. Steps below; phones keep exactly what they had. */
+	--page-max: 860px;
+	/* Space between the column and the screen edge. */
+	--page-gutter: 1rem;
+	/* Space between the cards/panels a page is built from. Grows with the column
+	   so a wide layout doesn't read as a dense one. */
+	--page-gap: 1rem;
+}
+/* Tablet, portrait. Wide enough for two columns of cards. */
+@media (min-width: 900px) {
+	:root {
+		--page-max: 1080px;
+		--page-gutter: 1.5rem;
+		--page-gap: 1.15rem;
+	}
+}
+/* Laptop / desktop. */
+@media (min-width: 1280px) {
+	:root {
+		--page-max: 1320px;
+		--page-gutter: 2rem;
+		--page-gap: 1.25rem;
+	}
+}
+/* Large desktop. Capped rather than fluid: past this the eye has to travel too
+   far across a row, and a third column of cards is more useful than a wider one. */
+@media (min-width: 1700px) {
+	:root {
+		--page-max: 1560px;
+	}
+}
+
+/* THE page container. Replaces the copies of `max-width: 860px; margin: 0 auto`
+   that each contractor page carried inline. */
+.page-shell {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: var(--page-max);
+	margin-inline: auto;
+	padding: 1.25rem var(--page-gutter) 2.5rem;
+	display: grid;
+	gap: var(--page-gap);
+	/* A grid child defaults to `min-width: auto`, which lets a wide table or a
+	   long unbroken string push the whole column past the viewport. */
+	min-width: 0;
+}
+
+/* A responsive card grid. Cards flow into as many columns as fit at
+   `--card-min` (default 22rem), so the count follows the real width rather than
+   a breakpoint guess — and a page that sets a wider `--card-min` for its own
+   denser cards needs no new media query.
+
+   `auto-fill`, not `auto-fit`: with `auto-fit` a single remaining card stretches
+   to the full row and a one-result search looks like a different page. */
+.card-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(var(--card-min, 22rem), 100%), 1fr));
+	gap: var(--page-gap);
+	/* STRETCH, not `start`. Sized to their own content, three cards in a row ended
+	   at three different heights — a ragged shelf that reads as a rendering fault
+	   rather than a list. Stretching makes the row one band deep.
+	   
+	   Stretching alone is not enough and can even make things worse: it equalises
+	   the row to its TALLEST card, so one long project name inflates its
+	   neighbours. The other half of the job is on the cards themselves, which cap
+	   and reserve their text — see the title clamps on the order list and the
+	   dashboard feed. */
+	align-items: stretch;
+}
+
+/* Card text that has to measure the same on every card in the grid.
+   
+   `--card-lines` lines, always: the clamp caps a long value with an ellipsis and
+   the matching `min-height` reserves the space for a short one, so a card with a
+   two-word project name is exactly as tall as one with a sentence. Reserving is
+   the half that is easy to miss — clamping alone still lets a short title sit in
+   a shorter card.
+   
+   `-webkit-line-clamp` is the unprefixed behaviour everywhere that matters; the
+   standard `line-clamp` is listed alongside it for where it has landed. */
+.card-clamp {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: var(--card-lines, 1);
+	line-clamp: var(--card-lines, 1);
+	overflow: hidden;
+	line-height: var(--card-clamp-lh, 1.3);
+	/* How many lines are HELD OPEN, which is not always how many are allowed.
+	   Reserving everything you clamp to is what keeps a grid row even, but it also
+	   means a one-line title sits above a blank line — visible as an oddly wide
+	   gap between a job and the customer under it. A card that would rather have
+	   the room back sets `--card-reserve: 1` and keeps the two-line clamp. */
+	min-height: calc(var(--card-reserve, var(--card-lines, 1)) * var(--card-clamp-lh, 1.3) * 1em);
+	/* A URL or an unspaced name must break rather than push the card wider. */
+	overflow-wrap: anywhere;
+}
+/* An item that has to own its row — an expanded accordion card in a directory,
+   which would otherwise stretch every sibling in its row to match its height, or
+   an empty state that would sit in column one with blank columns beside it.
+   Deliberately not scoped to `.card-grid`: the directories build their own grids
+   with their own card minimums and need the same escape hatch. */
+.span-all {
+	grid-column: 1 / -1;
+}
+
+/* ============================================================
+   Charts
+
+   The series palette lives in the palette blocks at the top of this file, one
+   set per theme, because a chart's ground is the card it sits on and that moves
+   with the palette. What stays here is the rule about HOW they are assigned:
+   slots 1-5 go out in fixed order and are never cycled — a sixth category folds
+   into `--viz-other` rather than borrowing slot 1, so a reader who learned
+   "Pergola is blue" is never told otherwise by a data change.
+
+   Slots 1-5 were validated for lightness band, chroma, colour-vision separation
+   and contrast against the ORIGINAL white / #1b1f26 card surfaces. Voltage and
+   Overdrive land close enough to those to hold; Circuit's carbon-green card is
+   the one worth re-running the validator against before it ships.
+   ============================================================ */
+
+/* ============================================================
+   Cards that are links
+
+   A card in a list — a job on the dashboard, an order in the orders list — IS a
+   link to the thing it describes. Pressing anywhere on it opens that thing, and
+   the one or two controls that do something ELSE sit on top.
+
+   Built as a stretched pseudo-element rather than a click handler on the card,
+   and that is the whole point: `<div onclick={goto}>` throws away cmd-click,
+   middle-click, "open in new tab", the status-bar URL preview and the browser's
+   own history semantics, none of which a handler can give back. A real <a> whose
+   ::after covers the card keeps all of it.
+
+   Shared here because the two lists kept drifting apart while each owned its own
+   copy — one grew a labelled button while the other kept bare icon squares, and
+   they stopped looking like the same product.
+   ============================================================ */
+
+/* The card. Establishes the positioning context the stretched link fills. */
+.stretch-host {
+	position: relative;
+}
+
+/* The link. Sits in the flow as normal content — usually the title — and its
+   ::after does the covering. */
+.stretch-link {
+	color: inherit;
+	text-decoration: none;
+}
+.stretch-link::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+}
+/* The focus ring belongs on the CARD, not on the two lines of text in the middle
+   of it: a keyboard user needs to see which card they are on, not which words. */
+.stretch-link:focus-visible {
+	outline: none;
+}
+.stretch-host:focus-within {
+	outline: 2px solid var(--brand);
+	outline-offset: 2px;
+}
+
+/* The anchor for a control that sits on top of the link — the message button,
+   the icon picker — and for whatever that control opens.
+   
+   Deliberately NO `z-index`. It would make this a stacking context, and anything
+   inside would then be trapped in it: a popover at `z-index: 100` could only
+   climb as high as this wrapper, so the NEXT card's button (in its own wrapper,
+   later in the DOM, same z-index) would paint straight over the open panel. That
+   is exactly what happened. The lift belongs on the control itself — see
+   `.card-btn` — which leaves a popover free to reach the root context where it
+   can actually clear the rest of the list. */
+.above-stretch {
+	position: relative;
+	flex-shrink: 0;
+}
+
+/* The labelled action button both lists carry. The glyph anchors the eye and
+   the words do the explaining — a row of bare icon squares makes you learn what
+   each one means and then remember it. */
+.card-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	flex-shrink: 0;
+	/* Positioned for the count badge, and lifted over the stretched link so a
+	   press here does what the button says instead of following the card. One
+	   step only: anything this button OPENS carries its own, much higher, z-index
+	   and must not be boxed in behind a wrapper. */
+	position: relative;
+	z-index: 1;
+	/* Clears the 44px minimum touch target with room to spare. */
+	min-height: 2.75rem;
+	padding: 0.55rem 1rem;
+	/* NO BORDER, matching `.icon-btn`. This sits inside a card that is already
+	   outlined, so an outline around the one control in it drew a box inside a
+	   box. Transparent rather than absent so the hover wash can bring an edge in
+	   without moving anything. */
+	border: 1px solid transparent;
+	border-radius: var(--radius-control);
+	background: none;
+	color: var(--fg);
+	font-family: inherit;
+	font-size: 0.92rem;
+	font-weight: 600;
+	text-decoration: none;
+	cursor: pointer;
+	white-space: nowrap;
+	transition:
+		background 0.14s ease,
+		border-color 0.14s ease,
+		color 0.14s ease;
+}
+.card-btn:hover {
+	background: var(--surface-sunken);
+	border-color: var(--line);
+	color: var(--brand);
+}
+.card-btn:focus-visible {
+	outline: 2px solid var(--brand);
+	outline-offset: 2px;
+}
+/* The leading glyph. Larger than the label it sits beside — it is what the eye
+   lands on first, and below 620px the label is gone and it carries the button
+   alone. */
+.card-btn > [aria-hidden='true']:first-child {
+	font-size: 1.35rem;
+	line-height: 1;
+}
+/* Below this the row has no width for words, and the glyph carries it alone —
+   which is what the count badge is anchored to. */
+@media (max-width: 620px) {
+	.card-btn-label {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+}
+
+/* How many are unanswered, on the button that opens them. */
+.card-btn .btn-count {
+	position: absolute;
+	top: -0.3rem;
+	right: -0.3rem;
+	min-width: 1.15rem;
+	height: 1.15rem;
+	padding: 0 0.24rem;
+	box-sizing: border-box;
+	display: grid;
+	place-items: center;
+	border-radius: 999px;
+	border: 2px solid var(--surface);
+	background: var(--danger);
+	color: #fff;
+	font-size: 0.68rem;
+	font-weight: 800;
+	line-height: 1;
+}
+
+/* ============================================================
+   The app bar
+
+   Both halves of the product wear the same bar. They did not: the contractor's
+   wordmark took the theme's display face while the portal's stayed a plain bold
+   sans, the two used different padding and different brand sizing, and the
+   result was that switching sides felt like switching products rather than
+   switching roles.
+
+   Defined here rather than twice in two 1000-line layouts, because that is what
+   let them drift in the first place. Each shell still owns what is genuinely its
+   own — the contractor's gliding rail, the portal's project list — and both
+   define the `--bar-*` tokens these rules read, so the chrome follows whichever
+   side's accent is in play.
+
+   NOTE for anyone editing a layout: these are global rules and a component's
+   scoped copy will outrank them (a scoped selector carries the hash attribute,
+   so `.brand-word` inside a layout is (0,2,0) against this (0,1,0)). If a bar
+   stops matching, look for a scoped rule of the same name before changing
+   anything here.
+   ============================================================ */
+
+/* The bar surface. Sticky is the shell's own call — the portal pins its bar and
+   the contractor's scrolls with the page — so it is deliberately not set here. */
+.bar {
+	background: var(--bar-bg);
+	box-shadow: 0 4px 16px rgba(10, 20, 35, 0.06);
+}
+
+/* The row inside it. */
+.nav {
+	position: relative;
+	box-sizing: border-box;
+	padding: 0.7rem 1.25rem;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.55rem;
+	color: var(--bar-fg);
+	text-decoration: none;
+	flex-shrink: 0;
+}
+
+/* The wordmark wears the theme's display face — it is the first thing on the
+   page and the clearest single place to say which theme you are in. Both sides
+   now, which is the point of this block. */
+.brand-word {
+	font-family: var(--font-display);
+	font-weight: var(--display-weight, 900);
+	font-size: calc(0.92rem * var(--display-size, 1));
+	text-transform: var(--display-transform, uppercase);
+	letter-spacing: var(--display-tracking, 0.05em);
+}
+
+/* The utility square — theme toggle, settings gear. One size on both sides. */
+.bar-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.4rem;
+	height: 2.4rem;
+	flex-shrink: 0;
+	padding: 0;
+	border: none;
+	border-radius: var(--radius-control);
+	background: none;
+	color: var(--bar-fg-dim);
+	cursor: pointer;
+	text-decoration: none;
+	transition:
+		color 0.16s ease,
+		background 0.16s ease;
+}
+.bar-icon:hover {
+	color: var(--bar-fg);
+	background: var(--bar-wash);
+}
+.bar-icon:focus-visible {
+	outline: 2px solid var(--brand);
+	outline-offset: 2px;
+}
+/* On the section this control leads to, it takes the accent pill — so the bar
+   still answers "where am I" for a destination with no nav link of its own. */
+.bar-icon.on,
+.bar-icon.on:hover {
+	background: var(--brand-sweep);
+	color: var(--on-brand);
+}
+.bar-icon svg {
+	display: block;
+	flex: none;
+}
+
+@media (min-width: 48rem) {
+	.nav {
+		padding: 0.7rem 1.5rem;
+	}
+}
+
+/* The table behind every chart. Charts are a summary; this is the same numbers
+   in a form a screen reader, a text browser and Ctrl-F can all reach. Visually
+   hidden rather than absent — several of the light-mode series colours sit under
+   3:1 against a white card, and the rule for that is that the values must be
+   reachable without relying on the colour. */
+.viz-table {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
 }

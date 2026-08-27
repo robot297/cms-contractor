@@ -55,18 +55,6 @@ export function formatPhone(value: string): string {
 	return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
 }
 
-/** Split a comma-separated tag string into a trimmed, de-duplicated list. */
-export function parseTags(value: string): string[] {
-	return Array.from(
-		new Set(
-			value
-				.split(',')
-				.map((t) => t.trim())
-				.filter(Boolean)
-		)
-	);
-}
-
 /** Contact fields for a customer. Name and email are required; the rest are optional. */
 export type PreferredContact = 'email' | 'call' | 'text';
 
@@ -251,7 +239,6 @@ export type SubcontractorContact = {
 	insuranceCarrier: string | null;
 	insuranceExpiresAt: Date | null;
 	notes: string | null;
-	tags: string[];
 };
 
 /** The single source of truth for subcontractor-profile validation (client + server). */
@@ -306,11 +293,7 @@ export const subcontractorContactSchema = z.object({
 	notes: z
 		.string()
 		.optional()
-		.transform((v) => blankToNull(v)),
-	tags: z
-		.string()
-		.optional()
-		.transform((v) => parseTags(v ?? ''))
+		.transform((v) => blankToNull(v))
 });
 
 export type SubcontractorContactValidation =
@@ -331,7 +314,6 @@ export function validateSubcontractorContact(input: {
 	insuranceCarrier?: string;
 	insuranceExpiresAt?: string;
 	notes?: string;
-	tags?: string;
 }): SubcontractorContactValidation {
 	const result = subcontractorContactSchema.safeParse(input);
 	if (result.success) return { ok: true, value: result.data };
@@ -375,18 +357,6 @@ export const PROJECT_TYPES = [
 ] as const;
 
 export type ProjectType = (typeof PROJECT_TYPES)[number];
-
-/**
- * A fixed palette of construction glyphs a contractor can pin to an order to
- * signal its build type or status at a glance. Capped at 10 options.
- */
-export const ORDER_ICONS = ['🏗️', '🏠', '🛠️', '🔨', '🪚', '🧱', '🪵', '🚧', '📐', '✅'] as const;
-
-export type OrderIcon = (typeof ORDER_ICONS)[number];
-
-export function isOrderIcon(value: string): value is OrderIcon {
-	return (ORDER_ICONS as readonly string[]).includes(value);
-}
 
 export function isProjectType(value: string): value is ProjectType {
 	return (PROJECT_TYPES as readonly string[]).includes(value);
@@ -455,6 +425,22 @@ export type FollowUpDays = (typeof FOLLOWUP_DAY_CHOICES)[number];
 
 export function isFollowUpDays(value: number): value is FollowUpDays {
 	return (FOLLOWUP_DAY_CHOICES as readonly number[]).includes(value);
+}
+
+/**
+ * Where the contractor app's navigation lives on a phone or tablet.
+ *
+ * `top` is the original: links collapse behind the hamburger on the bar. `bottom`
+ * is the customer portal's shape — a fixed tab bar at the foot of the screen,
+ * which is a shorter reach one-handed on a job site. Only the narrow widths
+ * differ; above the desktop breakpoint the bar's rail navigates either way, so
+ * this is a preference rather than two different apps.
+ */
+export const NAV_PLACEMENTS = ['top', 'bottom'] as const;
+export type NavPlacement = (typeof NAV_PLACEMENTS)[number];
+
+export function isNavPlacement(value: unknown): value is NavPlacement {
+	return (NAV_PLACEMENTS as readonly unknown[]).includes(value);
 }
 
 /** How the interval reads in a sentence: "a week", not "7 days". */

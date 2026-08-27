@@ -37,6 +37,19 @@
 	const other = $derived(side === 'contractor' ? 'customer' : 'contractor');
 
 	/**
+	 * There is no visible label any more — the glyph is the control and the
+	 * accessible name carries the words. It is kept in the aria text rather than
+	 * dropped because the ambiguity that shaped it is still real: sitting in the
+	 * contractor bar, the destination read as a description of the bar and people
+	 * concluded they were already on the customer side. So the name says both
+	 * halves — where you are, then where the press goes.
+	 *
+	 * "Customer", not "Client": CONTEXT.md makes Customer the canonical term and
+	 * lists Client under _Avoid_.
+	 */
+	const goesTo = $derived(other === 'customer' ? 'customer' : 'contractor');
+
+	/**
 	 * Which endpoint gets us there, in order of fidelity:
 	 *   - a real session swap, when the seeded logins are there;
 	 *   - dropping the impersonation cookie, when that is all we are in;
@@ -57,8 +70,22 @@
 		{#if target.as}<input type="hidden" name="as" value={target.as} />{/if}
 		{#if target.customerId}<input type="hidden" name="customerId" value={target.customerId} />{/if}
 		{#if orderId}<input type="hidden" name="orderId" value={orderId} />{/if}
-		<button type="submit" class="dev-switch" title="Development only — open the {other} side">
-			Switch view
+		<!-- Icon only. The label spelled out which side you were on, which was worth
+		     a whole button while the control was new and its two readings ("where I
+		     am" vs "where this goes") were both live. Once you know what it does, the
+		     words are a caption on a glyph that already says it — and this is dev
+		     chrome sitting in a bar with real controls, so it should take the least
+		     room that still reads. The title and the accessible name still say both
+		     halves out loud, and the lit dot rides the glyph so the status is not
+		     lost with the text. -->
+		<button
+			type="submit"
+			class="dev-switch"
+			title="Development only — you are on the {side} side; switch to the {goesTo} side"
+			aria-label="You are on the {side} side. Switch to the {goesTo} side."
+		>
+			<span class="dev-swap" aria-hidden="true">⇄</span>
+			<span class="dev-dot" aria-hidden="true"></span>
 		</button>
 	</form>
 {/if}
@@ -67,23 +94,61 @@
 	.dev-form {
 		display: contents;
 	}
-	/* Amber, in neither side's palette, so it cannot be mistaken for real chrome —
-	   but quiet, because it sits among controls that are. */
+	/* Sits among real chrome and has to read as a status rather than a nav
+	   control, so it borrows the bar's own tokens and stays quiet — the lit dot
+	   and the swap glyph carry the two things it has to say. */
 	.dev-switch {
+		position: relative;
 		flex-shrink: 0;
-		padding: 0.35rem 0.8rem;
-		border: 1px solid var(--yellow-deep);
-		border-radius: 999px;
-		background: color-mix(in srgb, var(--yellow) 22%, transparent);
-		color: var(--fg);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.4rem;
+		height: 2.4rem;
+		padding: 0;
+		border: 1px solid var(--line-strong);
+		border-radius: var(--radius-control);
+		background: var(--bar-wash, var(--surface-sunken));
+		color: var(--bar-fg, var(--fg));
 		font-family: inherit;
-		font-size: 0.75rem;
-		font-weight: 700;
 		cursor: pointer;
-		white-space: nowrap;
+	}
+	/* A lit dot, the way a status indicator reads. Says "this is what is
+	   currently true" rather than "press me to make this true". */
+	/* Pinned to the corner now that there is no label to sit beside. Still the
+	   status half of this control: it says the side is live, the glyph says the
+	   press swaps it. */
+	.dev-dot {
+		position: absolute;
+		top: -2px;
+		right: -2px;
+		width: 6px;
+		height: 6px;
+		flex: none;
+		border-radius: 999px;
+		background: var(--brand);
+		/* Empty and decorative, so this never renders. Declared anyway because the
+		   fill and its foreground must not be separable — the same rule
+		   `.rail-glide` follows, enforced by theme.contrast.test.ts. */
+		color: var(--on-brand);
+		box-shadow: 0 0 6px var(--brand-glow);
+	}
+	/* The affordance. Without it the label alone is a caption, which is exactly
+	   how the old wording got misread. */
+	.dev-swap {
+		font-size: 1rem;
+		line-height: 1;
+		color: var(--bar-fg-dim, var(--fg-muted));
 	}
 	.dev-switch:hover {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		border-color: var(--brand);
+		box-shadow: 0 0 0 1px var(--brand-glow);
+	}
+	.dev-switch:hover .dev-swap {
+		color: var(--brand);
+	}
+	.dev-switch:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 1px;
 	}
 </style>

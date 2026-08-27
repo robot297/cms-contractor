@@ -49,6 +49,16 @@ const days = (n) => new Date(Date.now() + n * DAY);
 // Follow-ups are stored as day offsets in the shared fixtures; resolve to a Date
 // (or null) at seed time.
 const followUpAt = (n) => (n === null ? null : days(n));
+/**
+ * The on-site day, normalised to local midday. `visitsOn` queries a calendar
+ * day, so a visit seeded near midnight would land in the wrong one.
+ */
+const visitAt = (n) => {
+	if (n === null || n === undefined) return null;
+	const d = days(n);
+	d.setHours(12, 0, 0, 0);
+	return d;
+};
 
 const CUSTOMERS = DEMO_CUSTOMERS;
 const ORDERS = DEMO_ORDERS;
@@ -101,8 +111,8 @@ async function main() {
 		const orderId = randomUUID();
 		orderIdByProject[o.project] = orderId;
 		await sql`
-			insert into "order" (id, contractor_id, customer_id, project_name, project_type, icon, state, tags, next_follow_up_at)
-			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.icon ?? null}, ${o.state}, ${o.tags ?? []}, ${followUpAt(o.followUpDays)})
+			insert into "order" (id, contractor_id, customer_id, project_name, project_type, icon, state, next_follow_up_at, visit_date)
+			values (${orderId}, ${contractor.id}, ${target.id}, ${o.project}, ${o.type}, ${o.icon ?? null}, ${o.state}, ${followUpAt(o.followUpDays)}, ${visitAt(o.visitDays)})
 		`;
 		await sql`
 			insert into timeline_entry (id, order_id, kind, title, detail, author_role, internal)
@@ -134,8 +144,8 @@ async function main() {
 		const id = randomUUID();
 		subIds[s.key] = id;
 		await sql`
-			insert into subcontractor (id, contractor_id, name, email, phone, company, trade, tier, license_number, insurance_carrier, insurance_expires_at, notes, tags, avatar, user_id)
-			values (${id}, ${contractor.id}, ${s.name}, ${s.email}, ${s.phone}, ${s.company}, ${s.trade}, ${s.tier}, ${s.licenseNumber}, ${s.insuranceCarrier}, ${followUpAt(s.insuranceDays)}, ${s.notes}, ${s.tags}, ${s.avatar}, ${account?.id ?? null})
+			insert into subcontractor (id, contractor_id, name, email, phone, company, trade, tier, license_number, insurance_carrier, insurance_expires_at, notes, avatar, user_id)
+			values (${id}, ${contractor.id}, ${s.name}, ${s.email}, ${s.phone}, ${s.company}, ${s.trade}, ${s.tier}, ${s.licenseNumber}, ${s.insuranceCarrier}, ${followUpAt(s.insuranceDays)}, ${s.notes}, ${s.avatar}, ${account?.id ?? null})
 		`;
 		if (s.invited && !account) {
 			await sql`

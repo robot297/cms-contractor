@@ -73,7 +73,6 @@ the same treatment copied across two to four files.
 | `.status-pill` | How a job is doing. Add a tone: `.ok`, `.wait`, `.stop`.         |
 | `.menu-item`   | A row in a card's ⋯ menu. Add `.danger` for the destructive row. |
 | `.field-input` | The plain bordered input used in cards and inline forms.         |
-| `.tag-chip`    | Order/customer/subcontractor tags, inside `.tag-chips`.          |
 | `.icon-btn`    | Icon buttons. Size stays inline; it varies per use.              |
 
 Call sites should add only what is genuinely local — a margin against a nav

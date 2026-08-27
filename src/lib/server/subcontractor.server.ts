@@ -24,6 +24,19 @@ import { InvalidAvatarError } from './crm.server';
 // unguarded: a lapsed contractor's subs keep working exactly as before. See
 // docs/adr/0005-lapsing-never-reaches-customers.md.
 import { assertCanCreate, assertCanWrite } from './billing.server';
+import type { Stint } from '$lib/worker';
+
+/** Plain-language dates for a timeline entry. Mirrors the crew equivalent. */
+function describeStint(stint: Stint): string {
+	if (stint.startsOn && stint.endsOn) {
+		return stint.startsOn === stint.endsOn
+			? stint.startsOn
+			: `${stint.startsOn} to ${stint.endsOn}`;
+	}
+	if (stint.startsOn) return `from ${stint.startsOn}`;
+	if (stint.endsOn) return `until ${stint.endsOn}`;
+	return 'no dates set';
+}
 
 /** How long a subcontractor invite / magic link stays valid. */
 const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -82,7 +95,6 @@ export type SubcontractorDetailsInput = {
 	insuranceCarrier?: string | null;
 	insuranceExpiresAt?: Date | null;
 	notes?: string | null;
-	tags?: string[];
 };
 
 // ----------------------------------------------------------- Roster CRUD (§3.1)
@@ -155,11 +167,53 @@ export async function createSubcontractor(
 			licenseExpiresAt: input.licenseExpiresAt ?? null,
 			insuranceCarrier: input.insuranceCarrier ?? null,
 			insuranceExpiresAt: input.insuranceExpiresAt ?? null,
-			notes: input.notes ?? null,
-			tags: input.tags ?? []
+			notes: input.notes ?? null
 		})
 		.returning();
 	return row;
+}
+
+/**
+ * Create many subcontractors at once, from the contact-import review list.
+ *
+ * Tolerant in the same way `importWorkers` is: the input is somebody's address
+ * book, some of it is already on file or is not a person at all, and neither is
+ * a reason to refuse the rest.
+ *
+ * What arrives is a name, an address and maybe a phone — never a trade, a tier
+ * or insurance, because an address book does not carry those. So an imported
+ * subcontractor lands at the default tier (`guest`, least privilege) with the
+ * rest of the profile blank, and is finished on the subcontractor page. That is
+ * the trade this makes: the record starts incomplete and visibly so, rather than
+ * the import guessing at an access level on the contractor's behalf.
+ */
+export type SubcontractorImportSummary = {
+	imported: number;
+	duplicates: number;
+	rejected: { name: string; message: string }[];
+};
+
+export async function importSubcontractors(
+	contractorId: string,
+	people: SubcontractorDetailsInput[]
+): Promise<SubcontractorImportSummary> {
+	const summary: SubcontractorImportSummary = { imported: 0, duplicates: 0, rejected: [] };
+	for (const person of people) {
+		try {
+			await createSubcontractor(contractorId, person);
+			summary.imported++;
+		} catch (err) {
+			if (err instanceof DuplicateSubcontractorEmailError) {
+				summary.duplicates++;
+				continue;
+			}
+			summary.rejected.push({
+				name: person.name,
+				message: err instanceof Error ? err.message : 'Could not be added'
+			});
+		}
+	}
+	return summary;
 }
 
 export async function editSubcontractor(
@@ -203,8 +257,7 @@ export async function editSubcontractor(
 			licenseExpiresAt: input.licenseExpiresAt ?? null,
 			insuranceCarrier: input.insuranceCarrier ?? null,
 			insuranceExpiresAt: input.insuranceExpiresAt ?? null,
-			notes: input.notes ?? null,
-			tags: input.tags ?? []
+			notes: input.notes ?? null
 		})
 		.where(eq(subcontractor.id, id))
 		.returning();
@@ -485,11 +538,22 @@ export function subcontractorsForUser(userId: string): Promise<SubcontractorRow[
 
 // -------------------------------------------------- Assignment (§5.1 / §5.2)
 
-/** Assign a subcontractor to an order (idempotent; both must be the contractor's). */
+/**
+ * Put a subcontractor on an order, or change the stint of one already on it.
+ *
+ * An upsert rather than a plain insert since subs gained dates: assigning
+ * somebody already on the job now far more often means "change their dates" than
+ * "add them twice". `stint` is optional so the older call sites — which only
+ * ever meant "put them on it" — keep working and leave the dates unset.
+ */
 export async function assignSubcontractor(
 	contractorId: string,
 	orderId: string,
-	subcontractorId: string
+	subcontractorId: string,
+	stint: Stint & { role?: string | null; notes?: string | null } = {
+		startsOn: null,
+		endsOn: null
+	}
 ): Promise<void> {
 	await assertCanWrite(contractorId);
 	const [ord] = await db
@@ -502,18 +566,44 @@ export async function assignSubcontractor(
 	if (!ord) throw new Error('Order not found');
 	const sub = await ownedSubcontractor(contractorId, subcontractorId);
 	if (!sub) throw new Error('Subcontractor not found');
-	const inserted = await db
+	const [existing] = await db
+		.select({ orderId: orderSubcontractor.orderId })
+		.from(orderSubcontractor)
+		.where(
+			and(
+				eq(orderSubcontractor.orderId, orderId),
+				eq(orderSubcontractor.subcontractorId, subcontractorId)
+			)
+		)
+		.limit(1);
+
+	await db
 		.insert(orderSubcontractor)
-		.values({ orderId, subcontractorId })
-		.onConflictDoNothing()
-		.returning();
-	// Already on the job — the conflict was swallowed, so there is nothing to log.
-	if (inserted.length === 0) return;
+		.values({
+			orderId,
+			subcontractorId,
+			startsOn: stint.startsOn,
+			endsOn: stint.endsOn,
+			role: stint.role ?? null,
+			notes: stint.notes ?? null
+		})
+		.onConflictDoUpdate({
+			target: [orderSubcontractor.orderId, orderSubcontractor.subcontractorId],
+			set: {
+				startsOn: stint.startsOn,
+				endsOn: stint.endsOn,
+				role: stint.role ?? null,
+				notes: stint.notes ?? null
+			}
+		});
+
 	await db.insert(timelineEntry).values({
 		orderId,
 		kind: 'note',
-		title: 'Subcontractor added',
-		detail: `${sub.name} put on this job`,
+		title: existing ? 'Subcontractor dates changed' : 'Subcontractor added',
+		detail: existing
+			? `${sub.name}: ${describeStint(stint)}`
+			: `${sub.name} put on this job — ${describeStint(stint)}`,
 		authorRole: 'contractor',
 		internal: true
 	});

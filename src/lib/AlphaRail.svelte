@@ -9,19 +9,30 @@
 	let {
 		present,
 		onjump,
-		top = 84
+		top = 84,
+		onrail
 	}: {
 		/** Letters that have a section to jump to ('A'–'Z', '#' for everything else). */
 		present: Set<string>;
 		onjump: (letter: string) => void;
 		/** Sticky offset in px, clearing the page's own sticky chrome. */
 		top?: number;
+		/**
+		 * Hands the rail's own element up once it exists. The page passes it to the
+		 * scroll animation as the control that is DRIVING the scroll — touches
+		 * landing on the rail are the gesture itself and must not be read as the
+		 * user grabbing the list to take over. See `smoothScrollIntoView`.
+		 */
+		onrail?: (el: HTMLElement) => void;
 	} = $props();
 
 	const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
 	let hover: number | null = $state(null);
 	// The rail element, so touch/mouse position can be mapped to a letter index.
 	let nav: HTMLElement | undefined = $state();
+	$effect(() => {
+		if (nav) onrail?.(nav);
+	});
 
 	// Map a pointer's Y onto a letter and magnify it. Child transforms don't
 	// reflow, so the nav's own box stays stable — no feedback loop as letters

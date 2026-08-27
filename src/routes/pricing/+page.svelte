@@ -196,11 +196,11 @@
 		cursor: pointer;
 	}
 	.toggle-opt.on {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 	.toggle-opt:focus-visible {
-		outline: 2px solid var(--yellow-deep);
+		outline: 2px solid var(--brand-deep);
 		outline-offset: 2px;
 	}
 	.save {
@@ -254,7 +254,7 @@
 		content: '✓';
 		position: absolute;
 		left: 0;
-		color: var(--yellow-deep);
+		color: var(--brand-deep);
 		font-weight: 800;
 	}
 
@@ -355,7 +355,7 @@
 	}
 	.foot-note a {
 		color: inherit;
-		text-decoration-color: var(--yellow-deep);
+		text-decoration-color: var(--brand-deep);
 		text-decoration-thickness: 2px;
 		text-underline-offset: 2px;
 	}

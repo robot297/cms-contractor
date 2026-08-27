@@ -72,6 +72,10 @@ const countActive = async (table, col, id) => {
 const timelineCount = async (orderId) =>
 	(await sql`select count(*)::int as n from timeline_entry where order_id = ${orderId}`)[0].n;
 
+/** Messages, which is where a customer's own write lands — not the timeline. */
+const messageCount = async (orderId) =>
+	(await sql`select count(*)::int as n from order_message where order_id = ${orderId}`)[0].n;
+
 let contractorId, customerUserId, subUserId;
 
 try {
@@ -102,12 +106,19 @@ try {
 
 	const dashBody = await (await req('/contractor')).text();
 	check('trial welcome shows on the dashboard', /Welcome to your free trial/.test(dashBody));
-	check('trial badge shows in the nav', /class="trial-badge/.test(dashBody));
+	// The nav's trial badge is gone — that slot holds the settings gear now, and
+	// the trial's own detail (end date, days left, capacity) lives on the account
+	// page. So the standing signal is asserted where it actually stands.
+	const acctBody = await (await req('/contractor/settings')).text();
+	check('the account page states the trial', /trial/i.test(acctBody));
 
 	await post('/contractor?/dismissTrialNotice', {});
 	const afterDismiss = await (await req('/contractor')).text();
 	check('dismissing the welcome sticks', !/Welcome to your free trial/.test(afterDismiss));
-	check('the nav badge survives dismissal', /class="trial-badge/.test(afterDismiss));
+	check(
+		'dismissing the welcome does not hide the trial itself',
+		/trial/i.test(await (await req('/contractor/settings')).text())
+	);
 	// Put it back so later assertions aren't reading a dismissed dashboard.
 	await sql`update contractor_settings set trial_notice_dismissed_at = null where contractor_id = ${contractorId}`;
 
@@ -118,7 +129,7 @@ try {
 		await sql`insert into customer (id, contractor_id, name, email)
 		          values (${crypto.randomUUID()}, ${contractorId}, ${`Seed ${i}`}, ${`seed${i}-${stamp}@example.com`})`;
 	}
-	await post('/contractor/customers?/addCustomer', {
+	await post('/contractor/people?/addCustomer', {
 		name: 'Number 25',
 		email: `c25-${stamp}@example.com`
 	});
@@ -127,7 +138,7 @@ try {
 		(await countActive('customer', 'contractor_id', contractorId)) === LIMIT
 	);
 
-	const refused = await post('/contractor/customers?/addCustomer', {
+	const refused = await post('/contractor/people?/addCustomer', {
 		name: 'Over',
 		email: `over-${stamp}@example.com`
 	});
@@ -141,7 +152,7 @@ try {
 	const [victim] =
 		await sql`select id from customer where contractor_id = ${contractorId} and archived_at is null limit 1`;
 	await sql`update customer set archived_at = now() where id = ${victim.id}`;
-	await post('/contractor/customers?/addCustomer', {
+	await post('/contractor/people?/addCustomer', {
 		name: 'After archive',
 		email: `after-${stamp}@example.com`
 	});
@@ -172,7 +183,7 @@ try {
 	check('lapsed contractor can still load the dashboard', lapsedDash.status === 200);
 	check('lapsed banner is shown', /free trial has ended/i.test(lapsedBody));
 
-	const custPage = await req('/contractor/customers');
+	const custPage = await req('/contractor/people');
 	const custBody = await custPage.text();
 	check('lapsed contractor can still read customers', custPage.status === 200);
 	check('their data still renders', custBody.includes('Number 25'));
@@ -184,25 +195,26 @@ try {
 	const writes = [
 		[
 			'create customer',
-			'/contractor/customers?/addCustomer',
+			'/contractor/people?/addCustomer',
 			{ name: 'No', email: `no-${stamp}@example.com` }
 		],
 		[
 			'edit customer',
-			'/contractor/customers?/editCustomer',
+			'/contractor/people?/editCustomer',
 			{ id: portalCust.id, name: 'Renamed', email: portalCust.email }
 		],
-		['archive customer', '/contractor/customers?/archiveCustomer', { id: portalCust.id }],
+		['archive customer', '/contractor/people?/archiveCustomer', { id: portalCust.id }],
 		[
 			'change order state',
 			`/contractor/orders/${orderId}?/updateStatus`,
 			{ state: 'Work Complete' }
 		],
 		['add order note', `/contractor/orders/${orderId}?/addNote`, { note: 'blocked?' }],
-		['send invite', '/contractor/customers?/sendInvite', { id: portalCust.id }],
+		// The shared invite action reads `customerId`, not `id`.
+		['send invite', '/contractor/people?/sendInvite', { customerId: portalCust.id }],
 		[
 			'create template',
-			'/contractor/settings/templates?/createTemplate',
+			'/contractor/settings?/createTemplate',
 			{ name: 'X', subject: 's', body: 'b' }
 		]
 	];
@@ -248,9 +260,15 @@ try {
 		!/trial has ended|subscription has ended/i.test(portalBody)
 	);
 
-	const beforeReq = await timelineCount(orderId);
-	await post('/customer?/request', { orderId, type: 'question', detail: 'Schedule?' });
-	check('customer can still send a request', (await timelineCount(orderId)) > beforeReq);
+	// The keystone of ADR-0005: the customer of a LAPSED contractor writes
+	// normally. Their message goes to the order's own portal page — `/customer`
+	// is the list, and it has no actions of its own.
+	const beforeReq = await messageCount(orderId);
+	await post(`/customer/orders/${orderId}?/send`, {
+		body: 'Any word on the schedule?',
+		topic: 'question'
+	});
+	check('customer can still send a message', (await messageCount(orderId)) > beforeReq);
 
 	cookie = '';
 	await post('/login?/signUp', { email: emails.sub, password: PASSWORD, name: 'Trusted Sub' });
@@ -294,7 +312,7 @@ try {
 	check('active restores writing', (await timelineCount(orderId)) > actBefore);
 
 	const cappedAt = await countActive('customer', 'contractor_id', contractorId);
-	await post('/contractor/customers?/addCustomer', {
+	await post('/contractor/people?/addCustomer', {
 		name: 'Uncapped',
 		email: `unc-${stamp}@example.com`
 	});

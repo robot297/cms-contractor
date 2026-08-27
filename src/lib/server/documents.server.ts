@@ -13,7 +13,6 @@ import {
 	MAX_DOCUMENT_BYTES,
 	checkUploadContent,
 	formatBytes,
-	parseTags,
 	safeFilename,
 	splitFilename
 } from '$lib/crm';
@@ -73,7 +72,6 @@ export type DocumentMeta = {
 	size: number;
 	uploadedByRole: string;
 	note: string | null;
-	tags: string[];
 	createdAt: Date;
 	/** Null until the contractor has opened this order's documents. */
 	readByContractorAt: Date | null;
@@ -87,7 +85,6 @@ const META = {
 	size: document.size,
 	uploadedByRole: document.uploadedByRole,
 	note: document.note,
-	tags: document.tags,
 	createdAt: document.createdAt,
 	readByContractorAt: document.readByContractorAt
 };
@@ -228,8 +225,6 @@ export type UploadInput = {
 	data: Buffer;
 	/** What this document is, in the uploader's words. */
 	note?: string;
-	/** Comma-separated on the way in; stored de-duplicated. */
-	tags?: string;
 };
 export type UploadOutcome =
 	{ ok: true; filename: string } | { ok: false; filename: string; reason: string };
@@ -302,8 +297,7 @@ export async function uploadDocuments(
 				data: Buffer.alloc(0),
 				uploadedByRole: viewer.role,
 				uploadedByUserId: viewer.userId,
-				note: file.note?.trim() || null,
-				tags: file.tags ? parseTags(file.tags) : []
+				note: file.note?.trim() || null
 			})
 			.returning({ id: document.id });
 		await putBytes(row.id, file.data);
@@ -376,11 +370,11 @@ async function recordDocumentHistory(
 	});
 }
 
-/** Set a document's note and tags. Anyone who may write on the order may label it. */
+/** Set a document's note. Anyone who may write on the order may label it. */
 export async function updateDocument(
 	viewer: Viewer,
 	documentId: string,
-	input: { note?: string; tags?: string }
+	input: { note?: string }
 ): Promise<void> {
 	const meta = await getDocument(viewer, documentId);
 	if (!meta) throw new Error('Document not found');
@@ -390,8 +384,7 @@ export async function updateDocument(
 	await db
 		.update(document)
 		.set({
-			note: input.note?.trim() || null,
-			tags: input.tags === undefined ? meta.tags : parseTags(input.tags)
+			note: input.note?.trim() || null
 		})
 		.where(eq(document.id, documentId));
 }

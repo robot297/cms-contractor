@@ -59,8 +59,42 @@ export type Contractor = { name: string; email: string; password: string };
  */
 export const ZIP_FIXTURE = { '78701': { city: 'Austin', state: 'TX' } } as const;
 
-export const test = base.extend<{ zipStub: void }>({
+/**
+ * What the dashboard's weather widget answers with under test.
+ *
+ * Stubbed for the same reason as the ZIP lookup and with the same care: the real
+ * endpoint calls a keyless forecast service, and a dashboard test that turned
+ * red because somebody else's API was slow would be reporting on their uptime
+ * rather than this app's. Deliberately a workable day — nothing here should make
+ * an advisory banner appear and shift the layout under a test that is looking at
+ * something else.
+ */
+export const WEATHER_FIXTURE = {
+	place: 'Austin, TX',
+	tempF: 72,
+	feelsLikeF: 72,
+	code: 1,
+	windMph: 6,
+	highF: 78,
+	lowF: 54,
+	rainChance: 10
+} as const;
+
+export const test = base.extend<{ zipStub: void; weatherStub: void }>({
 	// Auto-applied: no spec has to remember to ask for it.
+	weatherStub: [
+		async ({ page }, use) => {
+			await page.route('**/api/weather**', (route) =>
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify(WEATHER_FIXTURE)
+				})
+			);
+			await use();
+		},
+		{ auto: true }
+	],
 	zipStub: [
 		async ({ page }, use) => {
 			await page.route('**/api/zip/**', (route) => {
@@ -189,7 +223,7 @@ async function openModal(dialog: Locator, trigger: Locator): Promise<void> {
 
 /** The add-customer modal, addressed by its heading rather than by class. */
 function addCustomerDialog(page: Page): Locator {
-	return page.getByRole('dialog').filter({ hasText: 'Add a customer' });
+	return page.getByRole('dialog').filter({ hasText: 'Add someone' });
 }
 
 /**
@@ -202,7 +236,7 @@ function addCustomerDialog(page: Page): Locator {
  * customers you already had.
  */
 export async function addCustomer(page: Page, fields: CustomerFields): Promise<CustomerFields> {
-	await page.goto('/contractor/customers');
+	await page.goto('/contractor/people');
 	const dialog = addCustomerDialog(page);
 	// The ＋ and the modal's submit share an accessible name, so the trigger is
 	// addressed as the icon button it is.
@@ -219,7 +253,7 @@ export async function addCustomer(page: Page, fields: CustomerFields): Promise<C
 	await dialog.getByRole('button', { name: 'Add customer', exact: true }).click();
 	await expect(dialog).toBeHidden();
 
-	await page.goto('/contractor/customers');
+	await page.goto('/contractor/people');
 	await expect(page.getByText(fields.name).first()).toBeVisible();
 	return fields;
 }

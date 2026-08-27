@@ -5,6 +5,8 @@
 	import { theme } from '$lib/theme.svelte';
 	import Toaster from '$lib/Toaster.svelte';
 	import DevSwitcher from '$lib/DevSwitcher.svelte';
+	import AccountMenu from '$lib/AccountMenu.svelte';
+	import type { ResolvedPathname } from '$app/types';
 	import type { LayoutData } from './$types';
 	import type { Snippet } from 'svelte';
 
@@ -16,7 +18,6 @@
 
 	const path = $derived(page.url.pathname);
 	const currentId = $derived(page.params.id ?? null);
-	const onSupport = $derived(path.startsWith('/customer/support'));
 	const hasOrders = $derived(data.active.length + data.past.length > 0);
 
 	// --- Mobile bottom-bar navigation -------------------------------------
@@ -27,6 +28,13 @@
 	// somewhere sensible.
 	const onOrderPage = $derived(!!currentId);
 	const onAccount = $derived(path.startsWith('/customer/account'));
+	// Support is a tab on Account now, not a route of its own. `/customer/support`
+	// still 308s onto it, so nothing lands here carrying that path any more.
+	// Annotated, not inferred: TypeScript widens a template literal to `string`,
+	// and AccountMenu's `href` will not take one — the whole point of its type is
+	// that only a resolved path can get in.
+	const supportHref: `${ResolvedPathname}?${string}` = `${resolve('/customer/account')}?tab=support`;
+	const onSupport = $derived(onAccount && page.url.searchParams.get('tab') === 'support');
 	const currentOrderId = $derived(currentId ?? data.active[0]?.id ?? data.past[0]?.id ?? null);
 	const view = $derived(page.url.searchParams.get('view'));
 	const isMessages = $derived(onOrderPage && view === 'messages');
@@ -34,6 +42,8 @@
 	const projectHref = $derived(
 		currentOrderId ? resolve(`/customer/orders/${currentOrderId}`) : resolve('/customer')
 	);
+	// resolve() can't carry a query string, so the messages tab appends ?view= to
+	// the resolved order path. Same limitation the settings tabs work around.
 	const messagesHref = $derived(
 		currentOrderId
 			? `${resolve(`/customer/orders/${currentOrderId}`)}?view=messages`
@@ -71,6 +81,21 @@
 	// jobs, and the live one is what they opened the app for.
 	let pastOpen = $state(false);
 
+	/**
+	 * What sits behind the avatar.
+	 *
+	 * Account and Support, because above the phone breakpoint the bottom tab bar
+	 * that used to carry them is hidden — and Support's only other home is the
+	 * project rail, which a customer with no projects yet doesn't get either. So
+	 * before this menu existed both pages were unreachable on a laptop.
+	 */
+	const accountItems = $derived([
+		{ label: 'Account', href: resolve('/customer/account'), active: onAccount && !onSupport },
+		// Deep-links straight to the tab rather than making you land on Account and
+		// find it — the menu is the desktop's only route to either.
+		{ label: 'Support', href: supportHref, active: onSupport }
+	]);
+
 	function closeMenu() {
 		menuOpen = false;
 	}
@@ -92,7 +117,23 @@
 	>
 		<span class="navlink-name">{o.projectName ?? 'Your project'}</span>
 		<span class="navlink-meta">
-			<span class="state">{o.customerStateLabel}</span>
+			<!-- "Over to you" replaces the state word rather than sitting beside it.
+			     A customer with three projects reads this rail to find the one that
+			     needs them, and "In progress · Over to you" makes them read two
+			     things to answer one question. The precise state is on the project
+			     itself, one tap away, where it is the headline. -->
+			{#if o.openTasks > 0 || o.paymentDue}
+				<span class="state waiting">Over to you</span>
+			{:else}
+				<span class="state">{o.customerStateLabel}</span>
+			{/if}
+			{#if o.openTasks > 0}
+				<span
+					class="todo-pip"
+					aria-label="{o.openTasks} {o.openTasks === 1 ? 'thing' : 'things'} to do"
+					>{o.openTasks}</span
+				>
+			{/if}
 			{#if o.unread > 0}
 				<span class="unread" aria-label="{o.unread} messages awaiting your reply">{o.unread}</span>
 			{/if}
@@ -134,36 +175,43 @@
 			{#each data.past as o (o.id)}{@render projectLink(o, withSections)}{/each}
 		{/if}
 	{/if}
-	<a
-		href={resolve('/customer/support')}
-		class="navlink support"
-		class:is-active={onSupport}
-		onclick={closeMenu}
-	>
-		<span class="navlink-name">Support</span>
-	</a>
 {/snippet}
 
 {#snippet utilities()}
-	<!-- Development only. Lives with the other utilities rather than in the header
-	     row: on a phone that row is brand, badge and hamburger with nothing to
-	     spare, and this is not something to make room for. -->
+	<!-- The one control the portal bar carries at every width, phones included:
+	     hopping back to the contractor side. It is the same corner the contractor
+	     bar keeps its own copy in, so the way back is never somewhere new.
+
+	     Appearance used to sit here too. It moved to the Account page — light/dark
+	     and the palette are preferences you set once, and two colour controls in
+	     the chrome of a portal that is meant to be showing a customer their job
+	     were the loudest thing in the bar. -->
 	{#if data.viewAs || data.devSignInEnabled}
-		<DevSwitcher
-			side="customer"
-			viewing={!!data.viewAs}
-			canSignInAs={data.devSignInEnabled}
-			orderId={currentId}
-		/>
+		<div class="switch-slot">
+			<DevSwitcher
+				side="customer"
+				viewing={!!data.viewAs}
+				canSignInAs={data.devSignInEnabled}
+				orderId={currentId}
+			/>
+		</div>
 	{/if}
-	<button
-		type="button"
-		class="theme-toggle"
-		title={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-		aria-label={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-		onclick={() => theme.toggle()}
-	>
-		{#if theme.current === 'dark'}
+
+	<!-- The account pair. `display: contents` above the tablet breakpoint, so the
+	     wrapper costs nothing in the flex row; below it both are hidden, because
+	     the bottom tab bar's Account tab is the phone's way to them. -->
+	<div class="nav-account">
+		<!-- Account, in the same seat the contractor bar keeps it: a quiet gear that
+		     takes the accent pill when you are on the section, so the bar still answers
+		     "where am I" without a nav link for it. -->
+		<a
+			class="bar-icon settings-gear"
+			class:on={onAccount}
+			href={resolve('/customer/account')}
+			title="Account"
+			aria-label="Account"
+			onclick={closeMenu}
+		>
 			<svg
 				width="20"
 				height="20"
@@ -175,22 +223,25 @@
 				stroke-linejoin="round"
 				aria-hidden="true"
 			>
-				<circle cx="12" cy="12" r="4.5" />
+				<circle cx="12" cy="12" r="3.2" />
 				<path
-					d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+					d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
 				/>
 			</svg>
-		{:else}
-			<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-				<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-			</svg>
-		{/if}
-	</button>
-	{#if !data.viewAs}
-		<form method="POST" action="/logout">
-			<button type="submit" class="signout">Sign out</button>
-		</form>
-	{/if}
+		</a>
+		<!-- The name, the account links and sign-out, all behind one square — the same
+		     control the contractor bar carries. Replaces a bare "Sign out" pill, which
+		     was the widest thing in this bar and the only account affordance in it.
+
+		     Under development view-as there is no sign-out on offer: the session being
+		     borrowed is the contractor's, and ending it would sign THEM out. -->
+		<AccountMenu
+			name={data.userName}
+			items={accountItems}
+			canSignOut={!data.viewAs}
+			onnavigate={closeMenu}
+		/>
+	</div>
 {/snippet}
 
 <div class="shell">
@@ -294,12 +345,14 @@
 			<span class="bicon" aria-hidden="true">🏗️</span>
 			<span class="blabel">Project</span>
 		</a>
+		<!-- eslint-disable svelte/no-navigation-without-resolve -- messagesHref wraps resolve() -->
 		<a
 			href={messagesHref}
 			class="btab"
 			class:on={isMessages}
 			aria-current={isMessages ? 'page' : undefined}
 		>
+			<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			<span class="bicon" aria-hidden="true">💬</span>
 			<span class="blabel">Messages</span>
 			{#if data.awaitingReply > 0}
@@ -355,15 +408,63 @@
 	}
 
 	.shell {
-		--accent: #0f7d8c;
-		--accent-deep: #0b616d;
-		--accent-soft: #e4f2f4;
-		/* Text that sits ON an accent fill. */
+		/* The portal's own colour, which is now the palette's answer for "the other
+		   half of the product" rather than a fixed teal. `--who-customer` is set per
+		   palette in app.css and chosen to sit far enough from the contractor accent
+		   that the two sides of a message thread stay tellable apart. */
+		--accent: var(--who-customer);
+		--accent-deep: color-mix(in srgb, var(--who-customer) 78%, #000);
+		--accent-soft: color-mix(in srgb, var(--who-customer) 12%, var(--surface));
+		/* Text that sits ON an accent fill. The portal accent is a mid-tone in light
+		   and a bright in dark, so this follows the same rule --on-brand does. */
 		--accent-fg: #ffffff;
+
+		/* Which half of the product this is, as one token the shared nav chrome can
+		   read — `$lib/AccountMenu.svelte` wears these, so the identical component
+		   comes out teal here and safety yellow on the contractor side. Pointed at
+		   `--accent` rather than copied from it, so the dark override below moves
+		   both without restating either. */
+		--bar-accent: var(--accent);
+		--bar-accent-fg: var(--accent-fg);
+
+		/* THE BRAND FAMILY, REPOINTED AT THE PORTAL'S OWN ACCENT.
+		
+		   The portal used to override `--accent` only. But `--accent` is the
+		   portal's private token: everything SHARED reaches for `--brand` instead —
+		   the focus ring on every input (`input:focus` in app.css), `::selection`,
+		   `.icon-btn` hover and its pressed state, `h1.page-title`, and the innards
+		   of `$lib/PaletteSwitcher.svelte` and `$lib/DevSwitcher.svelte`, both of
+		   which sit in this bar. All of those kept resolving to the CONTRACTOR's
+		   accent, so the portal read as two colours arguing: the Status panel and
+		   the invoice in `--who-customer`, and every ring, selection and hover in
+		   the contractor's `--brand`.
+		
+		   Repointing the family here fixes all of them at once and keeps working
+		   for anything shared that is added later, which copying values into each
+		   component would not. Nothing branches on which side it is on — this is
+		   the same trick `--accent` was already doing, applied to the tokens the
+		   rest of the app actually uses. */
+		--brand: var(--accent);
+		--brand-deep: var(--accent-deep);
+		--on-brand: var(--accent-fg);
+		/* The second brand hue. `--who-contractor` rather than a mix off the accent:
+		   a sweep needs two hues that are genuinely different, and the two halves of
+		   the product are exactly that pair — the palettes are built so they read
+		   apart. */
+		--brand-2: var(--who-contractor);
+		--brand-glow: color-mix(in srgb, var(--accent) 30%, transparent);
+		--brand-glow-strong: color-mix(in srgb, var(--accent) 55%, transparent);
+		--brand-sweep: linear-gradient(135deg, var(--accent), var(--who-contractor));
 
 		/* The hero panel's own palette. In light it is an accent slab; in dark that
 		   same slab reads as a glowing plastic brick, so dark gets a deep tinted
-		   surface with accent detailing instead of an inverted-brightness copy. */
+		   surface with accent detailing instead of an inverted-brightness copy.
+
+		   The whites below are NOT the frozen-literal bug the dark block had: here
+		   the slab is a fill of --accent, so white and its alphas are the text ON
+		   the palette rather than a colour beside it, and they follow it by
+		   sitting on top of it. Every light `--who-customer` clears 5.3:1 against
+		   white. */
 		--hero-bg:
 			radial-gradient(120% 100% at 100% 0%, rgba(255, 255, 255, 0.22), transparent),
 			linear-gradient(160deg, var(--accent), var(--accent-deep));
@@ -376,12 +477,12 @@
 		/* The tick inside a completed step dot, drawn on --hero-fg. */
 		--hero-tick: var(--accent-deep);
 
-		--bar-bg: linear-gradient(180deg, #ffffff, #f6f8f8);
+		--bar-bg: linear-gradient(180deg, var(--surface), var(--surface-sunken));
 		--bar-line: var(--line);
 		--bar-fg: var(--fg);
-		--bar-fg-dim: rgba(31, 35, 40, 0.66);
-		--bar-edge: rgba(17, 17, 17, 0.16);
-		--bar-wash: rgba(17, 17, 17, 0.05);
+		--bar-fg-dim: var(--fg-muted);
+		--bar-edge: var(--line-strong);
+		--bar-wash: var(--surface-sunken);
 
 		min-height: 100dvh;
 		display: flex;
@@ -390,62 +491,72 @@
 		color: var(--fg);
 	}
 	:global(:root[data-theme='dark']) .shell {
-		--accent: #45c2d3;
-		--accent-deep: #2b97a6;
-		--accent-soft: #13323a;
-		--accent-fg: #05232a;
+		--accent: var(--who-customer);
+		--accent-deep: color-mix(in srgb, var(--who-customer) 72%, var(--surface));
+		--accent-soft: color-mix(in srgb, var(--who-customer) 16%, var(--surface));
+		/* Dark on the bright dark-mode accent, matching --on-brand's behaviour.
+		   Mixed from the accent and the palette's darkest surface rather than
+		   written as a literal, so it stays in the accent's own family. */
+		--accent-fg: color-mix(in srgb, var(--accent) 14%, var(--surface-inset));
 
-		/* Dark hero: a deep teal-tinted surface that belongs to the page, with the
-		   accent used as light (rule, ring, status text) rather than as a fill. */
+		/* Dark hero: a deep accent-tinted surface that belongs to the page, with
+		   the accent used as light (rule, ring, status text) rather than as a fill.
+
+		   EVERY value below is mixed FROM --accent. They used to be six frozen
+		   teal literals, left over from when the portal's accent was a fixed teal
+		   rather than the palette's `--who-customer`. That made the Status panel —
+		   the largest thing on the customer's main screen — the one surface in the
+		   app that ignored the palette outright in dark mode. Light mode hid it:
+		   there the slab IS the accent fill, so it changed and this did not.
+
+		   The two blacks that remain are shade, not hue: an inset well and a drop
+		   shadow are darkness, and tinting them just muddies the slab. */
 		--hero-bg:
-			radial-gradient(140% 120% at 100% 0%, rgba(69, 194, 211, 0.16), transparent),
-			linear-gradient(160deg, #17323b, #121a20);
-		--hero-fg: #eaf6f8;
-		--hero-dim: rgba(234, 246, 248, 0.62);
+			radial-gradient(
+				140% 120% at 100% 0%,
+				color-mix(in srgb, var(--accent) 16%, transparent),
+				transparent
+			),
+			linear-gradient(160deg, color-mix(in srgb, var(--accent) 22%, var(--surface)), var(--surface));
+		--hero-fg: color-mix(in srgb, var(--accent) 12%, var(--fg));
+		--hero-dim: color-mix(in srgb, var(--hero-fg) 70%, transparent);
 		--hero-inset: rgba(0, 0, 0, 0.28);
-		--hero-rule: rgba(69, 194, 211, 0.3);
+		--hero-rule: color-mix(in srgb, var(--accent) 30%, transparent);
 		--hero-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-		--hero-edge: rgba(69, 194, 211, 0.22);
-		--hero-tick: #12242b;
+		--hero-edge: color-mix(in srgb, var(--accent) 22%, transparent);
+		/* The tick inside a completed step dot, drawn on the --hero-fg fill. */
+		--hero-tick: color-mix(in srgb, var(--accent) 30%, var(--surface-inset));
 
-		--bar-bg: linear-gradient(180deg, #20252d, #181c22);
-		--bar-fg: #f5f8fb;
-		--bar-fg-dim: rgba(245, 248, 251, 0.66);
-		--bar-edge: rgba(255, 255, 255, 0.14);
-		--bar-wash: rgba(255, 255, 255, 0.07);
+		--bar-bg: linear-gradient(180deg, var(--surface-sunken), var(--surface));
+		--bar-fg: var(--fg);
+		--bar-fg-dim: var(--fg-muted);
+		--bar-edge: var(--line-strong);
+		--bar-wash: var(--surface-sunken);
 	}
 
 	/* ------------------------------------------------------------- Bar */
+	/* Surface, padding, wordmark and the utility squares come from the shared
+	   `.bar` / `.nav` / `.brand-word` / `.bar-icon` block in app.css — both halves
+	   of the product wear one bar. Only what is genuinely this bar's own stays
+	   here: it is pinned (the portal is read top-to-bottom and the bar is how you
+	   get back out), and it has one edge rather than two, because no accent rule
+	   sits under it. */
 	.bar {
-		background: var(--bar-bg);
 		border-bottom: 1px solid var(--bar-line);
-		box-shadow: 0 4px 16px rgba(27, 31, 36, 0.06);
 		position: sticky;
 		top: 0;
 		z-index: 30;
 	}
-	.nav {
-		position: relative; /* anchor for the overlay panel below */
-		box-sizing: border-box;
-		padding: 0.6rem 0.9rem;
-		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-	}
-	.brand {
+	/* The view switcher. Same arrangement as the contractor bar: `order` puts it last in
+	   the flex row, so it is the far right on a desktop and immediately left of
+	   the hamburger on a phone. */
+	.switch-slot {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.5rem;
-		color: var(--bar-fg);
-		text-decoration: none;
-		flex-shrink: 0;
+		order: 3;
+		margin-left: 0.5rem;
 	}
-	.brand-word {
-		font-weight: 900;
-		font-size: 0.88rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
+
 	.hamburger {
 		/* The phone navigates from the bottom bar now, so its old top-corner menu
 		   (projects + utilities, all of which live in the Account tab) is retired. */
@@ -484,54 +595,40 @@
 		background: transparent;
 		cursor: default;
 	}
+	/* No longer a panel. It was an overlay that dropped from the hamburger, but the
+	   hamburger is retired — the bottom tab bar navigates the phone — which left
+	   this hidden and unreachable below the tablet breakpoint. It is now simply the
+	   bar's right-hand cluster: static, on show at every width, and carrying the
+	   view switcher down to the smallest screen. */
 	.nav-collapse {
-		position: absolute;
-		top: 100%;
-		left: 0;
-		right: 0;
-		z-index: 50;
 		display: flex;
-		flex-direction: column;
-		align-items: stretch;
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		justify-content: flex-end;
 		gap: 0.4rem;
-		padding: 0.75rem 0.9rem 1rem;
-		background: var(--bar-bg);
-		border-bottom: 1px solid var(--bar-line);
-		box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
-		opacity: 0;
-		visibility: hidden;
-		transform: translateY(-10px);
-		transition:
-			opacity 0.18s ease,
-			transform 0.18s ease,
-			visibility 0s linear 0.18s;
 	}
-	.nav-collapse.open {
-		opacity: 1;
-		visibility: visible;
-		transform: translateY(0);
-		transition:
-			opacity 0.18s ease,
-			transform 0.18s ease,
-			visibility 0s;
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.nav-collapse {
-			transition: none;
-		}
-	}
+	/* Projects have the rail beside the content and the bottom tab bar on a phone.
+	   The bar's copy is never the way to them. */
 	.nav-projects {
-		display: grid;
-		gap: 0.15rem;
+		display: none;
 	}
+	/* The bar's right-hand cluster: view switcher, gear, avatar — the contractor
+	   bar's `.nav-right` order and spacing, minus the Appearance controls, which
+	   are the Account page's now. */
 	.nav-utils {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 0.6rem;
-		margin-top: 0.35rem;
-		padding-top: 0.6rem;
-		border-top: 1px solid var(--bar-line);
+		justify-content: flex-end;
+		gap: 0.75rem;
+	}
+	/* The gear and the avatar. On a phone the bottom bar's Account tab is the way to
+	   both, so a bar copy would only duplicate — which leaves the view switcher as
+	   the single control in the portal's upper-right at that width. Above the
+	   breakpoint the wrapper dissolves so the flex row spaces the controls as if it
+	   weren't there. */
+	.nav-account {
+		display: none;
 	}
 
 	/* --------------------------------------------------------- Nav links */
@@ -586,14 +683,6 @@
 		align-items: center;
 		gap: 0.4rem;
 	}
-	.navlink.support {
-		margin-top: 0.4rem;
-		border-top: 1px solid var(--line);
-		border-radius: 0;
-		padding-top: 0.7rem;
-		color: var(--fg-muted);
-		font-size: 0.9rem;
-	}
 
 	/* Sections of the open project. Indented and quieter than a project link, so
 	   the rail still reads as a list of projects with one of them expanded rather
@@ -643,6 +732,28 @@
 		font-size: 0.76rem;
 		color: var(--fg-muted);
 	}
+	/* The rail's one "this needs you" mark. It borrows the accent the unread badge
+	   wears rather than inventing a second alarm colour: both mean the same thing
+	   to a customer — something here is waiting on me — and two colours would ask
+	   them to learn which is worse. */
+	.state.waiting {
+		color: var(--accent);
+		font-weight: 800;
+	}
+	.todo-pip {
+		min-width: 1.15rem;
+		height: 1.15rem;
+		padding: 0 0.3rem;
+		box-sizing: border-box;
+		border-radius: 999px;
+		border: 1.5px solid var(--accent);
+		color: var(--accent);
+		font-size: 0.7rem;
+		font-weight: 800;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
 	.unread {
 		min-width: 1.15rem;
 		height: 1.15rem;
@@ -663,36 +774,19 @@
 		transform: rotate(180deg);
 	}
 
-	.theme-toggle {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 2.4rem;
-		height: 2.4rem;
-		padding: 0;
-		border: none;
-		background: none;
-		border-radius: 8px;
-		color: var(--bar-fg-dim);
-		cursor: pointer;
-	}
-	.theme-toggle:hover {
-		color: var(--bar-fg);
-	}
-	.signout {
-		border: 1px solid var(--bar-edge);
-		background: transparent;
-		color: var(--bar-fg-dim);
-		border-radius: 999px;
-		padding: 0.4rem 0.9rem;
-		font-size: 0.85rem;
-		font-family: inherit;
-		cursor: pointer;
-	}
-	.signout:hover {
-		color: var(--danger);
-		border-color: var(--danger);
-	}
+	/* Phone: the bar carries the brand and the view switcher, nothing else. The
+	   bottom tab bar navigates, and its Account tab is the way to the gear, the
+	   account menu and Appearance — so those hide below the tablet breakpoint and
+	   the switcher does not. */
+
+	/* The account gear. Quiet icon-only chrome, except when you're on the account
+	   section: then it takes the accent pill, so
+	   the bar answers "where am I" with no nav link for it.
+
+	   Icon-only, with the name carried by `aria-label`. The contractor's copy
+	   reveals a text label inside its collapsed hamburger panel; this bar has no
+	   such panel — below the tablet breakpoint the bottom tab bar navigates and
+	   `.nav-account` is hidden — so there is nowhere for one to appear. */
 
 	/* ------------------------------------------------------------ Body */
 	.wrap {
@@ -744,7 +838,17 @@
 		z-index: 35;
 		display: flex;
 		background: var(--bar-bg);
-		border-top: 1px solid var(--bar-line);
+		/* --line-strong, not --bar-line. The bar had a hairline already; it was
+		   just the wrong one. --bar-line resolves to --line, which is drawn to sit
+		   quietly BETWEEN things on the same surface — and in dark that is #1a2534
+		   against a bar whose top edge is #101823, a difference of nothing at 1px.
+		   The drop shadow below cannot rescue it either: on a near-black ground a
+		   shadow is invisible, which is why app.css zeroes --card-shadow in dark.
+		   So the bar simply ended where the content did, with no seam.
+
+		   --line-strong is the app's rule for an edge that has to READ as an edge,
+		   and it stays legible in all thirteen palettes in both modes. */
+		border-top: 1px solid var(--line-strong);
 		box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
 		padding: 0.2rem 0.2rem calc(0.2rem + env(safe-area-inset-bottom, 0px));
 	}
@@ -789,24 +893,35 @@
 	}
 
 	/* Below the tablet breakpoint the bottom bar owns navigation, so the project
-	   page shows one section at a time — the tab you're on. The section ids are the
-	   order page's own; the bar toggles which group is hidden via the main's class. */
+	   page shows one group at a time — the tab you're on. The section ids are the
+	   order page's own; the bar toggles which group is hidden via the main's class.
+
+	   Messages hides EVERYTHING that isn't the thread, rather than naming the
+	   sections to hide one at a time. The list version had been outgrown: it named
+	   #status and #documents, so when the invoice card was added it was on neither
+	   list and showed up under both tabs — a customer read their balance on the
+	   Messages tab, which is for messages. Written this way a section added later
+	   lands on Project by default, which is the side that means "your job"; only
+	   the thread belongs here.
+
+	   Direct children only, and `section` only. The order page's `<header>` carries
+	   the job's name and stays as context on both tabs, and the document viewer is
+	   a `div` dialog that must still be able to open over either. */
 	@media (max-width: 47.99rem) {
 		.wrap {
 			padding-bottom: 4.5rem;
 		}
-		.main.m-messages :global(#status),
-		.main.m-messages :global(#documents) {
+		.main.m-messages > :global(section:not(#messages)) {
 			display: none;
 		}
-		.main.m-project :global(#messages) {
+		.main.m-project > :global(#messages) {
 			display: none;
 		}
 	}
 
 	/* ================================================== Tablet and up ===
-	   The rail appears beside the content and the utilities move into the
-	   bar, so the hamburger has nothing left to hold. */
+	   The rail appears beside the content, and the account-side controls join the
+	   Appearance pair already in the bar. */
 	@media (min-width: 48rem) {
 		/* The rail and top-bar utilities navigate here; the bottom bar is a phone
 		   affordance. */
@@ -819,30 +934,11 @@
 		.hamburger {
 			display: none;
 		}
-		/* Back into the bar: static, visible, no panel chrome. */
-		.nav-collapse {
-			position: static;
-			flex-direction: row;
-			justify-content: flex-end;
-			align-items: center;
-			flex: 1;
-			padding: 0;
-			background: none;
-			border-bottom: none;
-			box-shadow: none;
-			opacity: 1;
-			visibility: visible;
-			transform: none;
-			transition: none;
-		}
-		/* Projects live in the rail at this width, not in the bar. */
-		.nav-projects {
-			display: none;
-		}
-		.nav-utils {
-			margin-top: 0;
-			padding-top: 0;
-			border-top: none;
+		/* `contents`, not `flex`: the wrapper stops being a box and its three
+		   controls join `.nav-utils`' own flex row, so the gap between the theme
+		   toggle and the gear is the same 0.75rem as everywhere else in the bar. */
+		.nav-account {
+			display: contents;
 		}
 
 		.wrap {

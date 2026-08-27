@@ -3,9 +3,9 @@ import {
 	isContractorOrderState,
 	isSnoozePreset,
 	parseDateInput,
-	parseDollarsToCents,
-	parseTags
+	parseDollarsToCents
 } from '$lib/crm';
+import { isPaymentKind } from '$lib/invoice';
 import {
 	addOrderNote,
 	cancelOrder,
@@ -14,10 +14,17 @@ import {
 	InviteStillOpenError,
 	portalStanding,
 	resendInvite,
+	addLineItem,
+	deleteLineItem,
 	deleteOrder,
+	deletePayment,
 	getOrderDetail,
+	setOrderDetails,
+	setVisitDate,
+	updateLineItem,
+	recordPayment,
 	setFollowUp,
-	setOrderTags,
+	setOrderTotal,
 	snoozeFollowUp,
 	updateOrderState
 } from '$lib/server/crm.server';
@@ -30,12 +37,7 @@ import {
 	viewerFromLocals,
 	type UploadInput
 } from '$lib/server/documents.server';
-import {
-	assignSubcontractor,
-	listOrderSubcontractors,
-	listSubcontractors,
-	unassignSubcontractor
-} from '$lib/server/subcontractor.server';
+import { assignSubcontractor, unassignSubcontractor } from '$lib/server/subcontractor.server';
 import {
 	EmptyMessageError,
 	getThread,
@@ -48,21 +50,67 @@ import { withBillingErrors } from '$lib/server/billing.server';
 import { sendEmailAction, sendFinalInvoiceEmail } from '$lib/server/email-action.server';
 import { revokeInviteAction } from '$lib/server/invite-action.server';
 
+/**
+ * A line item's amount, which unlike every other money field in the app may be
+ * NEGATIVE — a discount or a credit is a line, not a special case.
+ * `parseDollarsToCents` rejects negatives on purpose (a negative payment or
+ * invoice total is always a mistake), so this is its signed sibling rather than
+ * a loosening of it.
+ */
+function parseSignedDollarsToCents(input: string | null | undefined): number | null {
+	const raw = (input ?? '').trim();
+	if (!raw) return null;
+	const negative = raw.startsWith('-');
+	const cents = parseDollarsToCents(negative ? raw.slice(1) : raw);
+	if (cents == null) return null;
+	return negative ? -cents : cents;
+}
+
 function requireContractor(locals: App.Locals) {
 	if (!locals.user) redirect(302, '/login');
 	if (locals.user.role !== 'contractor') redirect(302, '/');
 	return locals.user;
 }
 
+import { validateStint, workerSchema } from '$lib/worker';
+import {
+	createWorker,
+	DuplicateWorkerEmailError,
+	WorkerNotFoundError
+} from '$lib/server/worker.server';
+import { isPersonKind } from '$lib/people';
+import { taskSchema } from '$lib/tasks';
+import {
+	completeTaskAsContractor,
+	createTask,
+	deleteTask,
+	listTasks,
+	reopenTask,
+	TaskNotFoundError,
+	updateTask
+} from '$lib/server/tasks.server';
+import {
+	assignPerson,
+	listOrderPeople,
+	listPeople,
+	unassignPerson
+} from '$lib/server/people.server';
+
 export const load: PageServerLoad = async ({ locals, params }) => {
 	const user = requireContractor(locals);
 	const detail = await getOrderDetail(params.id, user.id);
 	if (!detail) error(404, 'Order not found');
-	const [assignedSubs, roster] = await Promise.all([
-		listOrderSubcontractors(user.id, params.id),
-		listSubcontractors(user.id)
+	// One list for the panel, one for the picker. Both carry crew and subs — the
+	// order page asks "who is on this job", which was never two questions.
+	const [assignedPeople, roster, tasks] = await Promise.all([
+		listOrderPeople(user.id, params.id),
+		listPeople(user.id),
+		// What this job is waiting on the CUSTOMER for. Loaded here rather than
+		// behind its own fetch because the tab shows a count, and a count that
+		// arrives late is a tab that changes width after you have looked at it.
+		listTasks(params.id)
 	]);
-	const assignedIds = new Set(assignedSubs.map((s) => s.id));
+	const onJob = new Set(assignedPeople.map((p) => `${p.kind}-${p.id}`));
 
 	// The conversation with the customer. Opening the order is what marks it read
 	// for the contractor side — the customer's own unread state is untouched.
@@ -97,9 +145,18 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		documents,
 		owesReply,
 		pendingReplies,
-		assignedSubs,
-		// Subs not yet on this job, offered in the assign picker.
-		availableSubs: roster.filter((s) => !assignedIds.has(s.id)),
+		assignedPeople,
+		tasks,
+		// The contractor's own name, for the preview of what their CUSTOMER is
+		// being told. The portal writes the sentence with it, so the preview has
+		// to have it too or the two would differ in the one word that says who is
+		// waiting.
+		contractorName: user.name,
+		// Not yet on this job, offered in the picker. Archived people are already
+		// excluded by `listPeople`, so somebody who has left cannot be newly
+		// assigned — but the ones already on it stay in `assignedPeople`, because
+		// they really did work it.
+		availablePeople: roster.filter((p) => !onJob.has(`${p.kind}-${p.id}`)),
 		thread,
 		// An unlinked customer has no portal to read a reply in, so the composer
 		// says so rather than storing a message nobody can see.
@@ -160,8 +217,12 @@ export const actions: Actions = withBillingErrors({
 
 		await completeOrder(params.id, user.id, { amountCents, notes, paymentMethod, markPaid });
 
-		let invoiceEmail: 'sent' | 'skipped' | null = null;
+		let invoiceEmail: 'sent' | 'simulated' | 'skipped' | null = null;
 		if (sendInvoice) {
+			// Re-read AFTER completing, so the emailed invoice carries the payment
+			// close-out just recorded. Composing from the form values instead would
+			// send a customer a balance that was already settled by the time they
+			// read it.
 			const detail = await getOrderDetail(params.id, user.id);
 			invoiceEmail = detail?.order.customerEmail
 				? await sendFinalInvoiceEmail(
@@ -170,9 +231,10 @@ export const actions: Actions = withBillingErrors({
 							id: params.id,
 							projectName: detail.order.projectName,
 							customerName: detail.order.customerName,
-							customerEmail: detail.order.customerEmail
+							customerEmail: detail.order.customerEmail,
+							finalNotes: detail.order.finalNotes
 						},
-						{ amountCents, notes }
+						detail.invoice
 					)
 				: 'skipped';
 		}
@@ -189,10 +251,113 @@ export const actions: Actions = withBillingErrors({
 		return { success: true, action: 'cancel' as const };
 	},
 
-	setTags: async ({ request, locals, params }) => {
+	// What the job costs. Separate from close-out because a deposit needs a total
+	// to be half OF, and that is agreed at quote time — see `setOrderTotal`.
+	setOrderTotal: async ({ request, locals, params }) => {
 		const user = requireContractor(locals);
 		const form = await request.formData();
-		await setOrderTags(params.id, user.id, parseTags(form.get('tags')?.toString() ?? ''));
+		const raw = form.get('total')?.toString() ?? '';
+		// A blank field clears the total; a filled-but-unparseable one is a typo and
+		// must not silently clear it. `parseDollarsToCents` returns null for both, so
+		// the two cases are told apart here rather than there.
+		const totalCents = parseDollarsToCents(raw);
+		if (raw.trim() && totalCents == null)
+			return fail(400, { message: 'Enter a dollar amount, e.g. 4800 or 4,800.00' });
+		await setOrderTotal(params.id, user.id, totalCents);
+		return { success: true };
+	},
+
+	// Money in. The contractor is the only one who can say this happened — they are
+	// the only one who saw it (ADR-0010: record, never process).
+	recordPayment: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const amountCents = parseDollarsToCents(form.get('amount')?.toString());
+		if (amountCents == null || amountCents === 0)
+			return fail(400, { message: 'Enter the amount received' });
+
+		const kindInput = form.get('kind')?.toString() ?? 'progress';
+		const kind = isPaymentKind(kindInput) ? kindInput : 'progress';
+		const method = form.get('method')?.toString() || null;
+		const note = form.get('note')?.toString() ?? null;
+		// The date the money changed hands, which the contractor may backdate. An
+		// unparseable date falls back to now rather than refusing the payment — the
+		// amount is the fact worth keeping.
+		const receivedAt = parseDateInput(form.get('receivedAt')?.toString() ?? '');
+
+		await recordPayment(params.id, user.id, { kind, amountCents, method, note, receivedAt });
+		return { success: true };
+	},
+
+	deletePayment: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const paymentId = form.get('paymentId')?.toString() ?? '';
+		if (!paymentId) return fail(400, { message: 'No payment selected' });
+		await deletePayment(paymentId, params.id, user.id);
+		return { success: true };
+	},
+
+	// The job's own details, saved as one panel rather than five fields.
+	setOrderDetails: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		await setOrderDetails(params.id, user.id, {
+			description: form.get('description')?.toString() ?? null,
+			siteAddress: form.get('siteAddress')?.toString() ?? null,
+			siteCity: form.get('siteCity')?.toString() ?? null,
+			siteState: form.get('siteState')?.toString() ?? null,
+			sitePostalCode: form.get('sitePostalCode')?.toString() ?? null,
+			startDate: parseDateInput(form.get('startDate')?.toString() ?? ''),
+			targetDate: parseDateInput(form.get('targetDate')?.toString() ?? '')
+		});
+		return { success: true };
+	},
+
+	// One charge on the invoice. A blank amount is refused rather than treated as
+	// zero — a line with no price is a typo, not a freebie.
+	addLineItem: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const label = form.get('label')?.toString().trim() ?? '';
+		const amountCents = parseSignedDollarsToCents(form.get('amount')?.toString());
+		if (!label) return fail(400, { message: 'Give the line a name' });
+		if (amountCents == null) return fail(400, { message: 'Enter an amount for this line' });
+		await addLineItem(params.id, user.id, { label, amountCents });
+		return { success: true };
+	},
+
+	updateLineItem: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const itemId = form.get('itemId')?.toString() ?? '';
+		const label = form.get('label')?.toString().trim() ?? '';
+		const amountCents = parseSignedDollarsToCents(form.get('amount')?.toString());
+		if (!itemId) return fail(400, { message: 'No line selected' });
+		if (!label) return fail(400, { message: 'Give the line a name' });
+		if (amountCents == null) return fail(400, { message: 'Enter an amount for this line' });
+		await updateLineItem(itemId, params.id, user.id, { label, amountCents });
+		return { success: true };
+	},
+
+	// The day the crew is on site. Its own action for the same reason it is its
+	// own control: it changes on the morning it applies to.
+	setVisitDate: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const raw = form.get('date')?.toString() ?? '';
+		const date = parseDateInput(raw);
+		if (raw.trim() && !date) return fail(400, { message: 'That date could not be read' });
+		await setVisitDate(params.id, user.id, date);
+		return { success: true };
+	},
+
+	deleteLineItem: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const itemId = form.get('itemId')?.toString() ?? '';
+		if (!itemId) return fail(400, { message: 'No line selected' });
+		await deleteLineItem(itemId, params.id, user.id);
 		return { success: true };
 	},
 
@@ -274,15 +439,14 @@ export const actions: Actions = withBillingErrors({
 		return { success: true };
 	},
 
-	/** What a document is, in the contractor's words, plus how they file it. */
+	/** What a document is, in the contractor's words. */
 	updateDocument: async ({ request, locals }) => {
 		requireContractor(locals);
 		const form = await request.formData();
 		const documentId = form.get('documentId')?.toString() ?? '';
 		if (!documentId) return fail(400, { message: 'A document is required' });
 		await updateDocument(viewerFromLocals(locals)!, documentId, {
-			note: form.get('note')?.toString() ?? '',
-			tags: form.get('tags')?.toString() ?? ''
+			note: form.get('note')?.toString() ?? ''
 		});
 		return { success: true };
 	},
@@ -350,6 +514,231 @@ export const actions: Actions = withBillingErrors({
 			await assignSubcontractor(user.id, params.id, subcontractorId);
 		for (const subcontractorId of unassign)
 			await unassignSubcontractor(user.id, params.id, subcontractorId);
+		return { success: true };
+	},
+
+	/**
+	 * Put somebody on this job, or change the dates of somebody already on it.
+	 *
+	 * ONE action for crew and subcontractors alike, because the panel is one list
+	 * — "who is on this job" was never two questions. `kind` says which table the
+	 * id belongs to; it arrives from a hidden field, so it is validated rather
+	 * than trusted, and `assignPerson` re-checks ownership on whichever branch it
+	 * takes.
+	 *
+	 * Also the edit path: the underlying writes are upserts, because assigning
+	 * somebody already here almost always means "change their dates", and a
+	 * separate action would differ only in which of the two it refused.
+	 */
+	assignPerson: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const personId = form.get('personId')?.toString() ?? '';
+		const kind = form.get('kind')?.toString() ?? '';
+		if (!personId || !isPersonKind(kind))
+			return fail(400, { action: 'crew', message: 'A person is required' });
+
+		const stint = validateStint({
+			startsOn: form.get('startsOn')?.toString(),
+			endsOn: form.get('endsOn')?.toString()
+		});
+		if (!stint.ok) return fail(400, { action: 'crew', field: stint.field, message: stint.message });
+
+		try {
+			await assignPerson(user.id, params.id, kind, personId, {
+				...stint.value,
+				role: form.get('role')?.toString()?.trim() || null,
+				notes: form.get('notes')?.toString()?.trim() || null
+			});
+		} catch (err) {
+			if (err instanceof WorkerNotFoundError)
+				return fail(404, { action: 'crew', message: err.message });
+			throw err;
+		}
+		return { success: true };
+	},
+
+	/**
+	 * Add somebody who isn't on the books yet, and put them straight on this job.
+	 *
+	 * The panel could only pick from people who already existed, so hiring a hand
+	 * on Tuesday morning meant leaving the job, crossing to the people page,
+	 * filling a full record, coming back and finding the job again — five screens
+	 * to answer "Dave is here today". The picker now creates as well as searches.
+	 *
+	 * THREE FIELDS, and that is the point. The people page is where a full record
+	 * is kept (email, company, notes, insurance, tiers, a portal login); this is
+	 * the field version of it, where a name and what they do is genuinely all that
+	 * is known at the moment somebody turns up. Everything else can be filled in
+	 * later from the record this creates.
+	 *
+	 * It creates CREW, never a subcontractor. A sub carries an access tier,
+	 * insurance and possibly a portal login — decisions with consequences beyond
+	 * this job, which is the wrong thing to make as a side effect of staffing a
+	 * Tuesday. A firm you are engaging is still set up on the people page.
+	 */
+	createAndAssignPerson: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const parsed = workerSchema.safeParse({
+			name: form.get('name')?.toString() ?? '',
+			phone: form.get('phone')?.toString() ?? '',
+			role: form.get('role')?.toString() ?? '',
+			email: '',
+			company: '',
+			notes: ''
+		});
+		if (!parsed.success)
+			return fail(400, {
+				action: 'crew',
+				message: parsed.error.issues[0]?.message ?? 'Check the details'
+			});
+
+		// Validated before the record is written, so a bad date cannot leave a new
+		// person on the books who never made it onto the job they were added for.
+		const stint = validateStint({ startsOn: form.get('startsOn')?.toString() });
+		if (!stint.ok) return fail(400, { action: 'crew', field: stint.field, message: stint.message });
+
+		let created;
+		try {
+			created = await createWorker(user.id, parsed.data);
+		} catch (err) {
+			if (err instanceof DuplicateWorkerEmailError)
+				return fail(400, { action: 'crew', message: err.message });
+			throw err;
+		}
+
+		await assignPerson(user.id, params.id, 'crew', created.id, {
+			...stint.value,
+			// What they are doing HERE starts as what they do generally. Both stay
+			// editable from the row once they are on.
+			role: parsed.data.role ?? null,
+			notes: null
+		});
+		return { success: true };
+	},
+
+	/**
+	 * Ask the customer for something.
+	 *
+	 * The gap this closes: the only thing this product could previously ask a
+	 * customer for was money, and only by moving the whole order into Deposit
+	 * Pending or Final Payment Pending. Anything else — a colour, a signature, a
+	 * gate code, being home on Thursday — had to go in a Message, where it read
+	 * as conversation and scrolled away while the portal reported "In progress".
+	 */
+	addTask: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const parsed = taskSchema.safeParse({
+			title: form.get('title')?.toString() ?? '',
+			detail: form.get('detail')?.toString() ?? '',
+			dueOn: form.get('dueOn')?.toString() ?? '',
+			blocking: form.get('blocking') != null
+		});
+		if (!parsed.success)
+			return fail(400, {
+				action: 'task',
+				message: parsed.error.issues[0]?.message ?? 'Check the details'
+			});
+		try {
+			await createTask(user.id, params.id, parsed.data);
+		} catch (err) {
+			if (err instanceof TaskNotFoundError)
+				return fail(404, { action: 'task', message: err.message });
+			throw err;
+		}
+		return { success: true };
+	},
+
+	editTask: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const taskId = form.get('taskId')?.toString() ?? '';
+		if (!taskId) return fail(400, { action: 'task', message: 'A task is required' });
+		const parsed = taskSchema.safeParse({
+			title: form.get('title')?.toString() ?? '',
+			detail: form.get('detail')?.toString() ?? '',
+			dueOn: form.get('dueOn')?.toString() ?? '',
+			blocking: form.get('blocking') != null
+		});
+		if (!parsed.success)
+			return fail(400, {
+				action: 'task',
+				message: parsed.error.issues[0]?.message ?? 'Check the details'
+			});
+		try {
+			await updateTask(user.id, taskId, parsed.data);
+		} catch (err) {
+			if (err instanceof TaskNotFoundError)
+				return fail(404, { action: 'task', message: err.message });
+			throw err;
+		}
+		return { success: true };
+	},
+
+	/**
+	 * Tick it off on the customer's behalf.
+	 *
+	 * Not a redundant copy of the customer's own button: cash changes hands on
+	 * site, a permit is handed over in person, and a contractor who cannot record
+	 * that is left with a portal telling their customer they still owe something
+	 * they have already done. The Timeline records WHICH side ticked it.
+	 */
+	completeTask: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const taskId = form.get('taskId')?.toString() ?? '';
+		if (!taskId) return fail(400, { action: 'task', message: 'A task is required' });
+		try {
+			await completeTaskAsContractor(user.id, taskId);
+		} catch (err) {
+			if (err instanceof TaskNotFoundError)
+				return fail(404, { action: 'task', message: err.message });
+			throw err;
+		}
+		return { success: true };
+	},
+
+	reopenTask: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const taskId = form.get('taskId')?.toString() ?? '';
+		if (!taskId) return fail(400, { action: 'task', message: 'A task is required' });
+		try {
+			await reopenTask(user.id, taskId);
+		} catch (err) {
+			if (err instanceof TaskNotFoundError)
+				return fail(404, { action: 'task', message: err.message });
+			throw err;
+		}
+		return { success: true };
+	},
+
+	/** Take the ask back. What happened — that it was asked — stays on the history. */
+	deleteTask: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const taskId = form.get('taskId')?.toString() ?? '';
+		if (!taskId) return fail(400, { action: 'task', message: 'A task is required' });
+		try {
+			await deleteTask(user.id, taskId);
+		} catch (err) {
+			if (err instanceof TaskNotFoundError)
+				return fail(404, { action: 'task', message: err.message });
+			throw err;
+		}
+		return { success: true };
+	},
+
+	unassignPerson: async ({ request, locals, params }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const personId = form.get('personId')?.toString() ?? '';
+		const kind = form.get('kind')?.toString() ?? '';
+		if (!personId || !isPersonKind(kind))
+			return fail(400, { action: 'crew', message: 'A person is required' });
+		await unassignPerson(user.id, params.id, kind, personId);
 		return { success: true };
 	},
 

@@ -9,7 +9,13 @@ import {
 	DEV_CONTRACTOR,
 	DEV_CUSTOMER
 } from './fixtures/app';
-import { addInternalNote, openTab, setStatus, timelineEntry } from './fixtures/order';
+import {
+	addInternalNote,
+	openTab,
+	completeOrder,
+	setStatus,
+	timelineEntry
+} from './fixtures/order';
 import { customerPage, openPortalHistory, openPortalOrder } from './fixtures/portal';
 import type { Page } from '@playwright/test';
 
@@ -45,6 +51,85 @@ test.describe('customer portal', () => {
 		await openPortalOrder(customer, order.projectName);
 		// The portal leads with where the job stands, in the customer's words.
 		await expect(customer.getByText('Status')).toBeVisible();
+		await customer.close();
+	});
+
+	/**
+	 * The whole round trip of an ask, which is the point of the feature.
+	 *
+	 * Before this existed, the only thing a contractor could ask a customer for
+	 * was money — the two "pay me" states were the entire vocabulary — so a colour
+	 * to pick or a permit to sign went into a message and scrolled away while the
+	 * portal reported "In progress" on a job that had not moved in a week.
+	 */
+	test('a contractor asks the customer for something and they tick it off', async ({
+		page,
+		browser
+	}) => {
+		const { order } = await contractorWithOrderForDevCustomer(page);
+		const ask = `Pick your tile ${uid()}`;
+
+		await openTab(page, 'History');
+		await page.getByRole('button', { name: 'Ask the customer for something' }).click();
+		const form = page.locator('#panel-history form[action="?/addTask"]');
+		await form.getByLabel('What you need').fill(ask);
+		await form.getByLabel('Detail (optional)').fill('Any of the three in the sample box.');
+		await form.getByRole('button', { name: 'Ask them' }).click();
+		// Scoped to the ask list: the asks sit above the history in the SAME
+		// panel now, so the bare panel matches this text twice — once as the
+		// outstanding ask, once as the history entry recording that it was asked.
+		await expect(page.locator('#panel-history .ask-list').getByText(ask)).toBeVisible();
+
+		// The customer's side: it leads the project, in the one place they cannot
+		// miss it, and says whose turn it is in a sentence.
+		const customer = await customerPage(browser);
+		await openPortalOrder(customer, order.projectName);
+		await expect(customer.getByText(/This one’s with you/)).toBeVisible();
+		// Scoped to the panel: the ask is also on the history, because being asked
+		// is a thing that happened to the job and the record of it is the point.
+		const todo = customer.locator('.todo');
+		await expect(todo.getByText(ask)).toBeVisible();
+		await expect(todo.getByText('Any of the three in the sample box.')).toBeVisible();
+
+		// And they can say it is done, which is the half a message could never do.
+		await todo.getByRole('button', { name: 'Done' }).first().click();
+		await expect(customer.getByText(/This one’s with you/)).toHaveCount(0);
+		await customer.close();
+
+		// Back on the contractor's side it is off the outstanding list, and the
+		// history records that the CUSTOMER was the one who did it.
+		await page.reload();
+		await openTab(page, 'History');
+		await expect(page.locator('#panel-history .ask-list:not(.done)').getByText(ask)).toHaveCount(0);
+		await page.locator('#panel-history details.ask-done summary').click();
+		await expect(
+			page.locator('#panel-history .ask-list.done').getByText('They marked it done')
+		).toBeVisible();
+	});
+
+	test('an outstanding ask marks the project as waiting on the customer', async ({
+		page,
+		browser
+	}) => {
+		const { order } = await contractorWithOrderForDevCustomer(page);
+		const ask = `Gate code ${uid()}`;
+
+		await openTab(page, 'History');
+		await page.getByRole('button', { name: 'Ask the customer for something' }).click();
+		const form = page.locator('#panel-history form[action="?/addTask"]');
+		await form.getByLabel('What you need').fill(ask);
+		await form.getByRole('button', { name: 'Ask them' }).click();
+		// Scoped to the ask list: the asks sit above the history in the SAME
+		// panel now, so the bare panel matches this text twice — once as the
+		// outstanding ask, once as the history entry recording that it was asked.
+		await expect(page.locator('#panel-history .ask-list').getByText(ask)).toBeVisible();
+
+		// A customer with several projects reads the rail to find the one that
+		// needs them — so the mark has to be there, not only inside the project.
+		const customer = await customerPage(browser);
+		await openPortalOrder(customer, order.projectName);
+		const railLink = customer.getByRole('link', { name: order.projectName }).first();
+		await expect(railLink.getByText('Over to you')).toBeVisible();
 		await customer.close();
 	});
 
@@ -135,7 +220,8 @@ test.describe('customer portal', () => {
 
 		await page.goto(orderUrl);
 		await setStatus(page, 'In Progress');
-		await setStatus(page, 'Work Complete');
+		// Closing out is its own flow now — a final invoice, not a status pick.
+		await completeOrder(page, { total: '4500', markPaid: true });
 
 		const customer = await customerPage(browser);
 		// A closed job leaves the live list and files itself under "Past work" —
@@ -153,6 +239,32 @@ test.describe('customer portal', () => {
 		await expect(state).not.toHaveClass(/act/);
 		await expect(customer.getByRole('heading', { name: order.projectName })).toBeVisible();
 		await customer.close();
+	});
+
+	test('the rail names the sections, and Documents lands on a real one', async ({ page }) => {
+		// Documents used to sit behind a toggle in the page header, and the section
+		// itself was `{#if docsOpen}` — so while it was shut the element was not in
+		// the DOM and this rail link jumped at nothing. A nav entry that silently
+		// does nothing is worse than no nav entry.
+		await signIn(page, DEV_CUSTOMER.email, DEV_CUSTOMER.password);
+		await page.waitForURL('**/customer**');
+		await page
+			.getByRole('link', { name: /remodel|deck|Kitchen/i })
+			.first()
+			.click();
+		await page.waitForLoadState('networkidle');
+
+		const subnav = page.locator('aside.rail ul.subnav');
+		await expect(subnav.getByRole('link', { name: /History/ })).toBeVisible();
+		await expect(subnav.getByRole('link', { name: /Documents/ })).toBeVisible();
+		await expect(subnav.getByRole('link', { name: /Messages/ })).toBeVisible();
+
+		// Present whether or not anything has been sent — that is what makes it a
+		// jump target at all.
+		await expect(page.locator('#documents')).toBeVisible();
+		await subnav.getByRole('link', { name: /Documents/ }).click();
+		await expect(page).toHaveURL(/#documents$/);
+		await expect(page.locator('#documents')).toBeInViewport();
 	});
 
 	test('a customer cannot reach the contractor side', async ({ browser }) => {

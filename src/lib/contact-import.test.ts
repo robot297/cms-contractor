@@ -217,6 +217,19 @@ describe('fromPickedContact', () => {
 });
 
 describe('contactIssue', () => {
+	it('lets a crew import through without an email', () => {
+		// The customer rule inverted. A crew member is not identified by their
+		// address — a labourer may only ever be a name and a mobile number — so
+		// refusing them until one is invented would be the app being wrong about
+		// the world. A malformed address still fails: it was typed, so it was meant.
+		const existing = new Set<string>();
+		const opts = { emailRequired: false };
+		expect(contactIssue({ ...blank, name: 'Dave' }, existing, opts)).toBeNull();
+		expect(contactIssue({ ...blank, name: 'Dave', email: 'nope' }, existing, opts)).toBe(
+			'bad-email'
+		);
+	});
+
 	const existing = new Set(['taken@example.com']);
 
 	it('passes a contact that can be imported', () => {

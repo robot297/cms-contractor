@@ -1,14 +1,6 @@
-import { and, eq, isNull } from 'drizzle-orm';
-import { DEFAULT_SIGNATURE, STARTER_EMAIL_TEMPLATES } from '$lib/crm';
+import { eq } from 'drizzle-orm';
 import { db } from './db';
-import {
-	contractorSettings,
-	customer,
-	customerInvite,
-	emailTemplate,
-	order,
-	subcontractor
-} from './db/schema';
+import { contractorSettings, customerInvite, order } from './db/schema';
 import { getContractorSettings } from './templates.server';
 
 /**
@@ -30,23 +22,13 @@ export function isGuideState(value: string): value is GuideState {
 }
 
 export type GuideStep = {
-	id: 'customer' | 'order' | 'invite' | 'templates' | 'subcontractor';
+	id: 'job' | 'invite';
 	/** One line. If it needs a paragraph, it isn't a checklist item. */
 	title: string;
-	/**
-	 * Why this step is worth doing — shown only for the step the contractor is
-	 * actually on, so the guide reads as one instruction at a time rather than a
-	 * wall of five. Still one sentence: this is a nudge, not documentation.
-	 */
+	/** One sentence saying why it is worth doing. A nudge, not documentation. */
 	description: string;
 	done: boolean;
-	/** Where the step is actually performed; absent for the acknowledge-only step. */
-	href?: string;
-	/** Label for the step's action button. */
-	cta?: string;
-	/** Blocked steps say why in a few words instead of linking nowhere. */
-	blockedBy?: string;
-	/** Offered a "Skip" — optional steps a contractor may never want. */
+	/** Optional steps a contractor may never want are offered a "Skip". */
 	skippable?: boolean;
 	/** They took that offer. Resolved, but honestly labelled rather than ticked. */
 	skipped?: boolean;
@@ -54,14 +36,9 @@ export type GuideStep = {
 
 export type Guide = {
 	state: GuideState;
-	/** The two structurally-required steps. */
-	core: GuideStep[];
-	/** Shown once the contractor opts to keep going. */
-	extended: GuideStep[];
-	coreDone: boolean;
+	steps: GuideStep[];
+	/** Every step done or skipped — the card has nothing left to say. */
 	allDone: boolean;
-	/** True when both core steps are done and the contractor hasn't chosen yet. */
-	atFork: boolean;
 };
 
 /** Cheap existence probe — `limit 1`, no counting. */
@@ -69,157 +46,56 @@ async function exists(query: Promise<unknown | undefined>): Promise<boolean> {
 	return (await query) != null;
 }
 
-/**
- * A template's content, flattened so a starter can be recognised by value.
- *
- * Joined on NUL because it is the one character that cannot appear in template
- * text, so no combination of real fields can collide with the separator and make
- * an edited template look like an untouched starter. Spelled as an escape rather
- * than the raw byte: as a literal it is invisible in review and makes this whole
- * module read as binary to grep — see src/lib/source-hygiene.test.ts.
- */
-function wording(t: { name: string; subject: string; body: string }): string {
-	return `${t.name}\u0000${t.subject}\u0000${t.body}`;
-}
-
-const STARTER_WORDING = new Set(STARTER_EMAIL_TEMPLATES.map(wording));
-
 export async function loadGuide(contractorId: string): Promise<Guide> {
-	const [settings, hasCustomer, hasOrder, hasInvite, hasSubcontractor, templates] =
-		await Promise.all([
-			getContractorSettings(contractorId),
-			exists(
-				db.query.customer.findFirst({
-					where: eq(customer.contractorId, contractorId),
-					columns: { id: true }
-				})
-			),
-			exists(
-				db.query.order.findFirst({
-					where: eq(order.contractorId, contractorId),
-					columns: { id: true }
-				})
-			),
-			exists(
-				db.query.customerInvite.findFirst({
-					where: eq(customerInvite.contractorId, contractorId),
-					columns: { id: true }
-				})
-			),
-			// Archived subs are out of the roster, so they don't count — the Guide
-			// describes the account as it is now.
-			exists(
-				db.query.subcontractor.findFirst({
-					where: and(
-						eq(subcontractor.contractorId, contractorId),
-						isNull(subcontractor.archivedAt)
-					),
-					columns: { id: true }
-				})
-			),
-			db.query.emailTemplate.findMany({
-				where: eq(emailTemplate.contractorId, contractorId),
-				columns: { name: true, subject: true, body: true }
+	const [settings, hasOrder, hasInvite] = await Promise.all([
+		getContractorSettings(contractorId),
+		// An order is the whole of the first step: it cannot exist without a
+		// customer, so asking about the order asks about both.
+		exists(
+			db.query.order.findFirst({
+				where: eq(order.contractorId, contractorId),
+				columns: { id: true }
 			})
-		]);
+		),
+		exists(
+			db.query.customerInvite.findFirst({
+				where: eq(customerInvite.contractorId, contractorId),
+				columns: { id: true }
+			})
+		)
+	]);
 
 	const state: GuideState = isGuideState(settings.guideState) ? settings.guideState : 'active';
 	const skipped = new Set(settings.guideSkippedSteps);
 
-	// "Has templates" would tick itself: every contractor is seeded with the starter
-	// set and the default signature (see `ensureStarterTemplates`). What is genuinely
-	// derivable — and what the step is actually asking for — is whether they've made
-	// the wording theirs: a template that isn't a starter verbatim, or a signature or
-	// business name of their own.
-	const hasOwnWording =
-		templates.some((t) => !STARTER_WORDING.has(wording(t))) ||
-		settings.businessName.trim() !== '' ||
-		settings.signature !== DEFAULT_SIGNATURE;
-
-	const core: GuideStep[] = [
+	const steps: GuideStep[] = [
 		{
-			id: 'customer',
-			title: 'Add your first customer',
+			id: 'job',
+			title: 'Add your first job',
+			// Says what a job IS, because that is the one piece of vocabulary the
+			// whole app rests on — everything else hangs off an order.
 			description:
-				'Name, email and where the work is. Everything else you track hangs off a customer.',
-			done: hasCustomer,
-			href: '/contractor/customers',
-			cta: 'Add a customer'
+				'A customer and the work you are doing for them. Both together, right here — no hunting through screens.',
+			done: hasOrder
 		},
-		{
-			id: 'order',
-			title: 'Create an order for them',
-			description:
-				'An order is one job — what you are building, and how far along it is. Its status is what your customer sees.',
-			done: hasOrder,
-			href: '/contractor/orders',
-			cta: 'Create an order',
-			// The order form picks a customer from a dropdown, so this genuinely cannot
-			// be done first — say so rather than sending them to an empty select.
-			blockedBy: hasCustomer ? undefined : 'Add a customer first'
-		}
-	];
-
-	const extended: GuideStep[] = [
 		{
 			id: 'invite',
-			title: 'Invite them to their portal',
+			title: 'Invite your customer',
+			// The one thing worth saying about the portal, and it says the optional
+			// part out loud: a contractor who never invites anybody is using the app
+			// correctly, and a checklist that implies otherwise is lying to them.
 			description:
-				'Send a magic link to your client so they can to view updates and ask questions (this can be done later, too!)',
+				'Optional. Sends them a link to follow the job and message you in the app — chatting here needs an account on their side. Everything else works without it, and you can invite from any job later.',
 			done: hasInvite,
-			href: '/contractor/customers',
-			cta: 'Send an invite',
-			// Plenty of contractors keep their customers off the portal entirely, so
-			// this one can be waved away rather than sitting unticked forever.
 			skippable: true,
 			skipped: skipped.has('invite')
-		},
-		{
-			id: 'templates',
-			title: 'Make the communications sound like you',
-			// Says what "done" means, because the starter set arriving pre-filled
-			// makes this the one step where it isn't obvious.
-			description:
-				'You start with three ready-made emails and a signature. Edit the wording or add your own so every message you send from an order goes out in your voice.',
-			done: hasOwnWording,
-			href: '/contractor/settings/templates',
-			cta: 'Open templates',
-			// A contractor happy with the starters as written has already finished
-			// this in spirit — let them say so rather than edit a word to tick it.
-			skippable: true,
-			skipped: skipped.has('templates')
-		},
-		{
-			id: 'subcontractor',
-			title: 'Bring in a subcontractor',
-			description:
-				'Add a trade partner to your roster, then assign them to any order. Trusted subs see the whole job; guests see the work with your customer’s details hidden.',
-			// The roster, not an assignment. This step's own button says "Add a
-			// subcontractor" — completing it has to mean doing what the button says,
-			// or the contractor does exactly what was asked and nothing ticks.
-			done: hasSubcontractor,
-			// `?new` opens the add form on arrival — the step asks for a subcontractor,
-			// so landing on the roster and hunting for the ＋ is a step too many.
-			href: '/contractor/subcontractors?new=1',
-			cta: 'Add a subcontractor',
-			// Plenty of contractors work alone. Same reasoning as the invite step.
-			skippable: true,
-			skipped: skipped.has('subcontractor')
 		}
 	];
 
-	const coreDone = core.every((s) => s.done);
-	// A skipped step is resolved: it must not hold the guide open forever.
+	// A skipped step is resolved: it must not hold the card open forever.
 	const settled = (s: GuideStep) => s.done || s.skipped === true;
 
-	return {
-		state,
-		core,
-		extended,
-		coreDone,
-		allDone: coreDone && extended.every(settled),
-		atFork: coreDone && state === 'active'
-	};
+	return { state, steps, allDone: steps.every(settled) };
 }
 
 /** Record that a contractor waved a step away. Idempotent. */

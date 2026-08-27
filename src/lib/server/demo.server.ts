@@ -121,6 +121,12 @@ async function findDemoUserId(): Promise<string | undefined> {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const inDays = (n: number) => new Date(Date.now() + n * DAY_MS);
+/** Same day, at noon — safe from either end of a calendar-day query. */
+const atMidday = (d: Date) => {
+	const copy = new Date(d);
+	copy.setHours(12, 0, 0, 0);
+	return copy;
+};
 
 /** Wipe and rebuild the demo contractor's data so every entry is a fresh tour. */
 async function seedDemoData(contractorId: string): Promise<void> {
@@ -204,8 +210,12 @@ async function seedDemoData(contractorId: string): Promise<void> {
 			projectType: o.type,
 			icon: o.icon ?? null,
 			state: o.state,
-			tags: o.tags ?? [],
-			nextFollowUpAt: o.followUpDays === null ? null : inDays(o.followUpDays)
+			nextFollowUpAt: o.followUpDays === null ? null : inDays(o.followUpDays),
+			// The day the crew is on site. `inDays` lands at the current time of day,
+			// which is fine for a follow-up but wrong for this: `visitsOn` queries a
+			// calendar day, so a visit seeded at 23:50 on the boundary would fall
+			// into the wrong one. Normalised to local midday.
+			visitDate: o.visitDays == null ? null : atMidday(inDays(o.visitDays))
 		});
 		// A customer-visible status entry...
 		await db.insert(timelineEntry).values({
@@ -247,7 +257,6 @@ async function seedDemoData(contractorId: string): Promise<void> {
 			insuranceCarrier: s.insuranceCarrier,
 			insuranceExpiresAt: s.insuranceDays === null ? null : inDays(s.insuranceDays),
 			notes: s.notes,
-			tags: s.tags,
 			avatar: s.avatar
 		});
 		if (s.invited) {

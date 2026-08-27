@@ -1,7 +1,6 @@
 import {
 	test,
 	expect,
-	clickUntil,
 	openOrder,
 	seedWorkspace,
 	signIn,
@@ -24,30 +23,69 @@ import {
  * the customer — plus the history that has to record all of it.
  */
 test.describe('order workspace', () => {
-	test('a subcontractor can be staged and then assigned to the order', async ({ page }) => {
+	test('a subcontractor can be put on the order', async ({ page }) => {
 		const { subcontractor } = await seedWorkspace(page);
 
-		await openTab(page, 'Workers');
-		// Nobody on the job yet, but the roster is not empty — so the panel offers
-		// the search rather than the "no subcontractors" state.
-		await expect(page.getByText('No one is on this job yet')).toBeVisible();
+		await openTab(page, 'People');
+		// Nobody on the job yet, but the books are not empty — so the panel offers
+		// the picker rather than the "add your people" state.
+		await expect(page.getByText('Nobody is on this job yet')).toBeVisible();
 
 		await assignSubcontractor(page, subcontractor.name);
 
-		// It survives a reload, which is the difference between staged and saved.
+		// It survives a reload, which is what says it actually reached the database.
 		await page.reload();
-		await openTab(page, 'Workers');
+		await openTab(page, 'People');
 		await expect(assignedCrew(page).filter({ hasText: subcontractor.name })).toBeVisible();
 	});
 
-	test('an empty roster offers the way to build one instead of a search', async ({ page }) => {
-		// A contractor who has never added anyone — the state the Workers panel has
+	test('somebody new can be added to a job without leaving it', async ({ page }) => {
+		// A contractor who has never added anyone — the state the People panel has
 		// to speak to before the feature is of any use to them.
 		await seedWorkspace(page, { withSubcontractor: false });
 
-		await openTab(page, 'Workers');
-		await expect(page.getByText('No subcontractors found')).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Add subcontractors' })).toBeVisible();
+		await openTab(page, 'People');
+		await expect(page.getByText('Nobody is on this job yet')).toBeVisible();
+		// No standing link off the page. It used to sit in the panel heading on
+		// every job, offered to somebody who had come here to staff one.
+		await expect(page.getByRole('link', { name: 'Manage people →' })).toHaveCount(0);
+
+		await page.getByRole('button', { name: 'Put someone on this job' }).click();
+
+		// Nothing on the books, so there is nothing to search — the picker opens on
+		// the form, and this is the ONE state where the people page is worth
+		// pointing at (subcontractors, and importing a list you already have).
+		await expect(page.getByText('Nobody on your books yet')).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Manage people →' })).toBeVisible();
+
+		const add = page.locator('form.crew-new');
+		await add.getByPlaceholder('Dave Ellis').fill('Dave Ellis');
+		await add.getByPlaceholder('Framer, helper, operator…').fill('Framer');
+		await add.getByRole('button', { name: 'Add to this job' }).click();
+
+		// One press: the record is created AND they are on the job, dated today.
+		await expect(assignedCrew(page).filter({ hasText: 'Dave Ellis' })).toBeVisible();
+		await expect(assignedCrew(page).filter({ hasText: 'Framer' })).toBeVisible();
+
+		// And it reached the database, not just the screen.
+		await page.reload();
+		await openTab(page, 'People');
+		await expect(assignedCrew(page).filter({ hasText: 'Dave Ellis' })).toBeVisible();
+	});
+
+	test('a search that finds nobody offers to create them', async ({ page }) => {
+		await seedWorkspace(page, { withSubcontractor: true });
+
+		await openTab(page, 'People');
+		await page.getByRole('button', { name: 'Put someone on this job' }).click();
+		await page.getByRole('searchbox', { name: 'Search your people' }).fill('Nobody Here');
+
+		await expect(page.getByText('Nobody matches “Nobody Here”')).toBeVisible();
+		// What was typed rides into the form rather than being typed twice.
+		await page.getByRole('button', { name: 'Add “Nobody Here” as someone new' }).click();
+		await expect(page.locator('form.crew-new').getByPlaceholder('Dave Ellis')).toHaveValue(
+			'Nobody Here'
+		);
 	});
 
 	test('the Messages panel offers the invite when there is no portal to talk through', async ({
@@ -102,11 +140,16 @@ test.describe('order workspace', () => {
 		await openTab(page, 'History');
 		await expect(timeline(page).locator('li.tl-entry')).toHaveCount(before + 1);
 
-		await setStatus(page, 'Work Complete');
+		// Two interim moves, not a close-out: completing a job settles the invoice
+		// too, so it writes more than one entry and would make "one per action"
+		// mean something else. What is under test here is the counting.
+		await setStatus(page, 'Final Payment Pending');
 		await openTab(page, 'History');
 		await expect(timeline(page).locator('li.tl-entry')).toHaveCount(before + 2);
 		// Newest first: the most recent status is the entry at the top.
-		await expect(timeline(page).locator('li.tl-entry').first()).toContainText('Work Complete');
+		await expect(timeline(page).locator('li.tl-entry').first()).toContainText(
+			'Final Payment Pending'
+		);
 	});
 
 	test('a long history collapses to the latest few, with details foldable', async ({ page }) => {
@@ -118,7 +161,9 @@ test.describe('order workspace', () => {
 			'Deposit Pending',
 			'Work Scheduled',
 			'In Progress',
-			'Work Complete'
+			// Interim states only — closing the job out is its own flow, and this
+			// test is about the SHAPE of a long history, not about finishing.
+			'Final Payment Pending'
 		]) {
 			await setStatus(page, state);
 		}
@@ -130,7 +175,7 @@ test.describe('order workspace', () => {
 		// Capped, and the newest is what survives the cap — a preview that showed
 		// the OLDEST few would be worse than no preview at all.
 		expect(preview).toBeLessThanOrEqual(4);
-		await expect(entries.first()).toContainText('Work Complete');
+		await expect(entries.first()).toContainText('Final Payment Pending');
 
 		// The rest is one press away.
 		const showAll = page.getByRole('button', { name: /^Show all / });
@@ -138,40 +183,45 @@ test.describe('order workspace', () => {
 		expect(await entries.count()).toBeGreaterThan(preview);
 		await expect(page.getByRole('button', { name: 'Show less' })).toBeVisible();
 
-		// And the detail lines fold, leaving a spine of what happened and when.
+		// And the detail lines fold. Folded FIRST: the history reads as a scannable
+		// spine of what happened and when, and the sentence explaining any one
+		// entry is a press away rather than four lines of prose you scroll past.
+		await expect(timeline(page).locator('.tl-detail').first()).toBeHidden();
+		await page.getByRole('button', { name: 'Show details' }).click();
 		await expect(timeline(page).locator('.tl-detail').first()).toBeVisible();
 		await page.getByRole('button', { name: 'Hide details' }).click();
 		await expect(timeline(page).locator('.tl-detail').first()).toBeHidden();
-		await expect(entries.first()).toContainText('Work Complete');
+		await expect(entries.first()).toContainText('Final Payment Pending');
 	});
 
 	test('the portal invite says what happened and offers to resend', async ({ page }) => {
 		const { customer } = await seedWorkspace(page);
 
-		// The customer pane is where the invite lives.
-		await clickUntil(
-			page.getByRole('button', { name: 'Customer details' }),
-			page.getByRole('button', { name: /Invite customer to portal/ })
-		);
+		// The invite lives on the Chat channel, not on a button of its own. Chat is
+		// the conversation once they are on the portal and the invitation to it
+		// before then — which is the same errand described twice if it is two
+		// controls, and the reason a customer with no portal still gets the tab.
+		const composer = await openContactComposer(page);
+		await composer.getByRole('tab', { name: 'Chat' }).click();
 
 		// Nobody has been invited yet, so that is what it offers.
-		await expect(page.getByText(/Invite sent/)).toHaveCount(0);
-		await page.getByRole('button', { name: /Invite customer to portal/ }).click();
+		await expect(composer.getByText(/isn't on the portal yet/)).toBeVisible();
+		await expect(composer.getByText(/Invite sent/)).toHaveCount(0);
+		await composer.getByRole('button', { name: 'Send app invite' }).click();
 
 		// It says so — pressing this used to produce no visible change at all, and
 		// the only way to find out whether it worked was to ask the customer.
 		await expect(page.getByText(`Invite sent to ${customer.name}`)).toBeVisible();
 
-		// And the control updates to reflect that one is now outstanding.
-		await clickUntil(
-			page.getByRole('button', { name: 'Customer details' }),
-			page.getByRole('button', { name: /Resend invite/ })
-		);
-		await expect(page.getByText(/Invite sent .* expires/)).toBeVisible();
-		await expect(page.getByRole('button', { name: /Invite customer to portal/ })).toHaveCount(0);
+		// And the panel updates to reflect that one is now outstanding, with the
+		// two things you can do to a live invite.
+		await expect(composer.getByText('Invite sent')).toBeVisible();
+		await expect(composer.getByText(/Expires/)).toBeVisible();
+		await expect(composer.getByRole('button', { name: 'Send app invite' })).toHaveCount(0);
+		await expect(composer.getByRole('button', { name: 'Withdraw' })).toBeVisible();
 
 		// Resending reports itself as a resend, not as a first send.
-		await page.getByRole('button', { name: /Resend invite/ }).click();
+		await composer.getByRole('button', { name: 'Resend' }).click();
 		await expect(page.getByText(`Invite re-sent to ${customer.name}`)).toBeVisible();
 	});
 
@@ -184,11 +234,15 @@ test.describe('order workspace', () => {
 		await page.goto('/contractor/orders');
 		await openOrder(page, 'Kitchen remodel');
 
-		await clickUntil(
-			page.getByRole('button', { name: 'Customer details' }),
-			page.getByText('Has portal access')
-		);
-		await expect(page.getByRole('button', { name: /Invite|Resend/ })).toHaveCount(0);
+		const composer = await openContactComposer(page);
+		await composer.getByRole('tab', { name: 'Chat' }).click();
+
+		// Chat is a conversation for this one, not an invitation: the invite panel
+		// is not rendered at all, so there is no way to send a second link to
+		// somebody who already has an account.
+		await expect(composer.locator('.invite')).toHaveCount(0);
+		await expect(composer.getByRole('button', { name: 'Send app invite' })).toHaveCount(0);
+		await expect(composer.getByRole('button', { name: 'Resend' })).toHaveCount(0);
 	});
 
 	test('the contact composer offers email, text and call for the customer', async ({ page }) => {
@@ -196,9 +250,10 @@ test.describe('order workspace', () => {
 		const composer = await openContactComposer(page);
 
 		// Every way to reach someone lives on one tab strip — the same control the
-		// dashboard uses, since both mount the shared ContactPanel. No Chat tab
-		// here: this customer has no portal to deliver a reply to.
-		await expect(composer.getByRole('tab', { name: 'Chat' })).toHaveCount(0);
+		// dashboard uses, since both mount the shared ContactPanel. Chat is there
+		// even though this customer has no portal yet: the tab is the conversation
+		// once they have one and the invitation to it before then.
+		await expect(composer.getByRole('tab', { name: 'Chat' })).toBeVisible();
 		await expect(composer.getByRole('tab', { name: 'Email' })).toBeVisible();
 		await expect(composer.getByRole('tab', { name: 'Text' })).toBeVisible();
 		await expect(composer.getByRole('tab', { name: 'Call' })).toBeVisible();

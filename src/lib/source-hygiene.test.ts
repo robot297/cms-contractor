@@ -20,13 +20,22 @@
  */
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
-/** Every file git tracks under src/ and scripts/ — the code we author. */
+/**
+ * Every file git tracks under src/ and scripts/ — the code we author.
+ *
+ * TRACKED is not the same as PRESENT: a file deleted in the working tree but not
+ * yet committed is still listed here, and reading it throws ENOENT, which failed
+ * the whole sweep on an unrelated in-progress removal. Filtered rather than
+ * caught — a path that is not on disk has no bytes to check, and the
+ * `length > 40` guard below still catches a sweep that has gone empty for real.
+ */
 function trackedSourceFiles(): string[] {
 	return execFileSync('git', ['ls-files', 'src', 'scripts'], { encoding: 'utf8' })
 		.split('\n')
-		.filter((path) => /\.(ts|js|mjs|svelte|css|html)$/.test(path));
+		.filter((path) => /\.(ts|js|mjs|svelte|css|html)$/.test(path))
+		.filter((path) => existsSync(path));
 }
 
 /** Control characters that are not ordinary source whitespace. */

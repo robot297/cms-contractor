@@ -129,8 +129,8 @@
 		place-items: center;
 		min-width: 5.5rem;
 		padding: 0.35rem 1rem;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		border: none;
 		border-radius: 999px;
 		box-shadow: var(--pop-shadow-sm);
@@ -201,8 +201,8 @@
 			box-shadow 0.06s ease;
 	}
 	.go {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		border-color: transparent;
 	}
 	.alt {
@@ -217,7 +217,7 @@
 	}
 	.go:focus-visible,
 	.alt:focus-visible {
-		outline: 3px solid var(--yellow-deep);
+		outline: 3px solid var(--brand-deep);
 		outline-offset: 2px;
 	}
 
@@ -232,7 +232,7 @@
 		color: var(--fg);
 		font-weight: 700;
 		text-decoration: underline;
-		text-decoration-color: var(--yellow-deep);
+		text-decoration-color: var(--brand-deep);
 		text-decoration-thickness: 2px;
 		text-underline-offset: 2px;
 	}

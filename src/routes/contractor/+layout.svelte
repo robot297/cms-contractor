@@ -2,9 +2,12 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { theme } from '$lib/theme.svelte';
+	import { theme, THEME_LABELS, nextThemeLabel } from '$lib/theme.svelte';
+	import ThemeModeIcon from '$lib/ThemeModeIcon.svelte';
 	import Toaster from '$lib/Toaster.svelte';
 	import DevSwitcher from '$lib/DevSwitcher.svelte';
+	import AccountMenu from '$lib/AccountMenu.svelte';
+	import PaletteSwitcher from '$lib/PaletteSwitcher.svelte';
 	import type { LayoutData } from './$types';
 	import type { Snippet } from 'svelte';
 
@@ -17,15 +20,39 @@
 		theme.sync();
 	});
 
+	// Both copies of the theme control — the bar's and the collapsed menu's — say
+	// the same thing, so they say it from one place. With three modes the name has
+	// to carry where you ARE as well as what pressing does: the icon can show the
+	// current mode but there is no glyph for "the next one".
+	const themeLabel = $derived(
+		`Theme: ${THEME_LABELS[theme.choice]}. Switch to ${nextThemeLabel(theme.choice)}.`
+	);
+
 	const path = $derived(page.url.pathname);
 	const onDashboard = $derived(path === '/contractor');
 	const onOrders = $derived(path.startsWith('/contractor/orders'));
-	const onCustomers = $derived(path.startsWith('/contractor/customers'));
-	const onSubcontractors = $derived(path.startsWith('/contractor/subcontractors'));
-	// One entry now: email templates live on the account page rather than at their
-	// own route, which still exists only to redirect.
-	const onAccount = $derived(path.startsWith('/contractor/settings'));
-	const onSupport = $derived(path.startsWith('/contractor/support'));
+	// ONE entry for everyone the contractor knows — the people they work for and
+	// the people they work with. It was two (Customers, People), which meant
+	// deciding what somebody was to you before you could look them up, and made a
+	// person who is both — the customer whose deck you rebuilt and who now swings a
+	// hammer for you on Tuesdays — into two records you had to remember to keep in
+	// step. The subcontractor page is still a real destination for tier, insurance
+	// and invites, so it lights this link too.
+	const onPeople = $derived(
+		path.startsWith('/contractor/people') ||
+			// The two routes the directory absorbed. Both still exist as 308s to it —
+			// each was in the nav long enough to be bookmarked.
+			path.startsWith('/contractor/crew') ||
+			path.startsWith('/contractor/customers') ||
+			path.startsWith('/contractor/subcontractors')
+	);
+	// One entry now: email templates AND support live on the settings page as
+	// tabs rather than at routes of their own. Both old paths still exist only to
+	// redirect, and both light the gear — landing on one and seeing nothing
+	// selected would read as having navigated nowhere.
+	const onAccount = $derived(
+		path.startsWith('/contractor/settings') || path.startsWith('/contractor/support')
+	);
 	const onBilling = $derived(path.startsWith('/contractor/billing'));
 
 	// Billing chrome. The banner is the only signal a lapsed contractor gets in the
@@ -50,32 +77,78 @@
 	const onTrial = $derived(billing.canWrite && billing.status === 'trialing');
 	const trialDays = $derived(billing.trialDaysRemaining);
 
+	// Where the links live below the desktop breakpoint. `top` keeps them behind
+	// the hamburger, the shape this app has always had; `bottom` moves them to a
+	// fixed tab bar, the shape the customer portal uses — a shorter reach one-handed,
+	// which is how a contractor holds a phone on a site. The contractor picks it on
+	// the settings page; above 1024px the bar's rail navigates either way, so the
+	// choice only ever changes the narrow widths.
+	const bottomNav = $derived(data.navPlacement === 'bottom');
+	/** The same five destinations the rail carries, as phone tabs. */
+	const TABS = $derived([
+		{
+			href: resolve('/contractor'),
+			// The same word the rail uses. A tab bar tempts you to shorten it to "Home",
+			// which then names a destination nothing else in the app calls that.
+			label: 'Dashboard',
+			icon: '🏠',
+			active: onDashboard,
+			count: 0
+		},
+		{
+			href: resolve('/contractor/orders'),
+			label: 'Orders',
+			icon: '🧾',
+			active: onOrders,
+			count: data.awaitingReply
+		},
+		{
+			href: resolve('/contractor/people'),
+			label: 'People',
+			icon: '👥',
+			active: onPeople,
+			count: 0
+		},
+		// Only reachable from down here in this mode: the bar's gear, the palette and
+		// the light/dark toggle all live behind the hamburger, and the hamburger is
+		// reduced to sign-out when the tabs are carrying navigation. Settings is
+		// where the theme controls moved to, so it has to be a tab rather than a row
+		// in a menu that no longer opens.
+		{
+			href: resolve('/contractor/settings'),
+			label: 'Settings',
+			icon: '⚙️',
+			active: onAccount || onBilling,
+			count: 0
+		}
+	]);
+
 	const year = new Date().getFullYear();
 
-	// Mobile nav: links + user/sign-out collapse behind a hamburger.
+	// Mobile nav: links + sign-out collapse behind a hamburger. The avatar's own
+	// menu is `AccountMenu`'s business — it opens, closes and closes-on-navigate
+	// by itself, and the portal bar gets the identical control for free.
 	let menuOpen = $state(false);
-	// The account menu behind the avatar: billing and sign-out. The name and a red
-	// SIGN OUT button sitting in the bar was the widest thing in it, and the first
-	// to collide with the trial badge once the rail tightened up on a tablet.
-	let userMenuOpen = $state(false);
-	// Two letters at most — "Jo Bloggs" → JB, "testerooni" → T.
-	const initials = $derived(
-		(data.userName ?? '')
-			.split(/\s+/)
-			.filter(Boolean)
-			.slice(0, 2)
-			.map((word) => word[0]?.toUpperCase() ?? '')
-			.join('') || '?'
-	);
 	function closeMenus() {
 		menuOpen = false;
-		userMenuOpen = false;
 	}
-	// Close both menus whenever the route changes (a link was followed).
+	// Close the mobile menu whenever the route changes (a link was followed).
 	$effect(() => {
 		void path; // track route changes so the mobile menu closes on navigation
 		closeMenus();
 	});
+
+	/** What sits behind the avatar. Account and billing, in that order. */
+	const accountItems = $derived([
+		{ label: 'Account', href: resolve('/contractor/settings'), active: onAccount },
+		{ label: 'Billing', href: resolve('/contractor/billing'), active: onBilling }
+	]);
+	/** The trial countdown, as the menu's second line. Absent on a paid plan. */
+	const accountSubline = $derived(
+		onTrial && trialDays !== null
+			? `Trial · ${trialDays} ${trialDays === 1 ? 'day' : 'days'} left`
+			: undefined
+	);
 	// …and on the click itself, because tapping the link for the page you're already
 	// on is not a navigation: the effect above never re-runs, so the menu just sat
 	// there looking broken.
@@ -117,20 +190,45 @@
 	});
 </script>
 
-<div class="shell" style="min-height: 100dvh; display: flex; flex-direction: column;">
+<div
+	class="shell"
+	class:nav-bottom={bottomNav}
+	style="min-height: 100dvh; display: flex; flex-direction: column;"
+>
 	<div class="bar">
 		<nav class="nav">
 			<a href={resolve('/')} class="brand">
 				<span class="brand-word">Contractor&nbsp;CRM</span>
 			</a>
-			<button
-				type="button"
-				class="theme-toggle"
-				title={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-				aria-label={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-				onclick={() => theme.toggle()}
-			>
-				{#if theme.current === 'dark'}
+
+			<!-- The view switcher, on the bar at every width, and in the same seat the
+			     customer portal keeps it in — the whole point of the control is
+			     hopping between the two sides, and a button that moves when you use
+			     it makes you hunt for the way back.
+
+			     One instance, placed by flex `order` rather than by DOM position: it
+			     sits at the end of the bar on a desktop and immediately left of the
+			     hamburger on a phone, which is the same corner in both cases. -->
+			{#if data.viewAsEnabled && (data.viewAsCustomer || data.devSignInEnabled)}
+				<div class="switch-slot">
+					<DevSwitcher
+						side="contractor"
+						devCustomer={data.viewAsCustomer}
+						canSignInAs={data.devSignInEnabled}
+						orderId={page.params.id ?? null}
+					/>
+				</div>
+			{/if}
+
+			<!-- With the tabs at the foot of the screen there is no menu left to open:
+			     the five destinations are down there, the theme and the palette moved
+			     onto the settings page, and the account rows ARE the settings page. What
+			     was behind the hamburger is one thing — the way out — so it is that
+			     button, not a menu holding it. Rendered at every width and shown by CSS
+			     only where the bottom bar is, since above 1024px the bar's own rail is
+			     back and the collapsed menu with it. -->
+			<form method="POST" action="/logout" class="bar-signout-form">
+				<button type="submit" class="bar-icon bar-signout" title="Sign out" aria-label="Sign out">
 					<svg
 						width="20"
 						height="20"
@@ -142,17 +240,11 @@
 						stroke-linejoin="round"
 						aria-hidden="true"
 					>
-						<circle cx="12" cy="12" r="4.5" />
-						<path
-							d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-						/>
+						<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+						<path d="M16 17l5-5-5-5M21 12H9" />
 					</svg>
-				{:else}
-					<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-						<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-					</svg>
-				{/if}
-			</button>
+				</button>
+			</form>
 
 			<button
 				type="button"
@@ -228,31 +320,37 @@
 							>{/if}</a
 					>
 					<a
-						href={resolve('/contractor/customers')}
+						href={resolve('/contractor/people')}
 						class="navlink"
-						class:is-active={onCustomers}
-						onclick={closeMenus}>Customers</a
-					>
-					<a
-						href={resolve('/contractor/subcontractors')}
-						class="navlink"
-						class:is-active={onSubcontractors}
-						onclick={closeMenus}>Subcontractors</a
-					>
-					<a
-						href={resolve('/contractor/support')}
-						class="navlink"
-						class:is-active={onSupport}
-						onclick={closeMenus}>Support</a
+						class:is-active={onPeople}
+						onclick={closeMenus}>People</a
 					>
 				</div>
 				<div class="nav-right">
+					<!-- TEMPORARY: pick a palette, then delete this and the losers.
+					     Sits next to the light/dark toggle because each palette has to be
+					     judged in both themes, so switching has to be two clicks. -->
+					<span class="palette-slot"><PaletteSwitcher /></span>
+					<!-- Light/dark. Lives with the account cluster on the right rather than
+					     beside the brand: it is a preference, and a preference sitting in
+					     the first position on the bar reads as navigation. Hidden below the
+					     desktop breakpoint, where `.theme-row` in the collapsed menu is the
+					     control instead. -->
+					<button
+						type="button"
+						class="bar-icon theme-toggle"
+						title={themeLabel}
+						aria-label={themeLabel}
+						onclick={() => theme.cycle()}
+					>
+						<ThemeModeIcon />
+					</button>
 					<!-- Settings, in the slot the trial badge used to hold: it's admin,
 					     not a work surface, so it sits with the account cluster. In the
 					     collapsed menu the same control drops to the bottom-left of the
 					     utility row (also the badge's old seat) and gains its label. -->
 					<a
-						class="settings-gear"
+						class="bar-icon settings-gear"
 						class:on={onAccount}
 						href={resolve('/contractor/settings')}
 						title="Settings"
@@ -283,101 +381,21 @@
 					<button
 						type="button"
 						class="theme-row"
-						title={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-						aria-label={theme.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-						onclick={() => theme.toggle()}
+						title={themeLabel}
+						aria-label={themeLabel}
+						onclick={() => theme.cycle()}
 					>
-						{#if theme.current === 'dark'}
-							<svg
-								width="18"
-								height="18"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								aria-hidden="true"
-							>
-								<circle cx="12" cy="12" r="4.5" />
-								<path
-									d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-								/>
-							</svg>
-						{:else}
-							<svg
-								width="18"
-								height="18"
-								viewBox="0 0 24 24"
-								fill="currentColor"
-								aria-hidden="true"
-							>
-								<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-							</svg>
-						{/if}
+						<ThemeModeIcon size={18} />
 					</button>
-					<!-- Development-only: one button to the customer's side of the same
-					     job. Absent entirely unless CUSTOMER_PORTAL_DEV_TOOLS is set AND
-					     the seeder has run, so the server sends no target when either is
-					     missing and nothing about the feature reaches the browser. -->
-					{#if data.viewAsEnabled && (data.viewAsCustomer || data.devSignInEnabled)}
-						<DevSwitcher
-							side="contractor"
-							devCustomer={data.viewAsCustomer}
-							canSignInAs={data.devSignInEnabled}
-							orderId={page.params.id ?? null}
+					<!-- Account: avatar in the bar, everything else behind it. Shared with
+					     the customer portal's bar, which had none of this. -->
+					<div class="account-slot">
+						<AccountMenu
+							name={data.userName}
+							subline={accountSubline}
+							items={accountItems}
+							onnavigate={closeMenus}
 						/>
-					{/if}
-					<!-- Account: avatar in the bar, everything else behind it. -->
-					<div class="user">
-						<button
-							type="button"
-							class="avatar"
-							class:on={userMenuOpen}
-							aria-haspopup="menu"
-							aria-expanded={userMenuOpen}
-							title={data.userName}
-							aria-label="Account menu"
-							onclick={() => (userMenuOpen = !userMenuOpen)}>{initials}</button
-						>
-						{#if userMenuOpen}
-							<button
-								type="button"
-								class="user-scrim"
-								aria-label="Close account menu"
-								onclick={() => (userMenuOpen = false)}
-							></button>
-							<div class="user-menu" role="menu">
-								<div class="user-menu-head">
-									<span class="user-menu-name">{data.userName}</span>
-									{#if onTrial && trialDays !== null}
-										<span class="user-menu-sub"
-											>Trial · {trialDays}
-											{trialDays === 1 ? 'day' : 'days'} left</span
-										>
-									{/if}
-								</div>
-								<a
-									class="user-menu-item"
-									class:is-active={onAccount}
-									role="menuitem"
-									href={resolve('/contractor/settings')}
-									onclick={closeMenus}>Account</a
-								>
-								<a
-									class="user-menu-item"
-									class:is-active={onBilling}
-									role="menuitem"
-									href={resolve('/contractor/billing')}
-									onclick={closeMenus}>Billing</a
-								>
-								<form method="POST" action="/logout">
-									<button type="submit" class="user-menu-item danger" role="menuitem"
-										>Sign out</button
-									>
-								</form>
-							</div>
-						{/if}
 					</div>
 					<!-- The collapsed menu's sign-out. It has no avatar to hide things
 					     behind, so this is a plain row alongside the links. -->
@@ -419,12 +437,37 @@
 	     raised it — the contact composer closes on send and the toast reports it. -->
 	<Toaster />
 
+	<!-- The phone's primary navigation when the contractor asked for it there. Same
+	     links as the bar's rail, fixed to the foot of the screen; hidden above the
+	     width where the rail itself is on screen. The bar keeps the hamburger, which
+	     at this width holds only the account and the utilities. -->
+	{#if bottomNav}
+		<nav class="bottombar" aria-label="Sections">
+			{#each TABS as t (t.href)}
+				<a
+					href={t.href}
+					class="btab"
+					class:on={t.active}
+					aria-current={t.active ? 'page' : undefined}
+					onclick={closeMenus}
+				>
+					<span class="bicon" aria-hidden="true">{t.icon}</span>
+					<span class="blabel">{t.label}</span>
+					{#if t.count > 0}
+						<span class="bbadge" aria-label="{t.count} awaiting a reply">{t.count}</span>
+					{/if}
+				</a>
+			{/each}
+		</nav>
+	{/if}
+
 	<footer>
 		<div class="hazard"></div>
 		<div class="bar">
-			<div
-				style="max-width: 860px; margin: 0 auto; padding: 1.25rem 1rem; display: flex; align-items: center; justify-content: center; gap: 1rem; flex-wrap: wrap;"
-			>
+			<!-- Tracks the same column as the pages above it, so the footer text stays
+			     centred under the content rather than under a column the content
+			     stopped using. -->
+			<div class="foot-inner">
 				<!-- Class, not an inline colour: the footer text has to follow the bar. -->
 				<span class="foot-text">© {year} · Built for those who do</span>
 			</div>
@@ -439,27 +482,66 @@
 	   the theme: ink-on-light in light, light-on-dark in dark. The yellow active pill
 	   and the red sign-out are the exceptions; both already read on either bar. */
 	.shell {
+		/* Which half of the product this is, as one token. The shared AccountMenu
+		   reads these rather than `--brand` directly, so the same component wears
+		   safety yellow here and the portal's teal there.
+
+		   Never a token that flips in dark mode for the foreground: yellow is light
+		   in BOTH themes, so text on it is always dark. See the --on-brand note at
+		   the top of app.css. */
+		--bar-accent: var(--brand);
+		--bar-accent-fg: var(--on-brand);
 		/* Not flat white: a faint top-lit gradient so the bar reads as its own
 		   surface — chrome, not just page background that happens to hold links. */
-		--bar-bg: linear-gradient(180deg, #ffffff, #f6f6f1);
+		/* The bar is its own surface, one step off the page rather than a literal.
+		   Mixed from palette tokens so the chrome moves with the accent instead of
+		   staying a warm grey under a blue app. */
+		--bar-bg: linear-gradient(180deg, var(--surface), var(--surface-sunken));
 		--bar-line: var(--line);
 		--bar-fg: var(--fg);
-		--bar-fg-dim: rgba(31, 35, 40, 0.66);
-		--bar-edge: rgba(17, 17, 17, 0.16);
-		--bar-wash: rgba(17, 17, 17, 0.05);
-		--bar-wash-strong: rgba(17, 17, 17, 0.1);
-		--bar-rail-bg: linear-gradient(180deg, rgba(17, 17, 17, 0.06), rgba(17, 17, 17, 0.02));
+		--bar-fg-dim: var(--fg-muted);
+		--bar-edge: var(--line-strong);
+		--bar-wash: var(--surface-sunken);
+		--bar-wash-strong: color-mix(in srgb, var(--brand) 14%, var(--surface));
+		--bar-rail-bg: var(--surface-sunken);
 		/* The inset top highlight only reads on a dark bar. */
 		--bar-inset-hi: transparent;
 	}
+	/* Surface, padding, wordmark and the utility squares come from the shared
+	   `.bar` / `.nav` / `.brand-word` / `.bar-icon` block in app.css — both halves
+	   of the product wear one bar. Only the edge is local: this bar is bounded top
+	   and bottom because the accent rule sits directly under it. */
 	.bar {
-		background: var(--bar-bg);
 		border-block: 1px solid var(--bar-line);
 	}
 	/* Header only (the footer's bar is nested in <footer>): a soft cast below the
 	   bar + accent line so the chrome sits above the page instead of on it. */
 	.shell > .bar {
 		box-shadow: 0 4px 16px rgba(27, 31, 36, 0.06);
+	}
+	.shell {
+		/*
+		 * How tall the fixed tab bar is, as ONE number.
+		 *
+		 * It used to be written twice — `min-height: 3.1rem` on the tab plus the
+		 * bar's own padding here, and a hand-totalled `3.5rem` reserved at the foot
+		 * of the page there — and the two had drifted: the bar measures 66.5px and
+		 * the page was holding 56px open for it, so the last 10px of the footer sat
+		 * UNDER the bar. The bar takes its height from this and the page reserves
+		 * the same value, which is what stops the two from disagreeing again.
+		 */
+		--bottombar-h: 4.25rem;
+	}
+	.foot-inner {
+		box-sizing: border-box;
+		max-width: var(--page-max);
+		margin: 0 auto;
+		padding: 1.25rem var(--page-gutter);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 1rem;
+		flex-wrap: wrap;
 	}
 	.foot-text {
 		font-size: 0.75rem;
@@ -469,49 +551,27 @@
 		letter-spacing: 0.03em;
 	}
 	:global(:root[data-theme='dark']) .shell {
-		--bar-bg: linear-gradient(180deg, #20252d, #181c22);
-		--bar-fg: #ffffff;
-		--bar-fg-dim: rgba(255, 255, 255, 0.72);
-		--bar-edge: rgba(255, 255, 255, 0.14);
-		--bar-wash: rgba(255, 255, 255, 0.06);
-		--bar-wash-strong: rgba(255, 255, 255, 0.14);
-		--bar-rail-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
-		--bar-inset-hi: rgba(255, 255, 255, 0.07);
+		--bar-bg: linear-gradient(180deg, var(--surface-sunken), var(--surface));
+		--bar-fg: var(--fg);
+		--bar-fg-dim: var(--fg-muted);
+		--bar-edge: var(--line-strong);
+		--bar-wash: var(--surface-sunken);
+		--bar-wash-strong: color-mix(in srgb, var(--brand) 18%, var(--surface));
+		--bar-rail-bg: var(--surface-inset);
+		--bar-inset-hi: transparent;
 	}
 	:global(:root[data-theme='dark']) .shell > .bar {
 		box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
 	}
 
+	/* Full-width bar: brand hugs the left, the account cluster the right, so the
+	   whole desktop width is used instead of a centered column. Wrapping is local
+	   — this bar carries six nav links and has to fold on a narrow tablet, where
+	   the portal's bar has nothing to wrap. */
 	.nav {
-		position: relative;
-		/* Full-width bar: brand hugs the left, user/sign-out the right, so the
-		   whole desktop width is used instead of a centered 860px column. The
-		   <nav> already fills its parent, so no explicit width — and border-box
-		   keeps the side padding inside the bar instead of overflowing it. */
-		box-sizing: border-box;
-		padding: 0.7rem 1.5rem;
-		display: flex;
-		align-items: center;
-		gap: 1rem;
 		flex-wrap: wrap;
 	}
-	/* Wordmark: a small yellow tile carrying the glyph, plain strong type beside
-	   it. Replaces the hard yellow text-shadow treatment, which read as clip-art.
-	   Colors ride --bar-fg, so both themes come out right with no brand tokens. */
-	.brand {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.55rem;
-		color: var(--bar-fg);
-		text-decoration: none;
-		flex-shrink: 0;
-	}
-	.brand-word {
-		font-weight: 900;
-		font-size: 0.92rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
+
 	/* Desktop: links sit next to the brand, user/sign-out pushed to the right. */
 	.nav-collapse {
 		flex: 1;
@@ -530,7 +590,16 @@
 		   the whole rail collapses into the hamburger overlay anyway. */
 		flex-wrap: nowrap;
 		padding: 0.25rem;
-		border-radius: 999px;
+		/* CONCENTRIC with the glide pill inside it, not a hard 999px.
+
+		   The track used to be a full lozenge while the pill riding in it followed
+		   `--radius-pill` — 3px on Voltage, 0 on Halogen and Blueprint. A near-square
+		   selection inside a fully-rounded track is the mismatch, and the fix is not
+		   to force the pill round: that would drop the theme's geometry, which is
+		   the whole point of the `--radius-*` ladder. So the TRACK gives up its
+		   radius instead and follows the pill, offset by the padding that separates
+		   them — which is what keeps the two curves parallel at every theme. */
+		border-radius: calc(var(--radius-pill) + 0.25rem);
 		border: 1px solid var(--bar-edge);
 		background: var(--bar-rail-bg);
 		box-shadow: inset 0 1px 0 var(--bar-inset-hi);
@@ -555,11 +624,17 @@
 		left: 0;
 		width: var(--w);
 		transform: translateX(var(--x));
-		border-radius: 999px;
-		background: linear-gradient(180deg, var(--yellow), var(--yellow-deep));
+		/* The pill follows the theme's geometry: a lozenge on Vapor and Abyss, a
+		   hard rectangle on Halogen and Blueprint. */
+		border-radius: var(--radius-pill);
+		background: var(--brand-sweep);
+		/* Decorative and empty — the label lives in the sibling `.navlink`, which
+		   sits above it. Declared anyway so the fill and a foreground can never be
+		   separated, which is the invariant theme.contrast.test.ts enforces. */
+		color: var(--on-brand);
 		box-shadow:
-			0 2px 12px rgba(255, 204, 0, 0.35),
-			inset 0 1px 0 rgba(255, 255, 255, 0.5);
+			0 0 0 1px var(--brand-glow-strong),
+			0 0 18px var(--brand-glow);
 		overflow: hidden;
 		pointer-events: none;
 		/* Decelerating ease — the pill arrives rather than snaps. */
@@ -596,7 +671,10 @@
 		position: relative;
 		z-index: 1; /* above the glide pill */
 		padding: 0.4rem 0.9rem;
-		border-radius: 999px;
+		/* Matches the glide pill exactly: the hover wash and the selected fill
+		   occupy the same box, so moving between them is a colour change and not a
+		   change of shape. */
+		border-radius: var(--radius-pill);
 		text-decoration: none;
 		font-size: 0.85rem;
 		font-weight: 800;
@@ -608,6 +686,24 @@
 			color 0.2s ease,
 			background 0.2s ease;
 	}
+	/* The labels are ALL CAPS: no descenders, nothing above cap height — but the
+	   line box still reserves room for both, so the ink sat high inside the glide
+	   pill and the row of links looked a hair off its own centre. `text-box` trims
+	   the line box down to cap-height/baseline, and the block padding is restated
+	   to give back exactly what the trim took (~0.19rem a side at this size) so the
+	   pill and the rail keep the height they had.
+
+	   Scoped to a @supports because Safari and Firefox have not shipped it yet, and
+	   the compensating padding is only correct once the trim applies. Below 1025px
+	   the same links are sentence case with real ascenders, so the trim is turned
+	   back off there. */
+	@supports (text-box: trim-both cap alphabetic) {
+		.navlink {
+			text-box: trim-both cap alphabetic;
+			padding-block: 0.59rem;
+		}
+	}
+
 	/* Customers waiting on an answer, carried on the nav so it is visible from
 	   wherever you are rather than only on the dashboard. The pill itself is the
 	   shared `.count-badge` in app.css — all that is local to the nav is the gap
@@ -619,22 +715,27 @@
 		color: var(--bar-fg);
 		background: var(--bar-wash-strong);
 	}
-	/* Dark type once the yellow pill is underneath. Pinned, not var(--ink): yellow
-	   stays light in both themes, so its label must always be dark. */
+	/* The label, once the accent pill is underneath it.
+	
+	   `--on-brand`, never a literal. This carried a pinned `#14171c` from the era
+	   when the brand was yellow in both themes and its label was therefore always
+	   dark. Every theme now flips — Halogen's dark-mode accent is near-white and
+	   Overdrive's light-mode accent is deep violet — so a pinned dark label is
+	   near-black on violet in one and correct only by luck in the other. */
 	.navlink.is-active,
 	.navlink.is-active:hover {
-		color: #14171c;
+		color: var(--on-brand);
 		background: transparent;
 	}
 	/* No-JS / pre-measure fallback: without the pill, the active link paints its own.
-	   Foreground restated rather than left to the `.is-active` rule above — a yellow
-	   fill has to carry its own dark text so the pairing can't be split apart. */
+	   Foreground restated rather than left to the `.is-active` rule above, so the
+	   fill and its label can never be split apart. */
 	.nav-links:not(.ready) .navlink.is-active {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 	.navlink:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 2px;
 	}
 
@@ -652,89 +753,21 @@
 	   when you're on the settings section: then it takes the yellow active pill so
 	   the bar still answers "where am I" with the rail link gone. The label only
 	   appears in the collapsed menu (see the 1024px block). */
-	.settings-gear {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.45rem;
-		width: 2.4rem;
-		height: 2.4rem;
-		flex-shrink: 0;
-		border-radius: 999px;
-		color: var(--bar-fg-dim);
-		text-decoration: none;
-		transition:
-			color 0.16s ease,
-			background 0.16s ease;
-	}
 	.gear-label {
 		display: none;
 		font-size: 0.9rem;
 		font-weight: 700;
 		white-space: nowrap;
 	}
-	.settings-gear:hover {
-		color: var(--bar-fg);
-		background: var(--bar-wash-strong);
-	}
 	/* Pinned dark on yellow, like every active pill. */
-	.settings-gear.on,
-	.settings-gear.on:hover {
-		background: var(--yellow);
-		color: var(--on-yellow);
-	}
-	.settings-gear:focus-visible {
-		outline: 2px solid var(--yellow);
-		outline-offset: 2px;
-	}
-	.settings-gear svg {
-		display: block;
-		flex: none;
+
+	/* Account. The avatar and the menu behind it are `$lib/AccountMenu.svelte`,
+	   shared with the portal bar; this slot only decides whether the bar shows one
+	   at all (it doesn't, once the nav collapses — see the 1024px block). */
+	.account-slot {
+		display: contents;
 	}
 
-	/* Account. One square in the bar; the name, billing and sign-out all live in the
-	   menu behind it, which is what buys the trial badge its room back. */
-	.user {
-		position: relative;
-		flex: none;
-	}
-	.avatar {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		box-sizing: border-box;
-		width: 2rem;
-		height: 2rem;
-		padding: 0;
-		border-radius: 999px;
-		border: 1.5px solid var(--bar-edge);
-		background: var(--bar-wash);
-		color: var(--bar-fg);
-		font-family: inherit;
-		font-size: 0.72rem;
-		font-weight: 800;
-		letter-spacing: 0.02em;
-		line-height: 1;
-		cursor: pointer;
-	}
-	.avatar:hover,
-	.avatar.on {
-		background: var(--yellow);
-		border-color: var(--yellow);
-		color: var(--on-yellow);
-	}
-	.avatar:focus-visible {
-		outline: 2px solid var(--yellow);
-		outline-offset: 2px;
-	}
-	.user-scrim {
-		position: fixed;
-		inset: 0;
-		z-index: 90;
-		border: none;
-		background: transparent;
-		cursor: default;
-	}
 	/* Sits under the overlay (z-index 50) but over the page. Only exists at the
 	   widths where the nav actually collapses — above that the links are inline
 	   and a full-screen scrim would swallow every click on the page. */
@@ -751,70 +784,6 @@
 		.nav-scrim {
 			display: block;
 		}
-	}
-	.user-menu {
-		position: absolute;
-		right: 0;
-		top: calc(100% + 8px);
-		z-index: 100;
-		box-sizing: border-box;
-		min-width: 13rem;
-		max-width: calc(100vw - 2rem);
-		padding: 0.35rem;
-		display: grid;
-		gap: 0.1rem;
-		background: var(--surface);
-		border: 1px solid var(--line-strong);
-		border-radius: 12px;
-		box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
-	}
-	.user-menu-head {
-		display: grid;
-		gap: 0.1rem;
-		padding: 0.45rem 0.6rem 0.55rem;
-		margin-bottom: 0.15rem;
-		border-bottom: 1px solid var(--line);
-	}
-	.user-menu-name {
-		font-size: 0.88rem;
-		font-weight: 800;
-		color: var(--fg);
-		overflow-wrap: anywhere;
-	}
-	.user-menu-sub {
-		font-size: 0.72rem;
-		font-weight: 700;
-		color: var(--fg-muted);
-	}
-	.user-menu-item {
-		display: block;
-		width: 100%;
-		box-sizing: border-box;
-		padding: 0.5rem 0.6rem;
-		border: none;
-		border-radius: 8px;
-		background: none;
-		color: var(--fg);
-		font-family: inherit;
-		font-size: 0.85rem;
-		font-weight: 600;
-		text-align: left;
-		text-decoration: none;
-		cursor: pointer;
-	}
-	.user-menu-item:hover {
-		background: var(--surface-sunken);
-	}
-	.user-menu-item.is-active {
-		color: var(--fg);
-		background: color-mix(in srgb, var(--yellow) 22%, var(--surface));
-	}
-	.user-menu-item.danger {
-		color: var(--danger);
-	}
-	.user-menu-item:focus-visible {
-		outline: 2px solid var(--yellow);
-		outline-offset: -2px;
 	}
 	/* Collapsed-menu-only pieces. Hidden on the bar, where the account menu behind
 	   the avatar covers the same ground. Turned on in the 1024px block below. */
@@ -858,12 +827,28 @@
 		color: var(--bar-fg);
 	}
 	.theme-row:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 2px;
 	}
-	.theme-row svg {
-		display: block;
+	/* :global, because the svg lives inside `$lib/ThemeModeIcon.svelte` now and
+	   carries that component's scope, not this one's. `display: block` is the
+	   icon's own business and it sets it; `flex: none` is this row's, since it is
+	   the flex container. */
+	.theme-row :global(svg) {
 		flex: none;
+	}
+
+	/* The view switcher. `order` puts it last in the bar's flex row at every width — on
+	   a desktop that is the far right, and on a phone it lands just before the
+	   hamburger, which orders itself after it. */
+	.switch-slot {
+		display: inline-flex;
+		align-items: center;
+		order: 3;
+		margin-left: 0.5rem;
+	}
+	.hamburger {
+		order: 4;
 	}
 
 	/* Nav utility buttons (theme toggle + hamburger) share a soft, tactile chrome:
@@ -898,7 +883,7 @@
 	}
 	.hamburger:hover {
 		background: var(--bar-wash-strong);
-		border-color: rgba(255, 204, 0, 0.75);
+		border-color: var(--brand);
 		transform: translateY(-1px);
 		box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
 	}
@@ -911,40 +896,220 @@
 	   full-size hit area so it stays easy to tap, and only the icon colour responds.
 	   (It and the hamburger are never on screen together: the bar's toggle is hidden
 	   at the width where the hamburger appears.) */
-	.theme-toggle {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 2.4rem;
-		height: 2.4rem;
-		padding: 0;
-		flex-shrink: 0;
-		border: none;
-		background: none;
-		box-shadow: none;
-		border-radius: 8px;
-		color: var(--bar-fg-dim);
-		cursor: pointer;
-		transition: color 0.16s ease;
-	}
-	.theme-toggle:hover {
-		color: var(--bar-fg);
-	}
-	.theme-toggle:focus-visible {
-		outline: 2px solid var(--yellow);
-		outline-offset: 2px;
-	}
-	.hamburger svg,
-	.theme-toggle svg {
+	.hamburger svg {
 		display: block;
+		flex: none;
 	}
 
-	/* Hide the signed-in name below wide desktop — it only crowds the bar and the
-	   overlay doesn't need it. */
+	/* ------------------------------------------------------------- Bottom bar
+	   The optional phone navigation (Settings → Navigation → Bottom bar). Deliberately
+	   the same control the customer portal has always had — same geometry, same safe-area
+	   padding, same badge — because it is the same idea, and the two halves of the product
+	   drifting apart on their own chrome is what makes an app feel assembled rather than
+	   designed. The one difference is the accent: yellow here, teal there.
+
+	   Only ever on screen below 1025px. Above that the bar's rail is visible and a second
+	   copy of the same five links would be two navs for one section. */
+	.bottombar {
+		display: none;
+		position: fixed;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		z-index: 35;
+		background: var(--bar-bg);
+		/* --line-strong, not --bar-line. The bar had a hairline already; it was
+		   just the wrong one. --bar-line resolves to --line, which is drawn to sit
+		   quietly BETWEEN things on the same surface — and in dark that is #1a2534
+		   against a bar whose top edge is #101823, a difference of nothing at 1px.
+		   The drop shadow below cannot rescue it either: on a near-black ground a
+		   shadow is invisible, which is why app.css zeroes --card-shadow in dark.
+		   So the bar simply ended where the content did, with no seam.
+
+		   --line-strong is the app's rule for an edge that has to READ as an edge,
+		   and it stays legible in all thirteen palettes in both modes. */
+		border-top: 1px solid var(--line-strong);
+		box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.18);
+		/* Fixed rather than content-sized, so it cannot quietly outgrow the space
+		   the page reserves for it. A tab that no longer fits clips visibly, in the
+		   bar, where somebody will see it — rather than invisibly, by eating the
+		   bottom of the page. */
+		box-sizing: border-box;
+		height: calc(var(--bottombar-h) + env(safe-area-inset-bottom, 0px));
+		padding: 0.2rem 0.2rem calc(0.2rem + env(safe-area-inset-bottom, 0px));
+	}
+	/* Sign-out on the bar, in the hamburger's seat. Hidden everywhere except the
+	   bottom-bar phone layout, which is the only place the menu that used to hold
+	   it does not exist. */
+	.bar-signout-form {
+		display: none;
+		align-items: center;
+		order: 4;
+	}
+	.bar-signout {
+		width: 2.4rem;
+		height: 2.4rem;
+	}
+
+	.btab {
+		position: relative;
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.12rem;
+		min-width: 0;
+		min-height: 3.1rem;
+		padding: 0.3rem 0.15rem;
+		text-decoration: none;
+		color: var(--bar-fg-dim);
+		font-size: 0.62rem;
+		font-weight: 700;
+	}
+	/* WHERE AM I. The whole tab lights, not a pill behind the glyph: at the foot of
+	   a phone the tab IS the target, and a wash around a 1.15rem emoji was a hint
+	   where the question deserves an answer.
+	   
+	   A filled accent block rather than a tint, and that is the app's existing
+	   answer to "which section is this" — the desktop rail's glide pill is the same
+	   fill with the same foreground. The two navigations are one idea at two
+	   widths and should not each invent their own selected state.
+	   
+	   Not colour alone, either: the fill is a shape a colour-blind reader still
+	   sees (WCAG 1.4.1), and `aria-current="page"` carries it for a screen
+	   reader. */
+	/* The lit tab. A full-strength brand fill is the loudest thing on the screen —
+	   it is safety yellow, sized for a hard hat, and five of these in a row put a
+	   headlight under every page. A wash of it says the same thing: the tab is a
+	   small shape and the eye reads WHICH one is filled long before it reads how
+	   saturated the fill is. The label goes to full contrast instead, which is
+	   where the legibility actually has to be. */
+	.btab.on {
+		background: color-mix(in srgb, var(--brand) 22%, transparent);
+		color: var(--bar-fg);
+		border-radius: var(--radius-control);
+	}
+	.btab.on .blabel {
+		font-weight: 800;
+	}
+	.btab:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: -2px;
+	}
+	/* Dark bars swallow a 22% wash, so it is lifted there — the same fill has to
+	   read as "lit" against both grounds. */
+	:global(:root[data-theme='dark']) .btab.on {
+		background: color-mix(in srgb, var(--brand) 30%, transparent);
+	}
+	.bicon {
+		font-size: 1.15rem;
+		line-height: 1;
+	}
+	.blabel {
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	/* The same count the rail carries on Orders. Pinned to the icon rather than the
+	   label so a five-tab row stays legible at 360px. */
+	.bbadge {
+		position: absolute;
+		top: 0.3rem;
+		left: calc(50% + 0.45rem);
+		min-width: 1.05rem;
+		height: 1.05rem;
+		padding: 0 0.28rem;
+		box-sizing: border-box;
+		display: grid;
+		place-items: center;
+		border-radius: 999px;
+		background: var(--brand);
+		color: var(--on-brand);
+		font-size: 0.62rem;
+		font-weight: 800;
+		line-height: 1;
+	}
+	/* Inverted on the selected tab: an accent badge on an accent fill is a badge
+	   nobody can see. */
+	.btab.on .bbadge {
+		background: var(--on-brand);
+		color: var(--brand);
+	}
 
 	/* Tablet + mobile: collapse behind the hamburger as an animated overlay. The
 	   inline bar can't fit the full link set, so tablets get the menu too. */
 	@media (max-width: 1024px) {
+		.bottombar {
+			display: flex;
+		}
+		/* Room for the fixed bar, so the footer clears it rather than sitting under
+		   it — the last line of the page is otherwise unreachable. */
+		.shell.nav-bottom {
+			padding-bottom: calc(var(--bottombar-h) + env(safe-area-inset-bottom, 0px));
+		}
+		/* And room INSIDE the footer, under its line of type.
+		   
+		   Clearing the bar is not the same as looking clear of it: with the footer's
+		   own 1.25rem the copyright line sat about ten pixels off the tab bar's top
+		   edge, near enough to read as one crowded strip rather than as two pieces of
+		   chrome. The space goes inside the footer rather than below it so the
+		   footer's own ground fills it — reserving more on the shell would open a
+		   band of page background between two bars instead. */
+		.shell.nav-bottom .foot-inner {
+			padding-bottom: 2.25rem;
+		}
+		/* The page title is redundant when a lit tab at the foot of the screen is
+		   already naming the section — "Dashboard" as a heading directly above
+		   "Dashboard" as a tab is the same word twice on a screen with no room for
+		   it once.
+		   
+		   HIDDEN, NOT REMOVED. A page still needs its h1: it is what a screen
+		   reader announces on arrival and what heading navigation jumps between, so
+		   this only takes it off the glass. And only when the bottom bar is
+		   actually there — with the links behind the hamburger nothing else names
+		   the section, and the title is the only answer to "where am I".
+		   
+		   `:global()` because the title is rendered by the page inside this layout,
+		   not by the layout itself. */
+		.shell.nav-bottom :global(h1.page-title) {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+			white-space: nowrap;
+		}
+		/* …and take its wrapper out of the layout with it. Clipping the title left
+		   a header that measured zero but still sat in the page's grid, so every
+		   section under the bottom bar opened on a dead band one `--page-gap` tall.
+		   `display: contents` drops the box without dropping the heading.
+		   
+		   Only when the title is the header's ONLY child — a header that also
+		   carries a control still has a job to do, and collapsing it would drop
+		   that control into the page grid on its own. */
+		.shell.nav-bottom :global(header:has(> h1.page-title:only-child)) {
+			display: contents;
+		}
+		/* With the tabs carrying navigation, the whole collapsed menu goes: its links
+		   are duplicated at the foot of the screen, its theme and palette rows moved
+		   to the settings page, and its account rows are that page. The hamburger goes
+		   with it — a button that opens nothing — and sign-out, the one thing that was
+		   only ever in there, becomes a control of its own on the bar. */
+		.shell.nav-bottom .nav-collapse,
+		.shell.nav-bottom .hamburger,
+		.shell.nav-bottom .nav-scrim {
+			display: none;
+		}
+		.shell.nav-bottom .bar-signout-form {
+			display: flex;
+			margin-left: auto;
+		}
+		/* The switcher keeps its seat beside it, the same corner the hamburger had. */
+		.shell.nav-bottom .switch-slot ~ .bar-signout-form {
+			margin-left: 0;
+		}
 		.hamburger {
 			display: inline-flex;
 		}
@@ -955,6 +1120,21 @@
 		}
 		.hamburger {
 			margin-left: auto;
+		}
+		/* The pair sits together at the right edge: the switcher takes the slack so
+		   the hamburger does not push it into the middle. */
+		.switch-slot {
+			margin-left: auto;
+			margin-right: 0.4rem;
+		}
+		.switch-slot ~ .hamburger {
+			margin-left: 0;
+		}
+		/* The palette picker moves to Settings at this width. It is a preference,
+		   and the utility row it was sharing is already carrying more than a strip
+		   this narrow can hold. TEMPORARY along with the rest of the switcher. */
+		.palette-slot {
+			display: none;
 		}
 		/* Overlay panel: absolutely positioned so it floats over the page
 		   content instead of pushing it down, and tweens on open/close. */
@@ -1003,6 +1183,9 @@
 		}
 		.navlink {
 			text-transform: none;
+			/* Sentence case here: ascenders reach past cap height, so a cap-trimmed
+			   line box would clip the visual breathing room off 'd', 'l', 'k'. */
+			text-box: normal;
 			letter-spacing: 0;
 			font-size: 0.95rem;
 			font-weight: 700;
@@ -1013,8 +1196,8 @@
 		}
 		.navlink.is-active,
 		.navlink.is-active:hover {
-			background: var(--yellow);
-			color: var(--on-yellow);
+			background: var(--brand);
+			color: var(--on-brand);
 			box-shadow: none;
 		}
 		/* Sign-out becomes a row of its own — the avatar and its popover are dropped
@@ -1028,7 +1211,7 @@
 			width: 100%;
 			box-sizing: border-box;
 		}
-		.user {
+		.account-slot {
 			display: none;
 		}
 		/* One compact line rather than a stack of full-width blocks: Settings on the
@@ -1050,6 +1233,10 @@
 			width: auto;
 			height: auto;
 			padding: 0.45rem 0.8rem;
+			/* `.bar-icon` sets no gap — it is built for an icon on its own, where the
+			   glyph is centred in a square. Here the label joins it and the two sat
+			   flush against each other. */
+			gap: 0.5rem;
 			background: var(--bar-wash);
 			color: var(--bar-fg);
 		}

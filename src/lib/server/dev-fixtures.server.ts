@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from './db';
-import { customer, order, orderMessage, timelineEntry } from './db/schema';
+import { customer, lineItem, order, orderMessage, payment, timelineEntry } from './db/schema';
 
 /**
  * The sample workspace behind the dev contractor login.
@@ -32,6 +32,13 @@ function dayOffset(offset: number): Date {
 	return d;
 }
 
+/** `daysAgo` before now, at midday — for payment dates, which want a calendar day. */
+function daysAgo(days: number): Date {
+	const d = dayOffset(-days);
+	d.setHours(12, 0, 0, 0);
+	return d;
+}
+
 /** `hoursAgo` before now — for message timestamps, which want a time of day. */
 function hoursAgo(hours: number): Date {
 	return new Date(Date.now() - hours * 60 * 60 * 1000);
@@ -55,40 +62,66 @@ type SeedCustomer = {
  */
 export const DEV_LINKED_CUSTOMER_EMAIL = 'customer@upliftcollective.dev';
 
+/**
+ * Twin Cities addresses, and the reason they are: the dashboard estimates drive
+ * time between the day's jobs, and the fixture set this replaced was spread
+ * across three Oregon towns, which produced legs nobody could sanity-check at a
+ * glance. These sit in one real metro — Minneapolis, Saint Paul, Edina,
+ * Stillwater — so the estimates come out as journeys a person can recognise
+ * (about nine miles city-to-city, about twenty-five out to Stillwater) and a
+ * wrong one is obvious.
+ *
+ * One metro is a property of THIS FIXTURE, not of the app. Nothing assumes a
+ * contractor works in a single state: addresses carry their own state code,
+ * `customerLocation()` renders whatever pair it is given, and the validator
+ * accepts any real code. A contractor working across a state line is supported —
+ * it is just not what a drive-time fixture should be demonstrating.
+ *
+ * The ZIPs are real, which matters: coordinates are resolved from them.
+ */
 const CUSTOMERS: SeedCustomer[] = [
 	{
 		key: 'dev',
 		name: 'Dev Customer',
 		email: DEV_LINKED_CUSTOMER_EMAIL,
 		phone: '(555) 013-0100',
-		address: '742 Evergreen Terrace',
-		city: 'Springfield',
-		state: 'OR',
-		postalCode: '97477'
+		address: '2841 Girard Avenue S',
+		city: 'Minneapolis',
+		state: 'MN',
+		postalCode: '55408'
 	},
 	{
 		key: 'marisol',
 		name: 'Marisol Vega',
 		email: 'marisol.vega@example.com',
 		phone: '(555) 240-8817',
-		address: '1180 Alder Street',
-		city: 'Eugene',
-		state: 'OR',
-		postalCode: '97401'
+		address: '1180 Selby Avenue',
+		city: 'Saint Paul',
+		state: 'MN',
+		postalCode: '55104'
 	},
 	{
 		key: 'theo',
 		name: 'Theo Brandt',
 		email: 'theo.brandt@example.com',
 		phone: '(555) 771-3364',
-		address: '58 Kestrel Lane',
-		city: 'Corvallis',
-		state: 'OR',
-		postalCode: '97330'
+		address: '58 Woodland Road',
+		city: 'Edina',
+		state: 'MN',
+		postalCode: '55424'
 	}
 ];
 
 type SeedMessage = { from: 'customer' | 'contractor'; body: string; hoursAgo: number };
+
+/** A payment on a seeded order. `daysAgo` keeps the dates moving with today. */
+type SeedPayment = {
+	kind: 'deposit' | 'progress' | 'final';
+	amountCents: number;
+	method: string;
+	note?: string;
+	daysAgo: number;
+};
 
 type SeedOrder = {
 	customerKey: string;
@@ -96,12 +129,35 @@ type SeedOrder = {
 	projectType: string;
 	state: string;
 	icon: string;
-	tags: string[];
 	/** Days from today. Negative is overdue, 0 is due today, null is no follow-up. */
 	followUpDays: number | null;
 	timeline: { kind: string; title: string; detail: string; internal?: boolean }[];
 	/** Only meaningful on the linked customer's orders — see the note up top. */
 	messages?: SeedMessage[];
+	/**
+	 * The agreed job total, in whole cents. Between them the seeded orders below
+	 * cover every state `invoiceSummary` can report — nothing agreed, a deposit
+	 * against a balance, a balance owed in full, and paid off — so the invoice
+	 * card, the portal's copy and the emailed document can each be looked at in
+	 * all of them without staging a job by hand first.
+	 */
+	totalCents?: number;
+	payments?: SeedPayment[];
+	/**
+	 * The breakdown behind the total. When present the total is their SUM and
+	 * `totalCents` is ignored (see `invoiceSummary`) — seeded on one order only, so
+	 * both an itemised invoice and a lump-sum one are on screen to compare.
+	 */
+	lineItems?: { label: string; amountCents: number }[];
+	/** Close-out details. Customer-visible: they appear on the invoice. */
+	finalNotes?: string;
+	/** What the job is, where it happens and when — the Details card. */
+	description?: string;
+	site?: { address: string; city: string; state: string; postalCode: string };
+	startDays?: number;
+	targetDays?: number;
+	/** Days from today for the on-site visit — 0 puts the job on today's run. */
+	visitDays?: number;
 };
 
 const ORDERS: SeedOrder[] = [
@@ -111,12 +167,51 @@ const ORDERS: SeedOrder[] = [
 		projectType: 'Renovation',
 		state: 'In Progress',
 		icon: '🔨',
-		tags: ['deposit paid'],
+		// The headline money case: half up front, half still to come. This is the
+		// one to look at when checking that "Balance due" reads correctly on the
+		// contractor's card, on the portal, and in the previewed email.
+		totalCents: 1_840_000,
+		lineItems: [
+			{ label: 'Cabinets and hardware', amountCents: 940_000 },
+			{ label: 'Countertops — quartz', amountCents: 420_000 },
+			{ label: 'Labour', amountCents: 460_000 },
+			{ label: 'Repeat customer discount', amountCents: -20_000 }
+		],
+		payments: [
+			{ kind: 'deposit', amountCents: 920_000, method: 'check', note: 'check #1041', daysAgo: 26 }
+		],
+		description:
+			'Full gut of the galley kitchen. New cabinet runs both sides, quartz counters, ' +
+			'move the sink to the window wall and re-route the waste. Appliances are the ' +
+			"customer's own.",
+		startDays: -26,
+		targetDays: 12,
+		visitDays: 0,
 		// Overdue AND unanswered: the worst combination, and the one the dashboard
 		// should be loudest about.
 		followUpDays: -4,
 		timeline: [
 			{ kind: 'status', title: 'Quote accepted', detail: 'Signed and returned — thanks!' },
+			// The invoice's own history. Seeded to match `lineItems` below, because
+			// the fixture inserts those rows directly and so never goes through
+			// `addLineItem` — without these the demo shows an itemised invoice with
+			// no record of it being itemised, which is the opposite of the point.
+			{
+				kind: 'invoice',
+				title: 'Invoice itemised',
+				detail: 'Cabinets and hardware — $9,400.00 · Total $9,400.00'
+			},
+			{
+				kind: 'invoice',
+				title: 'Line added',
+				detail: 'Countertops — quartz — $4,200.00 · Total $13,600.00'
+			},
+			{ kind: 'invoice', title: 'Line added', detail: 'Labour — $4,600.00 · Total $18,200.00' },
+			{
+				kind: 'invoice',
+				title: 'Line added',
+				detail: 'Repeat customer discount — -$200.00 · Total $18,000.00'
+			},
 			{
 				kind: 'milestone',
 				title: 'Cabinets ordered',
@@ -160,7 +255,20 @@ const ORDERS: SeedOrder[] = [
 		projectType: 'Deck',
 		state: 'Work Scheduled',
 		icon: '🪵',
-		tags: ['cedar'],
+		// A total agreed and nothing paid against it yet — the whole amount reads as
+		// outstanding, which is the state a "deposit due" job is actually in.
+		totalCents: 1_260_000,
+		description:
+			'Tear out the failing cedar deck, re-frame the two rotten joists, rebuild 16x20 with a railing and one step down to the lawn.',
+		// The one seeded job that is NOT at the customer's own address, so the
+		// Details card's site line has something to show.
+		site: { address: '412 Nelson Street', city: 'Stillwater', state: 'MN', postalCode: '55082' },
+		startDays: 5,
+		targetDays: 19,
+		// The second and last stop today. Two is what a real day looks like — one
+		// site, sometimes two — and a different town from the first so the drive
+		// time measures a real distance rather than zero.
+		visitDays: 0,
 		// Due today, and the conversation is already answered — so this one shows
 		// up under follow-ups but NOT under "waiting on you".
 		followUpDays: 0,
@@ -183,7 +291,7 @@ const ORDERS: SeedOrder[] = [
 		projectType: 'Renovation',
 		state: 'Deposit Pending',
 		icon: '🏠',
-		tags: ['awaiting deposit'],
+		totalCents: 980_000,
 		// Overdue by one day: the near-miss case, so "1 day overdue" gets its
 		// singular checked as well as the plural.
 		followUpDays: -1,
@@ -198,10 +306,31 @@ const ORDERS: SeedOrder[] = [
 		projectType: 'Deck',
 		state: 'Quote Sent',
 		icon: '📐',
-		tags: [],
 		followUpDays: 0,
 		timeline: [
 			{ kind: 'status', title: 'Quote sent', detail: 'Powder-coated aluminium, 22 linear feet.' }
+		]
+	},
+	{
+		// Finished and square. The only seeded order whose invoice is SETTLED, which
+		// makes it the one to open when checking that the email calls itself a
+		// receipt rather than an invoice, and that the portal says "Paid in full"
+		// instead of showing a balance of $0.00 as though something were owed.
+		customerKey: 'dev',
+		projectName: 'Guest bath tile',
+		projectType: 'Renovation',
+		state: 'Work Complete',
+		icon: '🧱',
+		followUpDays: null,
+		totalCents: 640_000,
+		finalNotes: 'Porcelain subway tile, new pan and glass door. Grout sealed on the second visit.',
+		payments: [
+			{ kind: 'deposit', amountCents: 320_000, method: 'card', daysAgo: 58 },
+			{ kind: 'final', amountCents: 320_000, method: 'check', note: 'check #1102', daysAgo: 12 }
+		],
+		timeline: [
+			{ kind: 'status', title: 'Quote accepted', detail: 'Tile picked, pan ordered.' },
+			{ kind: 'milestone', title: 'Work Complete', detail: 'Sealed and signed off.' }
 		]
 	},
 	{
@@ -210,7 +339,6 @@ const ORDERS: SeedOrder[] = [
 		projectType: 'Pole Barn',
 		state: 'Parts Ordered',
 		icon: '🚧',
-		tags: [],
 		// Not due. Here so the dashboard is never checked ONLY in its alarming
 		// state — an order list where every row is red proves nothing about
 		// whether red reads as urgent.
@@ -219,7 +347,37 @@ const ORDERS: SeedOrder[] = [
 	}
 ];
 
-/** Create the customer if absent, and re-link it in case the user row was rebuilt. */
+/** The Details columns for one seed, re-stamped on every boot like the dates. */
+function detailColumns(seed: SeedOrder) {
+	return {
+		description: seed.description ?? null,
+		siteAddress: seed.site?.address ?? null,
+		siteCity: seed.site?.city ?? null,
+		siteState: seed.site?.state ?? null,
+		sitePostalCode: seed.site?.postalCode ?? null,
+		startDate: seed.startDays == null ? null : dayOffset(seed.startDays),
+		targetDate: seed.targetDays == null ? null : dayOffset(seed.targetDays),
+		visitDate: seed.visitDays == null ? null : dayOffset(seed.visitDays)
+	};
+}
+
+/**
+ * Create the customer if absent — and either way, re-stamp the fixture's own
+ * fields and re-link it in case the user row was rebuilt.
+ *
+ * The re-stamp is not cosmetic. This function matches on EMAIL, and for a long
+ * time it updated nothing but `userId` when it found a row. So a database seeded
+ * against an older fixture set kept that set's addresses forever: the Twin
+ * Cities move below never reached a dev machine that had already seeded the
+ * Oregon ones, and the dashboard happily showed a Portland job sitting next to a
+ * Minneapolis one. The order half of the fixture never had this problem because
+ * `ensureOrder` re-stamps `detailColumns` — the site address included — on every
+ * boot. This is that same rule applied to the customer half.
+ *
+ * The cost is the same trade `ensureOrder` documents: a fixture customer you
+ * edited by hand in the UI is back to the seeded values after a restart. That is
+ * correct for rows this file owns — edit a customer you made yourself.
+ */
 async function ensureCustomer(
 	contractorId: string,
 	seed: SeedCustomer,
@@ -230,9 +388,20 @@ async function ensureCustomer(
 		columns: { id: true }
 	});
 	if (existing) {
-		if (linkedUserId) {
-			await db.update(customer).set({ userId: linkedUserId }).where(eq(customer.id, existing.id));
-		}
+		await db
+			.update(customer)
+			.set({
+				name: seed.name,
+				phone: seed.phone,
+				address: seed.address,
+				city: seed.city,
+				state: seed.state,
+				postalCode: seed.postalCode,
+				// Only when there IS one: a null here would unlink the portal customer
+				// on any boot that runs before the user row is rebuilt.
+				...(linkedUserId ? { userId: linkedUserId } : {})
+			})
+			.where(eq(customer.id, existing.id));
 		return existing.id;
 	}
 	const [row] = await db
@@ -278,7 +447,18 @@ async function ensureOrder(
 		columns: { id: true }
 	});
 	if (existing) {
-		await db.update(order).set({ nextFollowUpAt: followUpAt }).where(eq(order.id, existing.id));
+		// The total and the close-out notes are re-stamped along with the follow-up
+		// date: they are part of what this fixture is demonstrating, so a database
+		// seeded before they existed should grow them rather than stay moneyless.
+		await db
+			.update(order)
+			.set({
+				nextFollowUpAt: followUpAt,
+				finalAmountCents: seed.totalCents ?? null,
+				finalNotes: seed.finalNotes ?? null,
+				...detailColumns(seed)
+			})
+			.where(eq(order.id, existing.id));
 		return { id: existing.id, created: false };
 	}
 
@@ -291,8 +471,10 @@ async function ensureOrder(
 			projectType: seed.projectType,
 			state: seed.state,
 			icon: seed.icon,
-			tags: seed.tags,
-			nextFollowUpAt: followUpAt
+			nextFollowUpAt: followUpAt,
+			finalAmountCents: seed.totalCents ?? null,
+			finalNotes: seed.finalNotes ?? null,
+			...detailColumns(seed)
 		})
 		.returning({ id: order.id });
 	return { id: row.id, created: true };
@@ -327,6 +509,47 @@ async function ensureOrderContent(
 				internal: t.internal ?? false
 			}))
 		);
+	}
+
+	// Payments, seeded only while the order has none — same rule as the timeline
+	// above, so a payment you record by hand while poking at the UI survives a
+	// restart instead of being wiped by the fixture that seeded its neighbours.
+	if (seed.payments?.length) {
+		const [hasPayment] = await db
+			.select({ id: payment.id })
+			.from(payment)
+			.where(eq(payment.orderId, orderId))
+			.limit(1);
+		if (!hasPayment) {
+			await db.insert(payment).values(
+				seed.payments.map((p) => ({
+					orderId,
+					kind: p.kind,
+					amountCents: p.amountCents,
+					method: p.method,
+					note: p.note ?? null,
+					receivedAt: daysAgo(p.daysAgo)
+				}))
+			);
+		}
+	}
+
+	if (seed.lineItems?.length) {
+		const [hasLine] = await db
+			.select({ id: lineItem.id })
+			.from(lineItem)
+			.where(eq(lineItem.orderId, orderId))
+			.limit(1);
+		if (!hasLine) {
+			await db.insert(lineItem).values(
+				seed.lineItems.map((l, i) => ({
+					orderId,
+					label: l.label,
+					amountCents: l.amountCents,
+					position: i
+				}))
+			);
+		}
 	}
 
 	if (!seed.messages?.length) return;

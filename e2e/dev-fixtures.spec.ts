@@ -11,6 +11,41 @@ import { test, expect, clickUntil, signIn, DEV_CONTRACTOR } from './fixtures/app
  * Asserts per named order rather than on totals, because other specs create
  * their own orders for this same contractor.
  */
+/**
+ * Point the chat at one of a customer's jobs.
+ *
+ * Two shapes to satisfy, and the spec must not care which is up: two or three
+ * jobs get a tab each, more than that steps through with arrows. What is
+ * invariant — and what this relies on — is that the job being replied to is
+ * always NAMED on screen, so a reply is never sent into an unlabelled thread.
+ * How many jobs the dev customer has is not this spec's to control: other specs
+ * open their own orders for them.
+ */
+async function pickProject(panel: import('@playwright/test').Locator, name: string) {
+	const tab = panel.getByRole('tab', { name });
+	if ((await tab.count()) > 0) {
+		await tab.click();
+		return;
+	}
+	const title = panel.locator('.proj-title');
+	const next = panel.getByRole('button', { name: 'Next project' });
+	const read = async () => ((await title.textContent()) ?? '').trim();
+
+	// Walk forward exactly one cycle. Bounded by the wrap rather than by a
+	// number, because this customer's job count is not fixed: the stepper's list
+	// is every order anybody has opened against them, and the suite adds to it.
+	// A plain loop rather than a retried assertion — stepping is local state, so
+	// each press is instant and a `toPass` would spend its budget on backoff.
+	const start = await read();
+	if (start === name) return;
+	for (;;) {
+		await next.click();
+		const now = await read();
+		if (now === name) return;
+		if (now === start) throw new Error(`"${name}" is not among this customer's jobs`);
+	}
+}
+
 test.describe('dev workspace fixture', () => {
 	test.beforeEach(async ({ page }) => {
 		await signIn(page, DEV_CONTRACTOR.email, DEV_CONTRACTOR.password);
@@ -19,25 +54,36 @@ test.describe('dev workspace fixture', () => {
 
 	/** The card for one seeded project. */
 	const card = (page: import('@playwright/test').Page, project: string) =>
-		page.locator('.due-card').filter({ hasText: project });
+		page.locator('.order-card').filter({ hasText: project });
 
-	test('an overdue follow-up counts the days and takes the danger edge', async ({ page }) => {
-		const kitchen = card(page, 'Kitchen remodel');
-		await expect(kitchen.locator('.due-flag.overdue')).toHaveText('4 days overdue');
-		await expect(kitchen).toHaveClass(/is-overdue/);
-
-		// The singular, one day out — a different string, not just a smaller number.
-		const garage = card(page, 'Garage conversion');
-		await expect(garage.locator('.due-flag.overdue')).toHaveText('1 day overdue');
-		await expect(garage).toHaveClass(/is-overdue/);
+	test('an overdue follow-up takes the danger edge', async ({ page }) => {
+		// The "4 days overdue" badge these cards used to carry is gone. The edge is
+		// what is left, and it is the better half of the pair anyway: a row of
+		// cards differing only by a small pill is a row you have to read, where an
+		// edge is something you can scan.
+		await expect(card(page, 'Kitchen remodel')).toHaveClass(/is-overdue/);
+		await expect(card(page, 'Garage conversion')).toHaveClass(/is-overdue/);
 	});
 
 	test('a follow-up due today is marked differently, not merely less late', async ({ page }) => {
+		// Three states, three edges. Due today gets the amber "waiting" tone: it had
+		// no edge at all, which beside two red cards read as one that had got into
+		// the list by mistake rather than as the third state it is.
+		//
+		// Amber, not danger: being due is the work, being late is the fault, and
+		// only one of them is alarming.
 		const porch = card(page, 'Front porch railing');
-		await expect(porch.locator('.due-flag')).toHaveText('Due today');
-		// The distinction that matters: today is the brand accent, overdue is
-		// danger. Same badge, different signal — and no danger edge on the card.
+		await expect(porch).toHaveClass(/is-due/);
 		await expect(porch).not.toHaveClass(/is-overdue/);
+	});
+
+	test('overdue outranks due-today on a card that is both', async ({ page }) => {
+		// All three states are single classes on one element, so the edge is decided
+		// by rule order in the stylesheet rather than by anything in the markup.
+		// Late is the older problem, so it takes the edge.
+		const kitchen = card(page, 'Kitchen remodel');
+		await expect(kitchen).toHaveClass(/is-overdue/);
+		await expect(kitchen).not.toHaveClass(/is-due/);
 	});
 
 	test('a follow-up still ahead is "due soon", not "due today"', async ({ page }) => {
@@ -81,7 +127,7 @@ test.describe('dev workspace fixture', () => {
 		// appear twice, once per list, in two different visual languages.
 		const kitchen = card(page, 'Kitchen remodel');
 		await expect(kitchen).toHaveCount(1);
-		await expect(kitchen.locator('.due-flag.overdue')).toHaveText('4 days overdue');
+		await expect(kitchen).toHaveClass(/is-overdue/);
 		// How many are unanswered lives on the button that opens them, and nowhere
 		// else — the card used to carry a pill saying the same thing.
 		await expect(kitchen.locator('.btn-count')).toHaveText('2');
@@ -92,14 +138,37 @@ test.describe('dev workspace fixture', () => {
 		// The deck job has a thread too — but the contractor replied last, so no
 		// count on its button. Owed is who spoke last, not what is unread.
 		const deck = card(page, 'Backyard deck rebuild');
-		await expect(deck.locator('.due-flag')).toHaveText('Due today');
+		await expect(deck).not.toHaveClass(/is-overdue/);
 		await expect(deck.locator('.btn-count')).toHaveCount(0);
+	});
+
+	test('the card is the link, and Message is the only button on it', async ({ page }) => {
+		const kitchen = card(page, 'Kitchen remodel');
+
+		// One control, not three. The "View order" button that used to sit beside
+		// Message is gone — the card itself opens the order, so it was a second
+		// control for what pressing anywhere already does — and the "how far away"
+		// distance estimate above the list went with its button.
+		await expect(kitchen.locator('a.stretch-link')).toHaveCount(1);
+		await expect(kitchen.getByRole('link', { name: /View order/ })).toHaveCount(0);
+		await expect(kitchen.getByRole('button', { name: /^Message/ })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'How far away?' })).toHaveCount(0);
+
+		// Message opens the conversation and does NOT navigate. It sits above the
+		// card's stretched link precisely so this press lands on the button and not
+		// on the link underneath it.
+		const url = page.url();
+		await clickUntil(
+			kitchen.getByRole('button', { name: /^Message / }),
+			page.locator('.contact-pop .chat')
+		);
+		expect(page.url()).toBe(url);
 	});
 
 	test('someone waiting sorts above a note you left yourself', async ({ page }) => {
 		// The old ordering between the two sections, kept as a tiebreak rather than
 		// as a heading: the kitchen is unanswered AND the most overdue.
-		const first = page.locator('.due-card').first();
+		const first = page.locator('.order-card').first();
 		await expect(first).toContainText('Kitchen remodel');
 	});
 
@@ -133,7 +202,7 @@ test.describe('dev workspace fixture', () => {
 		// The seeded customer is linked and has TWO jobs, which is the case that
 		// makes chat-from-the-directory non-trivial: a thread belongs to an order,
 		// so replying without saying which one would answer on the wrong job.
-		await page.goto('/contractor/customers');
+		await page.goto('/contractor/people');
 		const row = page.getByText('Dev Customer').first();
 		await clickUntil(row, page.getByRole('button', { name: /Contact|Message/ }).first());
 		await clickUntil(
@@ -147,18 +216,13 @@ test.describe('dev workspace fixture', () => {
 			await expect(panel.getByRole('tab', { name })).toBeVisible();
 		}
 
-		// And a picker, because this customer has more than one job. Asserted as
-		// "both seeded jobs are offered" rather than as a count — other specs create
-		// their own orders for this same customer, so the total is not ours to know.
-		const picker = panel.getByLabel('Which job to talk about');
-		await expect(picker).toBeVisible();
-		await expect(picker.locator('option', { hasText: 'Kitchen remodel' })).toHaveCount(1);
-		await expect(picker.locator('option', { hasText: 'Backyard deck rebuild' })).toHaveCount(1);
-
-		// The thread follows the picked job rather than merging both.
-		await picker.selectOption({ label: 'Kitchen remodel' });
+		// And a picker, because this customer has more than one job. The thread
+		// follows the picked job rather than merging every job into one stream —
+		// which is the whole difficulty of chatting from a directory, where the
+		// row is a PERSON and a thread belongs to an ORDER.
+		await pickProject(panel, 'Kitchen remodel');
 		await expect(panel.locator('.chat')).toContainText('when the cabinets land');
-		await picker.selectOption({ label: 'Backyard deck rebuild' });
+		await pickProject(panel, 'Backyard deck rebuild');
 		await expect(panel.locator('.chat')).toContainText('side gate');
 		await expect(panel.locator('.chat')).not.toContainText('when the cabinets land');
 	});

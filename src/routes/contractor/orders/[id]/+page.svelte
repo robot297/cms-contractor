@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { afterNavigate } from '$app/navigation';
@@ -12,17 +12,34 @@
 		paymentMethodLabel,
 		PAYMENT_METHODS,
 		QUICK_UPDATE_STATES,
+		isCustomerActionState,
 		snoozeDate,
 		toDateInput,
+		type ContractorOrderState,
 		type DocumentRef
 	} from '$lib/crm';
+	import {
+		customerActionSummary,
+		isTaskOpen,
+		openTasks,
+		taskDueLabel,
+		taskUrgency
+	} from '$lib/tasks';
+	import {
+		halfOf,
+		invoiceDate,
+		paidFraction,
+		paymentKindLabel,
+		paymentLineLabel,
+		PAYMENT_KINDS
+	} from '$lib/invoice';
+	import { coversDay, stintLabel, todayIso, workerInitials } from '$lib/worker';
 	import DocumentList from '$lib/DocumentList.svelte';
 	import DocumentViewer from '$lib/DocumentViewer.svelte';
 	import MessageComposer from '$lib/MessageComposer.svelte';
 	import MessageThread from '$lib/MessageThread.svelte';
 	import ContactPanel from '$lib/ContactPanel.svelte';
 	import InlineEditor from '$lib/InlineEditor.svelte';
-	import TagPicker from '$lib/TagPicker.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import type { PageData, ActionData } from './$types';
 
@@ -56,9 +73,20 @@
 			if (result.type === 'success') {
 				statusModal = null;
 				if (kind === 'complete') {
-					const emailed = result.data?.invoiceEmail === 'sent';
+					// Three outcomes now, and 'simulated' has to say so out loud: a
+					// server with email dev tools on composes and records the invoice
+					// but sends nothing, and a contractor told "emailed" on that box
+					// would believe a customer had it.
+					const outcome = result.data?.invoiceEmail;
 					toast.success('Order completed', {
-						detail: emailed ? `Final invoice emailed to ${order.customerName}.` : undefined
+						detail:
+							outcome === 'sent'
+								? `Final invoice emailed to ${order.customerName}.`
+								: outcome === 'simulated'
+									? 'Invoice composed and recorded — simulation is on, so nothing was sent.'
+									: outcome === 'skipped'
+										? 'Invoice was not emailed — email is not configured here.'
+										: undefined
 					});
 				} else {
 					toast.success('Order cancelled');
@@ -70,15 +98,6 @@
 		(s) => s !== 'Work Complete' && s !== 'Work Cancelled'
 	);
 
-	// Tags edit in place on the header rather than behind a separate screen.
-	let editingTags = $state(false);
-	// Past four, tags collapse behind a "+N" chip: a heavily-tagged order used to
-	// wrap the header into three lines and push the status badge down the page.
-	const TAG_LIMIT = 4;
-	let showAllTags = $state(false);
-	const shownTags = $derived(showAllTags ? data.order.tags : data.order.tags.slice(0, TAG_LIMIT));
-	const hiddenTags = $derived(data.order.tags.slice(TAG_LIMIT));
-
 	// Three panels. Files left the strip for an icon in the header — it is a thing
 	// you reach for, not a view you sit in — which also gets the tab row down to
 	// something that fits a phone without scrolling.
@@ -87,8 +106,17 @@
 	// customer is waiting opens on the conversation, everything else on the
 	// history. An explicit click overrides that for as long as you stay on the
 	// page, and is dropped on navigation so the next order gets its own answer.
-	type TabId = 'history' | 'messages' | 'workers';
+	type TabId = 'history' | 'messages' | 'crew' | 'billing';
 	let tabOverride = $state<TabId | null>(null);
+	/**
+	 * Which panel opens.
+	 *
+	 * Owed a reply wins, because somebody is waiting on an answer. Everything else
+	 * opens on the history — including a job stalled waiting on the CUSTOMER,
+	 * which used to get a tab of its own to land on. It no longer needs one: what
+	 * the job is waiting for is the first thing in the history panel now, so
+	 * arriving there already answers "why has nothing happened".
+	 */
 	const tab = $derived<TabId>(tabOverride ?? (data.owesReply ? 'messages' : 'history'));
 	// Only one of these carries a number, and only when it means something.
 	//
@@ -98,14 +126,62 @@
 	// three. So the counts are gone and Messages keeps a badge for the one thing
 	// that IS owed: questions the contractor has not answered.
 	const TABS = $derived([
+		// "Waiting on them" was here, first, wearing a count. It is not a tab any
+		// more: it was on show whether or not anything was waiting, so most of the
+		// time it was a permanent label advertising an empty list. What the job
+		// needs from the customer sits above the history now, and only when there
+		// is some — see the `.asks` block in that panel.
 		{ id: 'history' as const, label: 'History', pending: 0 },
 		// A peer of the history, not part of it: the history is what happened to
 		// the job, the thread is what was said about it.
 		{ id: 'messages' as const, label: 'Messages', pending: data.pendingReplies },
-		{ id: 'workers' as const, label: 'Workers', pending: 0 }
+		// One tab, one list: crew and subcontractors both. It was two — labelled
+		// "Workers" while assigning subs — which is the confusion this whole
+		// feature exists to end.
+		{ id: 'crew' as const, label: 'People', pending: 0 },
+		// Money. Last, and badge-less: a balance outstanding is a fact about the
+		// job, not a thing somebody is waiting on YOU for, and the counts here are
+		// reserved for the two tabs where that is what a number means.
+		{ id: 'billing' as const, label: 'Billing', pending: 0 }
 	]);
-	/** Files open in place under the header, the way tags and the customer do. */
+	/** Files open in place under the header, the way the customer does. */
 	let filesOpen = $state(false);
+
+	// ----------------------------------------------------------------- Asks
+	// Things needed FROM the customer. Before this, the only ask the product could
+	// express was money, via the two "pay me" states — so "send me the colour" went
+	// in a message and scrolled away while the portal said "In progress".
+	let taskAdding = $state(false);
+	let taskEditId = $state<string | null>(null);
+	let taskConfirmDeleteId = $state<string | null>(null);
+
+	const openTaskList = $derived(openTasks(data.tasks));
+	const doneTaskList = $derived(data.tasks.filter((t) => !isTaskOpen(t)));
+
+	/**
+	 * Today, in the contractor's timezone.
+	 *
+	 * Seeded during render so the server has something to send, then re-read on
+	 * mount: which calendar day it is where the CREW is standing is the whole
+	 * question here, and the server's day can be the wrong one. Same pattern the
+	 * dashboard uses for its follow-up dates.
+	 */
+	let now = $state(new Date());
+	onMount(() => {
+		now = new Date();
+	});
+	const today = $derived(todayIso(now));
+
+	/**
+	 * Who is on site today, by the same rule the dashboard uses.
+	 *
+	 * Computed here rather than asked of the server: the stints are already loaded
+	 * and `coversDay` is the one place the calendar rule lives, so a second
+	 * implementation could only disagree with the first.
+	 */
+	const onSiteToday = $derived(
+		data.assignedPeople.filter((p) => coversDay({ startsOn: p.startsOn, endsOn: p.endsOn }, today))
+	);
 
 	/** How many history entries show before "Show all". */
 	const HISTORY_PREVIEW = 4;
@@ -124,68 +200,236 @@
 
 	/** Two-step delete, matching every other destructive control in the app. */
 	let confirmingDeleteId = $state<string | null>(null);
-	/** The document whose note and tags are being edited, or null. */
+	/** The document whose note is being edited, or null. */
 	let editingDocId = $state<string | null>(null);
 	let editingNote = $state('');
-	let editingTagsValue = $state('');
 
-	function startEditDoc(d: { id: string; note?: string | null; tags?: string[] }) {
+	function startEditDoc(d: { id: string; note?: string | null }) {
 		confirmingDeleteId = null;
 		editingDocId = d.id;
 		editingNote = d.note ?? '';
-		editingTagsValue = (d.tags ?? []).join(', ');
 	}
 
 	// The reply box and its draft live in MessageComposer; scrolling the thread to
 	// its newest message is MessageThread's. Neither is this page's business.
-	// Customer details open in place under the customer line, the same way tags do.
-	let customerOpen = $state(false);
 
-	// Crew changes are staged, not applied on tap: every assignment writes to the
-	// job's history (and is where subcontractor notifications will hang later), so
-	// nothing commits until the "✓ Save" in the panel header. Keyed by sub id,
-	// value = the desired assigned state; toggling back to the server state simply
-	// drops the key.
-	let stagedSubs = $state<Record<string, boolean>>({});
-	function toggleSub(id: string, currentlyAssigned: boolean) {
-		const next = { ...stagedSubs };
-		if (id in next) delete next[id];
-		else next[id] = !currentlyAssigned;
-		stagedSubs = next;
-	}
-	const stagedAssign = $derived(
-		Object.entries(stagedSubs)
-			.filter(([, assigned]) => assigned)
-			.map(([id]) => id)
+	// ---------------------------------------------------------------- People
+	// Who is on this job — crew and subcontractors in ONE list, because that was
+	// never two questions. The staged batch-save the subcontractor panel used to
+	// have is gone: every assignment now carries dates that have to be typed
+	// anyway, so there is a form to submit regardless and staging only added a
+	// second step in front of it.
+	let crewEditKey = $state<string | null>(null);
+	let crewAdding = $state(false);
+	let crewQuery = $state('');
+	let crewConfirmRemoveKey = $state<string | null>(null);
+	/** Whether the picker is showing its "somebody new" form rather than results. */
+	let crewCreating = $state(false);
+	/** Carried from the search box, so a name typed once isn't typed twice. */
+	let crewNewName = $state('');
+
+	/**
+	 * Nobody on the books at all — not "nobody left to add to this job".
+	 *
+	 * The difference decides what the panel offers. With an empty roster there is
+	 * nothing to search and the people page is worth pointing at (it imports, and
+	 * it is where subcontractors are set up); with a full one it is a link away
+	 * from the thing you came here to do.
+	 */
+	const rosterEmpty = $derived(
+		data.availablePeople.length === 0 && data.assignedPeople.length === 0
 	);
-	const stagedUnassign = $derived(
-		Object.entries(stagedSubs)
-			.filter(([, assigned]) => !assigned)
-			.map(([id]) => id)
-	);
-	const stagedCount = $derived(stagedAssign.length + stagedUnassign.length);
-	/** Whether this contractor has anybody on the books at all. */
-	const hasRoster = $derived(data.assignedSubs.length > 0 || data.availableSubs.length > 0);
-	// The add box. Assigned crew renders inline; the rest of the roster only ever
-	// appears as search matches, so a fifty-person roster doesn't bury the three
-	// people actually on the job.
-	let subQuery = $state('');
-	const SUB_RESULT_LIMIT = 8;
-	// Staged adds surface in the crew list itself (as pending rows), so a picked
-	// person doesn't vanish when the search that found them is cleared…
-	const stagedAddSubs = $derived(data.availableSubs.filter((s) => stagedSubs[s.id] === true));
-	// …and drop out of the results, where they'd otherwise render twice.
-	const subMatches = $derived.by(() => {
-		const q = subQuery.trim().toLowerCase();
-		if (!q) return [];
-		return data.availableSubs.filter(
-			(s) =>
-				stagedSubs[s.id] !== true &&
-				(s.name.toLowerCase().includes(q) || (s.trade ?? '').toLowerCase().includes(q))
+
+	/** Stable identity across the two tables — ids are only unique within a kind. */
+	const personKey = (p: { kind: string; id: string }) => `${p.kind}-${p.id}`;
+
+	const crewMatches = $derived.by(() => {
+		const q = crewQuery.trim().toLowerCase();
+		if (!q) return data.availablePeople;
+		return data.availablePeople.filter((p) =>
+			[p.name, p.role, p.company]
+				.filter((f): f is string => Boolean(f))
+				.some((f) => f.toLowerCase().includes(q))
 		);
 	});
 
 	const order = $derived(data.order);
+	/**
+	 * The exact sentence the customer is being shown, previewed here.
+	 *
+	 * Same function, same inputs — a preview computed a second way is a preview
+	 * that can lie. It matters because "waiting on them" is a claim the contractor
+	 * is making to somebody else, and they should be able to see it as written.
+	 */
+	const customerSees = $derived(
+		customerActionSummary({
+			paymentDue: isCustomerActionState(order.state as ContractorOrderState),
+			contractorName: data.contractorName,
+			tasks: data.tasks,
+			today
+		})
+	);
+
+	// ------------------------------------------------------------------ Invoice
+	// The money panel. What the job costs lives on the order; what has been paid
+	// is a list of rows; the balance is the subtraction — see src/lib/invoice.ts,
+	// which does that arithmetic once for this page, the portal and the email.
+	const invoice = $derived(data.invoice);
+
+	// Editing the total is a toggle rather than a permanently-live field: this is
+	// the number the whole invoice is measured against, and a stray keystroke in an
+	// always-open input is not something a contractor should be able to do to it.
+	let editingTotal = $state(false);
+	let totalInput = $state('');
+	function openTotalEditor() {
+		totalInput = order.finalAmountCents != null ? (order.finalAmountCents / 100).toFixed(2) : '';
+		editingTotal = true;
+	}
+
+	// Recording a payment. Opens closed — most visits to an order are not about
+	// money — and the amount prefills to nothing rather than to a guess.
+	let payOpen = $state(false);
+	let payAmount = $state('');
+	let payKind = $state<(typeof PAYMENT_KINDS)[number]>('deposit');
+	// `payVia`, not `payMethod`: the close-out modal already owns a `payMethod`
+	// for its own one-shot radio group, and two states with one name is how the
+	// two forms start setting each other's values.
+	let payVia = $state<string>('check');
+	let payNote = $state('');
+	let payDate = $state('');
+
+	/**
+	 * Open the payment form, pre-set to the move the job is actually at.
+	 *
+	 * Nothing has been paid yet → a deposit, and the obvious deposit is half. Money
+	 * has already come in → this is the rest of it, so the amount prefills to the
+	 * outstanding balance and the kind to `final`. Both are prefills the contractor
+	 * types over; neither is a rule.
+	 */
+	function openPayment() {
+		const outstanding = invoice.balanceCents;
+		if (invoice.payments.length === 0) {
+			payKind = 'deposit';
+			const half = halfOf(invoice.totalCents);
+			payAmount = half != null ? (half / 100).toFixed(2) : '';
+		} else {
+			payKind = 'final';
+			payAmount = outstanding != null && outstanding > 0 ? (outstanding / 100).toFixed(2) : '';
+		}
+		payVia = 'check';
+		payNote = '';
+		payDate = toDateInput(new Date());
+		payOpen = true;
+	}
+
+	/** Drop the whole balance into the amount field — the "and the rest" button. */
+	function fillOutstanding() {
+		const outstanding = invoice.balanceCents;
+		if (outstanding != null && outstanding > 0) payAmount = (outstanding / 100).toFixed(2);
+	}
+
+	// Removing a recorded payment changes what someone owes, so it asks first.
+	let confirmRemovePayment = $state<string | null>(null);
+
+	// How much of the job has been paid for, for the bar. Null when there is no
+	// total to measure against — a bar with no denominator is decoration.
+	const paidPortion = $derived(paidFraction(invoice));
+
+	// ---- Line items. The breakdown behind the total.
+	//
+	// Adding the first one is what turns a lump figure into an itemised invoice,
+	// after which the total is the SUM and stops being typed at all — which is why
+	// the total's own editor disappears once `invoice.itemised` is true.
+	let addingLine = $state(false);
+	let lineLabel = $state('');
+	let lineAmount = $state('');
+	let editingLineId = $state<string | null>(null);
+	let editLabel = $state('');
+	let editAmount = $state('');
+	let confirmRemoveLine = $state<string | null>(null);
+
+	function openLineEditor(item: { id: string; label: string; amountCents: number }) {
+		editingLineId = item.id;
+		editLabel = item.label;
+		editAmount = (item.amountCents / 100).toFixed(2);
+	}
+	const closeLineForm =
+		() =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			await update();
+			addingLine = false;
+			editingLineId = null;
+			lineLabel = '';
+			lineAmount = '';
+		};
+
+	// ---- Details. What the job is, where, and when.
+	let editingDetails = $state(false);
+	let detDescription = $state('');
+	let detStart = $state('');
+	let detTarget = $state('');
+	let detSiteOn = $state(false);
+	let detAddress = $state('');
+	let detCity = $state('');
+	let detState = $state('');
+	let detPostal = $state('');
+
+	const hasDetails = $derived(
+		Boolean(
+			order.description ||
+			order.siteAddress ||
+			order.startDate ||
+			order.targetDate ||
+			order.visitDate
+		)
+	);
+	/** The site line, only when the job is somewhere other than the customer's address. */
+	const siteLine = $derived(
+		order.siteAddress
+			? [
+					order.siteAddress,
+					[order.siteCity, order.siteState].filter(Boolean).join(', '),
+					order.sitePostalCode
+				]
+					.filter(Boolean)
+					.join(' · ')
+			: ''
+	);
+	/** Past its target and not finished. Terminal orders are not late, they are done. */
+	const targetOverdue = $derived(
+		Boolean(order.targetDate) && !isTerminal && new Date(order.targetDate!) < new Date()
+	);
+
+	function openDetailsEditor() {
+		detDescription = order.description ?? '';
+		detStart = toDateInput(order.startDate);
+		detTarget = toDateInput(order.targetDate);
+		detSiteOn = Boolean(order.siteAddress);
+		detAddress = order.siteAddress ?? '';
+		detCity = order.siteCity ?? '';
+		detState = order.siteState ?? '';
+		detPostal = order.sitePostalCode ?? '';
+		editingDetails = true;
+	}
+	const closeDetailsEditor =
+		() =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			await update();
+			editingDetails = false;
+		};
+
+	const closePaymentForm =
+		() =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			await update();
+			payOpen = false;
+		};
+	const closeTotalEditor =
+		() =>
+		async ({ update }: { update: () => Promise<void> }) => {
+			await update();
+			editingTotal = false;
+		};
 	// "City, ST" from the customer's captured fields, for the header line.
 	const orderLocation = $derived(
 		customerLocation({
@@ -280,6 +524,23 @@
 	function fmtDate(d: Date | string | null): string {
 		return d ? new Date(d).toLocaleDateString() : '—';
 	}
+	/**
+	 * "Aug 19" — or "Aug 19, 2027" when it is not this year.
+	 *
+	 * The schedule block reads as two dates side by side, and "8/19/2026" twice
+	 * over is four numbers the eye has to parse before it can compare them. The
+	 * year only earns its place when leaving it out would be ambiguous.
+	 */
+	function fmtShortDate(d: Date | string | null): string {
+		if (!d) return '—';
+		const date = new Date(d);
+		const sameYear = date.getFullYear() === new Date().getFullYear();
+		return date.toLocaleDateString('en-US', {
+			month: 'short',
+			day: 'numeric',
+			...(sameYear ? {} : { year: 'numeric' })
+		});
+	}
 	/** "Thu, 20 Aug" — short enough to sit inside a preset button. */
 	const shortDay = new Intl.DateTimeFormat(undefined, {
 		weekday: 'short',
@@ -331,12 +592,42 @@
 	}
 </script>
 
+{#snippet askFields(title: string, detail: string, dueOn: string | null, blocking: boolean)}
+	<!-- One set of fields for asking and for editing. They were briefly two, and
+	     the edit form immediately lost the "holding up the job" box. -->
+	<label class="crew-wide"
+		>What you need<input
+			class="field-input"
+			name="title"
+			required
+			maxlength="120"
+			autocomplete="off"
+			placeholder="Pick your tile · Sign the permit · Gate code"
+			value={title}
+		/></label
+	>
+	<label class="crew-wide"
+		>Detail (optional)<textarea
+			class="field-input"
+			name="detail"
+			rows="2"
+			placeholder="Where to send it, which of the three quotes, why it is holding things up"
+			>{detail}</textarea
+		></label
+	>
+	<label>By<input class="field-input" type="date" name="dueOn" value={dueOn ?? ''} /></label>
+	<label class="ask-check"
+		><input type="checkbox" name="blocking" checked={blocking} />
+		<span>The job is held up until this is done</span></label
+	>
+{/snippet}
+
 <svelte:head>
 	<title>{order.projectName ?? 'Order'}</title>
 </svelte:head>
 
 <div class="order-shell">
-	<div class="page">
+	<div class="page page-shell">
 		<!-- Back and status share the top line. The status used to sit across from
 		     the title as a caption to it, which cost the title a fixed column on the
 		     right — on a phone that squeezed a project name into three wrapped lines
@@ -346,7 +637,7 @@
 			<a class="back-link" href={resolve(backTo.href)}>← {backTo.label}</a>
 			<div class="statusline">
 				<span
-					style="font-size: 0.82rem; font-weight: 700; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.25rem 0.8rem;"
+					style="font-size: 0.82rem; font-weight: 600; white-space: nowrap; color: {badge.fg}; background: {badge.bg}; border: 1px solid {badge.border}; border-radius: 999px; padding: 0.25rem 0.8rem;"
 					>{order.state}</span
 				>
 				<button
@@ -356,7 +647,7 @@
 					title="Update status"
 					aria-label="Update status"
 					onclick={openStatus}
-					style="width: 1.9rem; height: 1.9rem; font-size: 1.05rem;">⚙️</button
+					style="width: 2rem; height: 2rem; font-size: 1.25rem;">⚙️</button
 				>
 			</div>
 		</div>
@@ -371,141 +662,104 @@
 							· {typeSuffix(order.projectName, order.projectType)}</span
 						>{/if}
 				</h1>
-				<!-- Customer, then where the work is — same shape as the list card, so
-					     the two surfaces read alike. Omitted when the address has no city
-					     to isolate rather than shown as a dangling separator. -->
-				<span class="order-sub">
-					<span class="sub-customer">{order.customerName}</span>{#if orderLocation}<span
-							class="sub-sep">·</span
-						>{orderLocation}{/if}
-					{#if customer}
-						<button
-							type="button"
-							class="icon-btn cust-toggle"
-							class:on={customerOpen}
-							style="width: 1.6rem; height: 1.6rem; font-size: 0.9rem;"
-							title={customerOpen ? 'Hide customer details' : 'Customer details'}
-							aria-label={customerOpen ? 'Hide customer details' : 'Customer details'}
-							aria-expanded={customerOpen}
-							onclick={() => (customerOpen = !customerOpen)}
-						>
-							🪪
-						</button>
-					{/if}
-				</span>
-			</div>
 
-			{#if customerOpen && customer}
-				<InlineEditor title="Customer" onclose={() => (customerOpen = false)}>
-					{#snippet actions()}
-						<!-- Contact (email / call) behind one button, like the dashboard -->
-						<div style="position: relative;">
-							<button
-								type="button"
-								class="icon-btn"
-								style="width: 1.9rem; height: 1.9rem; font-size: 1.1rem;"
-								title="Contact customer"
-								aria-label="Contact customer"
-								aria-expanded={contactOpen}
-								onclick={() => (contactOpen = !contactOpen)}>💬</button
-							>
-							{#if contactOpen && customer}
-								<!-- Dimmed click-away scrim so the composer is the focus. -->
+				<!-- Who the job is for, in the shape the People directory uses: the same
+				     photo-or-initial, the same name, the same 💬 beside it. It was a name
+				     in muted type with a 🪪 next to it that opened a panel of read-only
+				     facts — a control that looked like an edit affordance, opened
+				     something you could not edit, and put a third rendering of "a
+				     person" on a third surface.
+
+				     It is a STATEMENT, not a control. The name was briefly a link into
+				     the directory, on the reasoning that editing a person should happen
+				     in one place — but the whole chip then behaved like a button on a
+				     page whose every other press does something to this job, and
+				     "who is this for" is a fact you read, not a place you go. The
+				     directory is one nav click away for the rare time you want it. -->
+				{#if customer}
+					<div class="head-customer">
+						<div class="cust-identity">
+							{#if customer.avatar}
+								<img class="cust-avatar" src={customer.avatar} alt="" />
+							{:else}
+								<span class="cust-avatar fallback" aria-hidden="true"
+									>{customer.name.charAt(0).toUpperCase()}</span
+								>
+							{/if}
+							<span class="cust-who">
+								<span class="cust-name">{customer.name}</span>
+								<span class="cust-meta">
+									{#if orderLocation}<span class="cust-where"
+											><span aria-hidden="true">📍</span>{orderLocation}</span
+										>{/if}
+									{#if customer.email}<span class="cust-reach">{customer.email}</span>{/if}
+								</span>
+							</span>
+						</div>
+
+						<!-- Reaching them is not editing them, so this stays. Same control,
+						     same panel and same seat as the directory's row. -->
+						{#if customer.email || customer.phone}
+							<div class="cust-contact">
 								<button
 									type="button"
-									aria-label="Close contact menu"
-									onclick={() => (contactOpen = false)}
-									class="contact-scrim"
-								></button>
-								<div class="contact-pop">
-									<ContactPanel
-										contact={{
-											name: customer.name,
-											email: customer.email,
-											phone: customer.phone,
-											preferredContact: customer.preferredContact
-										}}
-										project={order.projectName}
-										orderId={order.id}
-										conversations={[
-											{
-												orderId: order.id,
-												projectName: order.projectName,
-												thread: data.thread
-											}
-										]}
-										canChat={data.customerLinked}
-										customerId={order.customerId}
-										portal={data.portal}
-										onsent={() => (contactOpen = false)}
-										onclose={() => (contactOpen = false)}
-									/>
-								</div>
-							{/if}
-						</div>
-					{/snippet}
-					<dl class="cust-facts">
-						<div class="fact">
-							<dt>Email</dt>
-							<dd class="cust-value">{customer.email}</dd>
-						</div>
-						{#if customer.phone}
-							<div class="fact">
-								<dt>Phone</dt>
-								<dd class="cust-value">{customer.phone}</dd>
+									class="icon-btn"
+									style="width: 2.5rem; height: 2.5rem; font-size: 1.4rem;"
+									title="Message {customer.name}"
+									aria-label="Message {customer.name}"
+									aria-expanded={contactOpen}
+									onclick={() => (contactOpen = !contactOpen)}>💬</button
+								>
+								{#if contactOpen}
+									<!-- Dimmed click-away scrim so the composer is the focus. -->
+									<button
+										type="button"
+										aria-label="Close contact menu"
+										onclick={() => (contactOpen = false)}
+										class="contact-scrim"
+									></button>
+									<div class="contact-pop">
+										<ContactPanel
+											contact={{
+												name: customer.name,
+												email: customer.email,
+												phone: customer.phone,
+												preferredContact: customer.preferredContact
+											}}
+											project={order.projectName}
+											orderId={order.id}
+											conversations={[
+												{
+													orderId: order.id,
+													projectName: order.projectName,
+													thread: data.thread
+												}
+											]}
+											canChat={data.customerLinked}
+											customerId={order.customerId}
+											portal={data.portal}
+											onsent={() => (contactOpen = false)}
+											onclose={() => (contactOpen = false)}
+										/>
+									</div>
+								{/if}
 							</div>
 						{/if}
-						{#if customer.address}
-							<div class="fact">
-								<dt>Address</dt>
-								<dd class="cust-value">{customer.address}</dd>
-							</div>
-						{/if}
-					</dl>
-				</InlineEditor>
-			{/if}
+					</div>
+				{:else}
+					<!-- An order whose customer record has gone. The name still rides on the
+					     order itself, so the header says who it was for rather than nothing. -->
+					<span class="cust-name orphan">{order.customerName}</span>
+				{/if}
+			</div>
 
 			<!-- Everything you glance at or reach for about this order, in ONE wrapping
-			     row: tags, when to chase it, and the files on it. Each is a label, its
+			     row: when to chase it, and the files on it. Each is a label, its
 			     value, and the control that edits it. These were three separate
 			     full-width blocks, which on a phone meant three lines of mostly empty
 			     space; as flex items they pack onto as few lines as the width allows
 			     and wrap only when they must. Who's on the job lives in Workers. -->
 			<dl class="order-facts">
-				<div class="fact">
-					<dt>Tags</dt>
-					<dd>
-						{#each shownTags as tag (tag)}<span class="tag-chip">{tag}</span>{/each}
-						{#if hiddenTags.length > 0}
-							<!-- Hover shows the rest; clicking expands, since a tooltip is
-							     nothing a touch device can reach. -->
-							<button
-								type="button"
-								class="tag-more"
-								title={showAllTags ? 'Show fewer tags' : hiddenTags.join(', ')}
-								aria-expanded={showAllTags}
-								onclick={() => (showAllTags = !showAllTags)}
-							>
-								{showAllTags ? 'Show less' : `+${hiddenTags.length} more`}
-							</button>
-						{/if}
-						{#if order.tags.length === 0}
-							<span class="fact-empty">N/A</span>
-						{/if}
-						<button
-							type="button"
-							class="icon-btn tag-toggle"
-							style="width: 1.5rem; height: 1.5rem; font-size: 0.95rem;"
-							title={editingTags ? 'Close tag editor' : 'Add or edit tags'}
-							aria-label={editingTags ? 'Close tag editor' : 'Add or edit tags'}
-							aria-expanded={editingTags}
-							onclick={() => (editingTags = !editingTags)}
-						>
-							{editingTags ? '−' : '+'}
-						</button>
-					</dd>
-				</div>
-
 				<div class="fact">
 					<dt>Follow-up</dt>
 					<dd>
@@ -516,7 +770,7 @@
 							<button
 								type="button"
 								class="icon-btn"
-								style="width: 1.5rem; height: 1.5rem; font-size: 0.9rem;"
+								style="width: 1.7rem; height: 1.7rem; font-size: 1.1rem;"
 								title="Snooze or set follow-up"
 								aria-label="Snooze or set follow-up"
 								aria-expanded={snoozeOpen}
@@ -529,7 +783,7 @@
 					</dd>
 				</div>
 
-				<!-- Files, reached the same way tags and the customer are: a control on
+				<!-- Files, reached the same way the customer is: a control on
 				     the header that opens in place. It was a tab, which made a thing you
 				     dip into for one file cost a whole view. -->
 				<div class="fact">
@@ -544,7 +798,7 @@
 							type="button"
 							class="icon-btn"
 							class:on={filesOpen}
-							style="width: 1.5rem; height: 1.5rem; font-size: 0.85rem;"
+							style="width: 1.7rem; height: 1.7rem; font-size: 1.05rem;"
 							title={filesOpen ? 'Close files' : 'Files on this order'}
 							aria-label={filesOpen ? 'Close files' : 'Files on this order'}
 							aria-expanded={filesOpen}
@@ -593,29 +847,6 @@
 					{@render filesPanel()}
 				</InlineEditor>
 			{/if}
-
-			<!-- Both editors open in place, directly under the thing they edit, rather
-			     than as cards further down the page — the toggle and the surface it
-			     opens stay within a glance of each other. -->
-			{#if editingTags}
-				<InlineEditor title="Tags" onclose={() => (editingTags = false)}>
-					<form
-						method="POST"
-						action="?/setTags"
-						use:enhance={() =>
-							async ({ update }) => {
-								editingTags = false;
-								await update();
-							}}
-						class="editor-form"
-					>
-						<TagPicker value={order.tags} />
-						<div class="editor-footer">
-							<button type="submit" class="editor-save">Save tags</button>
-						</div>
-					</form>
-				</InlineEditor>
-			{/if}
 		</header>
 
 		{#if form?.message}
@@ -625,38 +856,6 @@
 				{form.message}
 			</p>
 		{/if}
-
-		<!-- One row of the crew picker, shared by the assigned list, staged adds and
-		     the search results. `currentlyAssigned` is the SERVER state — the mark and
-		     highlight render the staged (effective) state on top of it. -->
-		{#snippet crewRow(
-			sub: { id: string; name: string; trade: string | null; tier: string },
-			currentlyAssigned: boolean
-		)}
-			{@const effective = stagedSubs[sub.id] ?? currentlyAssigned}
-			{@const pending = sub.id in stagedSubs}
-			<button
-				type="button"
-				class="sub-row"
-				class:on={effective}
-				class:pending
-				aria-pressed={effective}
-				onclick={() => toggleSub(sub.id, currentlyAssigned)}
-			>
-				<span class="sub-mark" aria-hidden="true"
-					>{effective ? '✓' : currentlyAssigned ? '–' : '+'}</span
-				>
-				<span class="sub-text">
-					<span class="sub-name">{sub.name}</span>
-					<span class="sub-meta">
-						<span class="sub-trade">{sub.trade ?? 'Trade not set'}</span>
-						<span class="tier" class:guest={sub.tier !== 'trusted'}>
-							{sub.tier === 'trusted' ? 'Trusted' : 'Guest'}
-						</span>
-					</span>
-				</span>
-			</button>
-		{/snippet}
 
 		<!-- The follow-up controls, hung off the ⏰ in the header's meta row. A snippet
 	     rather than inline so the row itself stays a row and not a wall. -->
@@ -803,8 +1002,8 @@
 							<button
 								type="button"
 								class="doc-icon"
-								title="Edit note and tags"
-								aria-label="Edit note and tags for {d.filename}"
+								title="Edit note"
+								aria-label="Edit note for {d.filename}"
 								onclick={() => startEditDoc(d)}>✎</button
 							>
 							<!-- Two-step, like every other destructive control in the app: a
@@ -843,54 +1042,1210 @@
 							/>
 						</label>
 						<label class="doc-field">
-							<span>Tags</span>
-							<input name="tags" bind:value={editingTagsValue} placeholder="permit, invoice" />
+							<div class="doc-edit-actions">
+								<button type="button" class="doc-btn" onclick={() => (editingDocId = null)}
+									>Cancel</button
+								>
+								<button type="submit" class="doc-btn primary">Save</button>
+							</div>
 						</label>
-						<div class="doc-edit-actions">
-							<button type="button" class="doc-btn" onclick={() => (editingDocId = null)}
-								>Cancel</button
-							>
-							<button type="submit" class="doc-btn primary">Save</button>
-						</div>
 					</form>
 				{/if}
 			</div>
 		{/snippet}
 
-		<div class="card panel">
-			<div class="tabs" role="tablist" aria-label="Order sections">
-				{#each TABS as t (t.id)}
-					<button
-						type="button"
-						role="tab"
-						id={`tab-${t.id}`}
-						aria-selected={tab === t.id}
-						aria-controls={`panel-${t.id}`}
-						class="tab"
-						class:on={tab === t.id}
-						onclick={() => (tabOverride = t.id)}
-					>
-						{t.label}{#if t.pending > 0}<span class="tab-count as-pending">{t.pending}</span>{/if}
-					</button>
-				{/each}
+		<!-- All three panes are always rendered; which one SHOWS is CSS. That is what
+		     lets the desktop layout place them side by side — a `{#if tab === …}` can
+		     only ever put one of them on screen, so no amount of grid could have
+		     arranged the other two. On a phone the tab strip still shows exactly one,
+		     via `.pane:not(.on)`.
+
+		     The strip itself sits in the rail, directly above the People pane and below
+		     Details / Invoice: on a phone that is the one position where the always-on
+		     cards read as the order's own facts rather than as the open tab's contents.
+		     It is hidden from 1100px, where every pane is on screen at once. -->
+
+		<div class="workspace">
+			<div class="col-rail">
+				<!-- ------------------------------------------------------- Details
+				     What the job is, where it happens and when. The order carried a name
+				     and a type and nothing else, so the answer to "what are we actually
+				     building" lived in a timeline note or in someone's head. Edited as one
+				     panel rather than field by field: these are filled in together, at the
+				     start, and five separate inline editors would be five times the
+				     chrome for one sitting's work. -->
+				<section class="card details" aria-labelledby="details-head">
+					<div class="det-head">
+						<h2 id="details-head">Details</h2>
+						{#if !editingDetails}
+							<button type="button" class="inv-btn" onclick={openDetailsEditor}>
+								{hasDetails ? 'Edit' : 'Add details'}
+							</button>
+						{/if}
+					</div>
+
+					{#if editingDetails}
+						<form
+							method="POST"
+							action="?/setOrderDetails"
+							use:enhance={closeDetailsEditor}
+							class="det-form"
+						>
+							<label class="inv-field">
+								<span>Scope of work</span>
+								<textarea
+									name="description"
+									rows="4"
+									placeholder="Tear out the old cedar, re-frame the two rotten joists, 16x20 with a railing…"
+									bind:value={detDescription}></textarea>
+							</label>
+
+							<div class="det-dates">
+								<label class="inv-field">
+									<span>Starts</span>
+									<input type="date" name="startDate" bind:value={detStart} />
+								</label>
+								<label class="inv-field">
+									<span>Target finish</span>
+									<input type="date" name="targetDate" bind:value={detTarget} />
+								</label>
+							</div>
+
+							<!-- Off by default. Most jobs happen at the customer's own address,
+							     and a second address always on screen invites someone to retype
+							     the one already on the customer record. -->
+							<label class="det-check">
+								<input type="checkbox" bind:checked={detSiteOn} />
+								<span>The work is at a different address</span>
+							</label>
+							{#if detSiteOn}
+								<!-- Plain fields rather than <AddressFields>: that component hard-codes
+								     the input names `city` / `state` / `postalCode` for the customer
+								     form and has no address line at all, so reusing it here would post
+								     the wrong keys and drop the street. -->
+								<label class="inv-field">
+									<span>Street</span>
+									<input
+										name="siteAddress"
+										bind:value={detAddress}
+										placeholder="1180 Alder Street"
+									/>
+								</label>
+								<div class="det-site-row">
+									<label class="inv-field grow">
+										<span>City</span>
+										<input name="siteCity" bind:value={detCity} />
+									</label>
+									<label class="inv-field det-state">
+										<span>State</span>
+										<input name="siteState" bind:value={detState} maxlength="2" />
+									</label>
+									<label class="inv-field det-zip">
+										<span>ZIP</span>
+										<input name="sitePostalCode" bind:value={detPostal} inputmode="numeric" />
+									</label>
+								</div>
+							{:else}
+								<!-- Cleared on save when the box is unticked, so unticking it really
+								     does hand the job back to the customer's address instead of
+								     leaving a stale one behind. -->
+								<input type="hidden" name="siteAddress" value="" />
+								<input type="hidden" name="siteCity" value="" />
+								<input type="hidden" name="siteState" value="" />
+								<input type="hidden" name="sitePostalCode" value="" />
+							{/if}
+
+							<div class="inv-pay-actions">
+								<button type="button" class="inv-btn" onclick={() => (editingDetails = false)}
+									>Cancel</button
+								>
+								<button type="submit" class="inv-btn primary">Save details</button>
+							</div>
+						</form>
+					{:else if hasDetails}
+						{#if order.description}
+							<p class="det-scope">{order.description}</p>
+						{/if}
+						<!-- The schedule as a span rather than two rows of a definition list.
+						     Two dates that describe one stretch of time should be read
+						     together — stacked as "Starts …" over "Target …" they were two
+						     unrelated facts that happened to be adjacent. -->
+						{#if order.startDate || order.targetDate}
+							<div class="det-schedule">
+								<div class="det-when">
+									<span class="det-when-label">Starts</span>
+									<span class="det-when-value">{fmtShortDate(order.startDate)}</span>
+								</div>
+								<span class="det-arrow" aria-hidden="true"></span>
+								<div class="det-when">
+									<span class="det-when-label">Target</span>
+									<span class="det-when-value" class:det-late={targetOverdue}>
+										{fmtShortDate(order.targetDate)}
+									</span>
+								</div>
+								{#if targetOverdue}
+									<span class="det-late-flag">overdue</span>
+								{/if}
+							</div>
+						{/if}
+
+						{#if siteLine}
+							<div class="det-site">
+								<span class="det-site-label">Site</span>
+								<span>{siteLine}</span>
+							</div>
+						{/if}
+
+						<!-- The day the crew turns up, which is the one date here that gets
+						     changed on the morning it applies to — so it is settable in one
+						     press rather than through the details form. It is what the
+						     dashboard's "on site today" list is a query over. -->
+						<div class="det-visit">
+							<span class="det-site-label">On site</span>
+							<span class="det-visit-value">
+								{order.visitDate ? fmtShortDate(order.visitDate) : 'Not scheduled'}
+							</span>
+							<form method="POST" action="?/setVisitDate" use:enhance class="det-visit-form">
+								<input type="date" name="date" value={toDateInput(order.visitDate)} />
+								<button type="submit" class="inv-btn">Set</button>
+							</form>
+							{#if !order.visitDate}
+								<form method="POST" action="?/setVisitDate" use:enhance>
+									<input type="hidden" name="date" value={toDateInput(new Date())} />
+									<button type="submit" class="inv-btn">Today</button>
+								</form>
+							{/if}
+						</div>
+					{:else}
+						<p class="det-empty">
+							Nothing recorded yet — what the job is, where it happens, when it runs.
+						</p>
+					{/if}
+				</section>
+
+				<div class="tabs" role="tablist" aria-label="Order sections">
+					{#each TABS as t (t.id)}
+						<button
+							type="button"
+							role="tab"
+							id={`tab-${t.id}`}
+							aria-selected={tab === t.id}
+							aria-controls={`panel-${t.id}`}
+							class="tab"
+							class:on={tab === t.id}
+							onclick={() => (tabOverride = t.id)}
+						>
+							{t.label}{#if t.pending > 0}<span class="tab-count as-pending">{t.pending}</span>{/if}
+						</button>
+					{/each}
+				</div>
+
+				<!-- ------------------------------------------------------------- Billing
+				     What the job costs, what has come in, what is left.
+
+				     A tab now, alongside the others. It used to be a card of its own,
+				     sitting above the strip, on the reasoning that "the tab row is three
+				     wide because that is what fits a phone, and money is something you
+				     glance at on the way past rather than a view you sit in". The first
+				     half of that stopped being true when the row went to four; the second
+				     stopped being true when the invoice grew line items, payments and a
+				     close-out — it IS a view you sit in now.
+
+				     FIRST among the rail's panes on purpose. Above 1100px the strip is
+				     hidden and every pane shows at once, so pane order IS the rail's
+				     order — putting billing here keeps it at the top of the rail exactly
+				     where the card used to be, while a phone reaches it through the tab.
+
+				     Shown for the whole life of the order, not just at close-out. A deposit
+				     is taken at the START of a job, which is exactly the period the old
+				     close-out-only record could not describe. -->
+				<!-- The pane is the DIV; the card stays a <section> inside it. A
+				     `<section role="tabpanel">` is the role fighting the element, and the
+				     other four panes are divs — so this matches them, and the card keeps
+				     its own heading association. `.pane-billing` drops the pane's frame,
+				     because the card inside already draws one. -->
+				<div
+					class="pane pane-billing"
+					class:on={tab === 'billing'}
+					role="tabpanel"
+					id="panel-billing"
+					aria-labelledby="tab-billing"
+				>
+					<section class="card invoice" aria-labelledby="invoice-head">
+						<div class="inv-head">
+							<h2 id="invoice-head">Invoice</h2>
+							<!-- The whole point of the preview: what the customer will actually be
+							     sent, rendered by the same code that sends it. Opens in a new tab
+							     because it is a document, not a step in this page's flow. -->
+							<a
+								class="inv-preview"
+								href={resolve(`/contractor/orders/${order.id}/invoice`)}
+								target="_blank"
+								rel="noopener"
+							>
+								Preview email <span aria-hidden="true">↗</span>
+							</a>
+						</div>
+
+						<!-- The card's headline, and the reason it leads rather than trails: the one thing
+						     anyone opens an invoice to learn is what is still owed. It used to sit at the
+						     bottom, under the breakdown and the payment list, in the same weight as the
+						     labels around it.
+
+						     The bar and the sub-line both restate figures given in words, so the bar is
+						     aria-hidden and the sub-line carries the numbers as text. -->
+						<div
+							class="inv-hero"
+							class:settled={invoice.status === 'settled'}
+							class:owed={invoice.status === 'open'}
+						>
+							{#if invoice.status === 'settled'}
+								<span class="inv-hero-label">Paid in full</span>
+								<span class="inv-hero-value">{formatCents(invoice.paidCents)}</span>
+							{:else if invoice.status === 'overpaid'}
+								<span class="inv-hero-label">Refund owed</span>
+								<span class="inv-hero-value">{formatCents(-(invoice.balanceCents ?? 0))}</span>
+							{:else if invoice.status === 'open'}
+								<span class="inv-hero-label">Balance due</span>
+								<span class="inv-hero-value">{formatCents(invoice.balanceCents)}</span>
+							{:else if invoice.paidCents !== 0}
+								<!-- Money in, no agreed total. Report what arrived rather than a balance
+								     that cannot be computed. -->
+								<span class="inv-hero-label">Paid to date</span>
+								<span class="inv-hero-value">{formatCents(invoice.paidCents)}</span>
+							{:else}
+								<span class="inv-hero-label">Balance</span>
+								<span class="inv-hero-value unset">Nothing recorded yet</span>
+							{/if}
+
+							{#if paidPortion != null}
+								<div
+									class="inv-progress"
+									class:full={invoice.status === 'settled' || invoice.status === 'overpaid'}
+									aria-hidden="true"
+								>
+									<div class="inv-progress-fill" style="--paid: {paidPortion}"></div>
+								</div>
+								<span class="inv-hero-sub">
+									{formatCents(invoice.paidCents)} received of {formatCents(invoice.totalCents)}
+								</span>
+							{/if}
+						</div>
+
+						<!-- The total. One editable number, and the only one on this card that is
+						     typed rather than derived. -->
+						<div class="inv-total">
+							{#if editingTotal}
+								<form
+									method="POST"
+									action="?/setOrderTotal"
+									use:enhance={closeTotalEditor}
+									class="inv-total-form"
+								>
+									<label class="inv-total-label" for="inv-total-input">Project total</label>
+									<div class="inv-amount">
+										<span class="inv-cur" aria-hidden="true">$</span>
+										<input
+											id="inv-total-input"
+											name="total"
+											inputmode="decimal"
+											placeholder="0.00"
+											bind:value={totalInput}
+										/>
+									</div>
+									<button type="submit" class="inv-btn primary">Save</button>
+									<button type="button" class="inv-btn" onclick={() => (editingTotal = false)}
+										>Cancel</button
+									>
+								</form>
+							{:else}
+								<div class="inv-total-read">
+									<span class="inv-total-label">{invoice.itemised ? 'Total' : 'Project total'}</span
+									>
+									<span class="inv-total-value" class:unset={invoice.totalCents == null}>
+										{invoice.totalCents != null ? formatCents(invoice.totalCents) : 'Not set'}
+									</span>
+									<!-- No editor once the invoice is itemised: the total IS the sum of the
+									     lines, and offering a field for it would be offering to make the
+									     breakdown disagree with the figure printed above it. -->
+									{#if !invoice.itemised}
+										<button type="button" class="inv-btn" onclick={openTotalEditor}>
+											{invoice.totalCents != null ? 'Edit' : 'Set total'}
+										</button>
+									{/if}
+								</div>
+							{/if}
+						</div>
+
+						<!-- The breakdown. What the total is made of, and the answer to the one
+						     question a lump figure cannot answer: why is it that much? -->
+						{#if invoice.lineItems.length > 0}
+							<ul class="inv-items">
+								{#each invoice.lineItems as item (item.id)}
+									<li class="inv-item">
+										{#if editingLineId === item.id}
+											<form
+												method="POST"
+												action="?/updateLineItem"
+												use:enhance={closeLineForm}
+												class="inv-item-form"
+											>
+												<input type="hidden" name="itemId" value={item.id} />
+												<input
+													name="label"
+													class="inv-item-label-input"
+													bind:value={editLabel}
+													aria-label="Line description"
+												/>
+												<div class="inv-amount tight">
+													<span class="inv-cur" aria-hidden="true">$</span>
+													<input
+														name="amount"
+														inputmode="decimal"
+														bind:value={editAmount}
+														aria-label="Line amount"
+													/>
+												</div>
+												<button type="submit" class="inv-btn primary">Save</button>
+												<button type="button" class="inv-btn" onclick={() => (editingLineId = null)}
+													>Cancel</button
+												>
+											</form>
+										{:else}
+											<button
+												type="button"
+												class="inv-item-read"
+												title="Edit this line"
+												onclick={() => openLineEditor(item)}
+											>
+												<span class="inv-item-label">{item.label}</span>
+												<span class="inv-item-amount" class:credit={item.amountCents < 0}
+													>{formatCents(item.amountCents)}</span
+												>
+											</button>
+											{#if confirmRemoveLine === item.id}
+												<span class="inv-line-confirm" role="alert">
+													<span>Remove?</span>
+													<form method="POST" action="?/deleteLineItem" use:enhance>
+														<input type="hidden" name="itemId" value={item.id} />
+														<button type="submit" class="inv-remove-yes">Yes</button>
+													</form>
+													<button
+														type="button"
+														class="inv-btn"
+														onclick={() => (confirmRemoveLine = null)}>No</button
+													>
+												</span>
+											{:else}
+												<button
+													type="button"
+													class="inv-remove"
+													title="Remove this line"
+													aria-label="Remove line {item.label}"
+													onclick={() => (confirmRemoveLine = item.id)}>×</button
+												>
+											{/if}
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						{#if addingLine}
+							<form
+								method="POST"
+								action="?/addLineItem"
+								use:enhance={closeLineForm}
+								class="inv-item-form add"
+							>
+								<input
+									name="label"
+									class="inv-item-label-input"
+									placeholder="Cedar decking"
+									bind:value={lineLabel}
+									aria-label="Line description"
+								/>
+								<div class="inv-amount tight">
+									<span class="inv-cur" aria-hidden="true">$</span>
+									<input
+										name="amount"
+										inputmode="decimal"
+										placeholder="0.00"
+										bind:value={lineAmount}
+										aria-label="Line amount"
+									/>
+								</div>
+								<button type="submit" class="inv-btn primary">Add</button>
+								<button type="button" class="inv-btn" onclick={() => (addingLine = false)}
+									>Cancel</button
+								>
+							</form>
+						{:else}
+							<button type="button" class="inv-add-line" onclick={() => (addingLine = true)}>
+								<span aria-hidden="true">+</span>
+								{invoice.itemised ? 'Add another line' : 'Break the total into lines'}
+							</button>
+						{/if}
+
+						<!-- The running account. Oldest-first: an invoice is read down, not up. -->
+						{#if invoice.payments.length > 0}
+							<ul class="inv-lines">
+								{#each invoice.payments as p (p.id)}
+									<li class="inv-line">
+										<span class="inv-line-text">
+											<span class="inv-line-label">{paymentLineLabel(p)}</span>
+											<span class="inv-line-date">{invoiceDate(p.receivedAt)}</span>
+										</span>
+										<span class="inv-line-amount">{formatCents(p.amountCents)}</span>
+										{#if confirmRemovePayment === p.id}
+											<span class="inv-line-confirm" role="alert">
+												<span>Remove?</span>
+												<form method="POST" action="?/deletePayment" use:enhance>
+													<input type="hidden" name="paymentId" value={p.id} />
+													<button type="submit" class="inv-remove-yes">Yes</button>
+												</form>
+												<button
+													type="button"
+													class="inv-btn"
+													onclick={() => (confirmRemovePayment = null)}>No</button
+												>
+											</span>
+										{:else}
+											<button
+												type="button"
+												class="inv-remove"
+												title="Remove this payment"
+												aria-label="Remove {paymentKindLabel(p.kind)} of {formatCents(
+													p.amountCents
+												)}"
+												onclick={() => (confirmRemovePayment = p.id)}>×</button
+											>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						{#if payOpen}
+							<form
+								method="POST"
+								action="?/recordPayment"
+								use:enhance={closePaymentForm}
+								class="inv-pay-form"
+							>
+								<div class="inv-pay-row">
+									<label class="inv-field">
+										<span>Amount</span>
+										<div class="inv-amount">
+											<span class="inv-cur" aria-hidden="true">$</span>
+											<input
+												name="amount"
+												inputmode="decimal"
+												placeholder="0.00"
+												bind:value={payAmount}
+											/>
+										</div>
+									</label>
+									{#if invoice.balanceCents != null && invoice.balanceCents > 0}
+										<button type="button" class="inv-btn" onclick={fillOutstanding}>
+											Use balance ({formatCents(invoice.balanceCents)})
+										</button>
+									{/if}
+								</div>
+
+								<div class="inv-pay-row" role="radiogroup" aria-label="What this payment is">
+									{#each PAYMENT_KINDS as k (k)}
+										<label class="inv-chip" class:on={payKind === k}>
+											<input type="radio" name="kind" value={k} bind:group={payKind} />
+											{paymentKindLabel(k)}
+										</label>
+									{/each}
+								</div>
+
+								<div class="inv-pay-row" role="radiogroup" aria-label="How they paid">
+									{#each PAYMENT_METHODS as m (m)}
+										<label class="inv-chip" class:on={payVia === m}>
+											<input type="radio" name="method" value={m} bind:group={payVia} />
+											{paymentMethodLabel(m)}
+										</label>
+									{/each}
+								</div>
+
+								<div class="inv-pay-row">
+									<label class="inv-field">
+										<span>Received on</span>
+										<input type="date" name="receivedAt" bind:value={payDate} />
+									</label>
+									<label class="inv-field grow">
+										<span>Note (optional)</span>
+										<input name="note" placeholder="Check #1041" bind:value={payNote} />
+									</label>
+								</div>
+
+								<div class="inv-pay-actions">
+									<button type="button" class="inv-btn" onclick={() => (payOpen = false)}
+										>Cancel</button
+									>
+									<button type="submit" class="inv-btn primary">Record payment</button>
+								</div>
+							</form>
+						{:else}
+							<button type="button" class="inv-record" onclick={openPayment}>
+								<span aria-hidden="true">+</span> Record a payment
+							</button>
+						{/if}
+
+						{#if order.finalNotes}
+							<p class="inv-notes">{order.finalNotes}</p>
+						{/if}
+					</section>
+				</div>
+
+				<!-- ----------------------------------------------------------- People
+			     Who is on this job, and when. Crew and subcontractors in one list —
+			     it was two panels, which made "who is on this job" look like two
+			     questions. The chip on each row says which kind somebody is; the
+			     capability difference (tier, insurance, portal) lives on the
+			     subcontractor page, where it applies. -->
+				<div
+					class="pane pane-crew"
+					class:on={tab === 'crew'}
+					role="tabpanel"
+					id="panel-crew"
+					aria-labelledby="tab-crew"
+				>
+					<!-- The heading only. "Manage people →" used to sit here on every job,
+					     every time — a permanent link OFF the page, offered to a contractor
+					     who had come here to staff a job and could do that right below it.
+					     The one moment it is genuinely the answer is when the books are
+					     empty, and that is where it now lives. -->
+					<h2 style={sectionTitle}>On this job</h2>
+
+					{#if onSiteToday.length > 0}
+						<!-- The one fact this panel exists to answer at a glance. Only shown
+					     when somebody actually is on site — an empty "on site today" line
+					     on every job would train the eye straight past it. -->
+						<p class="crew-today">
+							<span aria-hidden="true">🦺</span>
+							On site today: {onSiteToday.map((p) => p.name).join(', ')}
+						</p>
+					{/if}
+
+					{#if form?.action === 'crew' && form?.message}
+						<p class="crew-error" role="alert">{form.message}</p>
+					{/if}
+
+					{#if data.assignedPeople.length === 0}
+						<div class="panel-empty">
+							<span class="empty-mark" aria-hidden="true">🦺</span>
+							<p class="editor-note">Nobody is on this job yet.</p>
+						</div>
+					{:else}
+						<ul class="crew-list">
+							{#each data.assignedPeople as p (personKey(p))}
+								{@const key = personKey(p)}
+								{@const onToday = coversDay({ startsOn: p.startsOn, endsOn: p.endsOn }, today)}
+								<li class="crew-item" class:here={onToday}>
+									<div class="crew-row">
+										{#if p.avatar}
+											<img class="crew-face" src={p.avatar} alt="" />
+										{:else}
+											<span class="crew-face placeholder" aria-hidden="true"
+												>{workerInitials(p.name)}</span
+											>
+										{/if}
+										<span class="crew-who">
+											<span class="crew-name">
+												{p.name}{#if p.archived}<span
+														class="crew-gone"
+														title="No longer on your books">· former</span
+													>{/if}
+											</span>
+											<!-- Role and company, then the dates. No crew/sub chip: whose
+											     company somebody is on is the fact that actually separates a
+											     hand from a hired firm, and it is right here — a second label
+											     saying the same thing in different words is noise. -->
+											<span class="crew-meta">
+												{[p.jobRole ?? p.role, p.company].filter(Boolean).join(' · ') ||
+													'On this job'} ·
+												{stintLabel({ startsOn: p.startsOn, endsOn: p.endsOn }, now)}
+											</span>
+										</span>
+										{#if onToday}<span class="crew-badge">Today</span>{/if}
+										<button
+											type="button"
+											class="crew-btn"
+											aria-expanded={crewEditKey === key}
+											onclick={() => {
+												crewEditKey = crewEditKey === key ? null : key;
+												crewConfirmRemoveKey = null;
+											}}>Dates</button
+										>
+									</div>
+
+									{#if p.jobNotes}
+										<p class="crew-note">{p.jobNotes}</p>
+									{/if}
+
+									{#if crewEditKey === key}
+										<form
+											method="POST"
+											action="?/assignPerson"
+											use:enhance={() =>
+												async ({ result, update }) => {
+													await update({ reset: false });
+													if (result.type === 'success') crewEditKey = null;
+												}}
+											class="crew-form"
+										>
+											<input type="hidden" name="personId" value={p.id} />
+											<input type="hidden" name="kind" value={p.kind} />
+											<label
+												>Start<input
+													class="field-input"
+													type="date"
+													name="startsOn"
+													value={p.startsOn ?? ''}
+												/></label
+											>
+											<label
+												>End<input
+													class="field-input"
+													type="date"
+													name="endsOn"
+													value={p.endsOn ?? ''}
+												/></label
+											>
+											<label class="crew-wide"
+												>On this job<input
+													class="field-input"
+													name="role"
+													value={p.jobRole ?? ''}
+													placeholder={p.role ?? 'Framer, helper, operator…'}
+												/></label
+											>
+											<label class="crew-wide"
+												>Note<input
+													class="field-input"
+													name="notes"
+													value={p.jobNotes ?? ''}
+													placeholder="Optional"
+												/></label
+											>
+											<div class="crew-actions crew-wide">
+												{#if crewConfirmRemoveKey === key}
+													<span class="crew-confirm">Take {p.name} off this job?</span>
+													<button
+														type="button"
+														class="crew-btn"
+														onclick={() => (crewConfirmRemoveKey = null)}>Keep</button
+													>
+												{:else}
+													<button
+														type="button"
+														class="crew-btn danger"
+														onclick={() => (crewConfirmRemoveKey = key)}>Remove</button
+													>
+												{/if}
+												<span class="crew-spacer"></span>
+												<button type="button" class="crew-btn" onclick={() => (crewEditKey = null)}
+													>Cancel</button
+												>
+												<button type="submit" class="crew-save">Save dates</button>
+											</div>
+										</form>
+										{#if crewConfirmRemoveKey === key}
+											<form
+												method="POST"
+												action="?/unassignPerson"
+												use:enhance={() =>
+													async ({ update }) => {
+														await update();
+														crewConfirmRemoveKey = null;
+														crewEditKey = null;
+													}}
+											>
+												<input type="hidden" name="personId" value={p.id} />
+												<input type="hidden" name="kind" value={p.kind} />
+												<button type="submit" class="crew-btn danger wide-btn"
+													>Yes, take {p.name} off</button
+												>
+											</form>
+										{/if}
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+
+					{#snippet newPerson()}
+						<!-- The field version of a person: a name, what they do, and a number
+						     to reach them on. Deliberately not the people page's form — at the
+						     moment somebody turns up on a Tuesday that IS everything you know
+						     about them, and asking for a company and an email before they can
+						     be put on the job is how a contractor ends up not recording them
+						     at all. The full record is there to fill in later. -->
+						<form
+							method="POST"
+							action="?/createAndAssignPerson"
+							use:enhance={() =>
+								async ({ result, update }) => {
+									await update();
+									if (result.type === 'success') {
+										crewCreating = false;
+										crewQuery = '';
+										crewNewName = '';
+									}
+								}}
+							class="crew-new"
+						>
+							<input type="hidden" name="startsOn" value={today} />
+							<label class="crew-wide"
+								>Name<input
+									class="field-input"
+									name="name"
+									required
+									autocomplete="off"
+									placeholder="Dave Ellis"
+									bind:value={crewNewName}
+								/></label
+							>
+							<label
+								>Does<input
+									class="field-input"
+									name="role"
+									autocomplete="off"
+									placeholder="Framer, helper, operator…"
+								/></label
+							>
+							<label
+								>Phone<input
+									class="field-input"
+									name="phone"
+									type="tel"
+									autocomplete="off"
+									placeholder="Optional"
+								/></label
+							>
+							<div class="crew-actions crew-wide">
+								<button
+									type="button"
+									class="crew-btn"
+									onclick={() => {
+										crewCreating = false;
+										if (rosterEmpty) crewAdding = false;
+									}}>{rosterEmpty ? 'Cancel' : 'Back to the list'}</button
+								>
+								<span class="crew-spacer"></span>
+								<button type="submit" class="crew-save">Add to this job</button>
+							</div>
+						</form>
+					{/snippet}
+
+					{#if crewAdding}
+						<div class="crew-add-box">
+							{#if rosterEmpty}
+								<!-- Nothing to search, so no search box: an empty field asking a
+								     contractor to look through nobody is furniture. This is the one
+								     state where the people page IS the answer, so it is the one
+								     state that links to it. -->
+								<p class="editor-note">Nobody on your books yet — add the first one here.</p>
+								{@render newPerson()}
+								<p class="editor-note">
+									Setting up a subcontractor, or bringing across a list you already have?
+									<a class="panel-link" href={resolve('/contractor/people')}>Manage people →</a>
+								</p>
+							{:else}
+								<div class="crew-search-row">
+									<span aria-hidden="true">🔍</span>
+									<input
+										class="crew-search"
+										type="search"
+										placeholder="Search crew and subs…"
+										aria-label="Search your people"
+										bind:value={crewQuery}
+									/>
+									<button
+										type="button"
+										class="crew-btn"
+										onclick={() => {
+											crewAdding = false;
+											crewCreating = false;
+											crewQuery = '';
+										}}>Done</button
+									>
+								</div>
+
+								{#if crewCreating}
+									{@render newPerson()}
+								{:else}
+									{#if crewMatches.length === 0}
+										<p class="editor-note">
+											{crewQuery.trim()
+												? `Nobody matches “${crewQuery.trim()}”.`
+												: 'Everyone on your books is already on this job.'}
+										</p>
+									{:else}
+										<ul class="crew-picker">
+											{#each crewMatches.slice(0, 8) as p (personKey(p))}
+												<li>
+													<!-- Dates default to today rather than empty: the common case is
+												     "put them on this job, starting now", and an empty pair means
+												     they never show up on an on-site list. Both stay editable. -->
+													<form
+														method="POST"
+														action="?/assignPerson"
+														use:enhance={() =>
+															async ({ result, update }) => {
+																await update();
+																if (result.type === 'success') crewQuery = '';
+															}}
+														class="crew-pick-row"
+													>
+														<input type="hidden" name="personId" value={p.id} />
+														<input type="hidden" name="kind" value={p.kind} />
+														<input type="hidden" name="startsOn" value={today} />
+														<span class="crew-face placeholder" aria-hidden="true"
+															>{workerInitials(p.name)}</span
+														>
+														<span class="crew-who">
+															<span class="crew-name">{p.name}</span>
+															<span class="crew-meta"
+																>{[p.role, p.company].filter(Boolean).join(' · ') ||
+																	'No role set'}</span
+															>
+														</span>
+														<button type="submit" class="crew-save">Add</button>
+													</form>
+												</li>
+											{/each}
+										</ul>
+										{#if crewMatches.length > 8}
+											<p class="editor-note">
+												+{crewMatches.length - 8} more — keep typing to narrow it down.
+											</p>
+										{/if}
+									{/if}
+
+									<!-- Search that can also create. Whatever has been typed rides
+									     into the name field, so "Dave" finding nobody is one press
+									     away from being Dave. -->
+									<button
+										type="button"
+										class="crew-new-open"
+										onclick={() => {
+											crewNewName = crewQuery.trim();
+											crewCreating = true;
+										}}
+									>
+										<span aria-hidden="true">＋</span>
+										{crewQuery.trim() ? `Add “${crewQuery.trim()}” as someone new` : 'Somebody new'}
+									</button>
+								{/if}
+							{/if}
+						</div>
+					{:else}
+						<button type="button" class="crew-add-open" onclick={() => (crewAdding = true)}>
+							<span aria-hidden="true">＋</span> Put someone on this job
+						</button>
+					{/if}
+				</div>
 			</div>
 
-			<div class="panel-body" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-				{#if tab === 'history'}
+			<!-- The conversation leads. It is the thing a contractor opens this page
+			     TO DO; the history is the record of what already happened, and it sat
+			     above the thread for no better reason than being written first. -->
+			<div class="col-main">
+				<div
+					class="pane pane-messages"
+					class:on={tab === 'messages'}
+					role="tabpanel"
+					id="panel-messages"
+					aria-labelledby="tab-messages"
+				>
+					<h2 style={sectionTitle}>Messages</h2>
+
+					{#if data.customerLinked}
+						<!-- The same component the customer sees this conversation through. Two
+						     ends of one Thread should not be able to drift apart, which is exactly
+						     what happened while each surface rendered its own. Only the palette
+						     differs — "mine" is the safety yellow here, teal in the portal. -->
+						<MessageThread
+							messages={data.thread}
+							mineRole="contractor"
+							otherName={data.order.customerName ?? 'your customer'}
+							empty="No messages yet — say the first thing."
+						/>
+
+						<MessageComposer
+							action="?/replyToCustomer"
+							placeholder="Reply to {data.order.customerName}…"
+						/>
+						{#if form?.action === 'replyToCustomer' && form?.message}
+							<p class="msg-note">{form.message}</p>
+						{/if}
+					{:else}
+						<!-- No portal, so there is no conversation to show and nothing a reply
+						     could land in. This used to be an empty thread box, a disabled
+						     composer AND a sentence explaining the disabled composer — three
+						     pieces of furniture around one absent thing. It is now the single
+						     action that changes the situation. -->
+						<div class="panel-empty">
+							<span class="empty-mark" aria-hidden="true">✉</span>
+							<p class="msg-invite-lede">
+								{data.order.customerName ?? 'This customer'} isn’t on their portal yet. Invite them and
+								your conversation starts here.
+							</p>
+							{#if order.customerId}
+								<form method="POST" action="?/sendInvite" use:enhance={inviteEnhance}>
+									<input type="hidden" name="customerId" value={order.customerId} />
+									{#if openInviteId}
+										<input type="hidden" name="inviteId" value={openInviteId} />
+									{/if}
+									<button type="submit" class="msg-invite-send" disabled={inviting}>
+										{inviting
+											? 'Sending…'
+											: data.portal.state === 'none'
+												? 'Send invite'
+												: 'Resend invite'}
+									</button>
+								</form>
+								{#if data.portal.state === 'pending'}
+									<span class="msg-invite-status">
+										Invite sent · expires {fmtDate(data.portal.expiresAt ?? null)}
+									</span>
+								{:else if data.portal.state === 'expired'}
+									<span class="msg-invite-status">The last invite expired.</span>
+								{/if}
+							{/if}
+							{#if form?.action === 'invite' && form?.message}
+								<span class="msg-invite-status">{form.message}</span>
+							{/if}
+						</div>
+					{/if}
+				</div>
+
+				<div
+					class="pane pane-history"
+					class:on={tab === 'history'}
+					role="tabpanel"
+					id="panel-history"
+					aria-labelledby="tab-history"
+				>
+					<!-- ------------------------------------------------------ Waiting on them
+			     What this job needs from the CUSTOMER before it can go on.
+
+			     The gap this closes: every "waiting on you" the portal could show was
+			     derived from the order's State, and only two of the ten States meant
+			     it — Deposit Pending and Final Payment Pending. So money was the only
+			     thing this product could ask a customer for. A colour to pick, a
+			     permit to sign, a gate code, being home Thursday — all of it went
+			     into a Message, where it read as chat and scrolled away while the
+			     portal reported "In progress" on a job that had not moved in a week.
+
+			     THIS IS NOT A TAB ANY MORE. It was the first of four, wearing a
+			     count, and it was on every job whether or not anything was waiting —
+			     so most of the time it was a permanent label advertising an empty
+			     list, with a whole panel behind it whose only job was to say no.
+
+			     It sits above the history instead, where it reads as what it is: the
+			     part of this job's story that has not happened yet, on top of the
+			     part that has. When nothing is waiting it collapses to the one
+			     control that still has to be reachable — the ask itself. -->
+					<div class="asks">
+						{#if form?.action === 'task' && form?.message}
+							<p class="crew-error" role="alert">{form.message}</p>
+						{/if}
+
+						<!-- The blurb, and deliberately the customer's OWN words for it: one
+					     function writes this line and the one in the portal, so a
+					     contractor making a claim about whose turn it is sees the claim
+					     exactly as it lands. Amber, the app's tone for waiting on
+					     somebody — not danger, which would make an unanswered question
+					     look like a fault. See docs/adr/0009.
+
+					     `customerSees.waiting` covers money as well as asks, so a job
+					     held up by a deposit says so here even with an empty list. -->
+						{#if customerSees.waiting}
+							<p class="ask-banner">
+								<!-- "They see", kept from the panel this replaced. The sentence is
+								     addressed to the CUSTOMER — "this one's with you" — so on this
+								     screen it has to say whose "you" that is, or the blurb is a
+								     pronoun pointing at the wrong person. -->
+								<span class="ask-banner-tag">They see</span>
+								<span>{customerSees.headline}</span>
+							</p>
+						{/if}
+
+						{#if openTaskList.length > 0}
+							<ul class="ask-list">
+								{#each openTaskList as task (task.id)}
+									{@const urgency = taskUrgency(task.dueOn, today)}
+									<li class="ask-item" class:late={urgency === 'overdue'}>
+										<div class="ask-row">
+											<span class="ask-text">
+												<span class="ask-title">{task.title}</span>
+												{#if task.detail}<span class="ask-detail">{task.detail}</span>{/if}
+												<span class="ask-meta">
+													{#if task.blocking}<span class="ask-chip hold">Holding up the job</span
+														>{/if}
+													{#if task.dueOn}<span class="ask-chip" class:late={urgency !== 'upcoming'}
+															>{taskDueLabel(task.dueOn, today)}</span
+														>{/if}
+												</span>
+											</span>
+
+											<!-- Done, from this side, because cash changes hands on site and a
+										     permit is handed over in person. The history records WHICH side
+										     ticked it, so the two are never confused. -->
+											<form method="POST" action="?/completeTask" use:enhance>
+												<input type="hidden" name="taskId" value={task.id} />
+												<button type="submit" class="crew-save">Done</button>
+											</form>
+											<button
+												type="button"
+												class="crew-btn"
+												aria-expanded={taskEditId === task.id}
+												onclick={() => {
+													taskEditId = taskEditId === task.id ? null : task.id;
+													taskConfirmDeleteId = null;
+												}}>Edit</button
+											>
+										</div>
+
+										{#if taskEditId === task.id}
+											<form
+												method="POST"
+												action="?/editTask"
+												use:enhance={() =>
+													async ({ result, update }) => {
+														await update({ reset: false });
+														if (result.type === 'success') taskEditId = null;
+													}}
+												class="ask-form"
+											>
+												<input type="hidden" name="taskId" value={task.id} />
+												{@render askFields(task.title, task.detail, task.dueOn, task.blocking)}
+												<div class="crew-actions crew-wide">
+													{#if taskConfirmDeleteId === task.id}
+														<span class="crew-confirm">Take this ask back?</span>
+														<button
+															type="button"
+															class="crew-btn"
+															onclick={() => (taskConfirmDeleteId = null)}>Keep</button
+														>
+													{:else}
+														<button
+															type="button"
+															class="crew-btn danger"
+															onclick={() => (taskConfirmDeleteId = task.id)}>Remove</button
+														>
+													{/if}
+													<span class="crew-spacer"></span>
+													<button type="button" class="crew-btn" onclick={() => (taskEditId = null)}
+														>Cancel</button
+													>
+													<button type="submit" class="crew-save">Save</button>
+												</div>
+											</form>
+											{#if taskConfirmDeleteId === task.id}
+												<form
+													method="POST"
+													action="?/deleteTask"
+													use:enhance={() =>
+														async ({ update }) => {
+															await update();
+															taskConfirmDeleteId = null;
+															taskEditId = null;
+														}}
+												>
+													<input type="hidden" name="taskId" value={task.id} />
+													<button type="submit" class="crew-btn danger wide-btn"
+														>Yes, take it back</button
+													>
+												</form>
+											{/if}
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						{#if taskAdding}
+							<form
+								method="POST"
+								action="?/addTask"
+								use:enhance={() =>
+									async ({ result, update }) => {
+										await update();
+										if (result.type === 'success') taskAdding = false;
+									}}
+								class="ask-form"
+							>
+								{@render askFields('', '', null, false)}
+								<div class="crew-actions crew-wide">
+									<button type="button" class="crew-btn" onclick={() => (taskAdding = false)}
+										>Cancel</button
+									>
+									<span class="crew-spacer"></span>
+									<button type="submit" class="crew-save">Ask them</button>
+								</div>
+							</form>
+						{:else}
+							<button type="button" class="crew-add-open" onclick={() => (taskAdding = true)}>
+								<span aria-hidden="true">＋</span> Ask the customer for something
+							</button>
+						{/if}
+
+						{#if doneTaskList.length > 0}
+							<details class="ask-done">
+								<summary>Done <span class="ask-done-count">{doneTaskList.length}</span></summary>
+								<ul class="ask-list done">
+									{#each doneTaskList as task (task.id)}
+										<li class="ask-item">
+											<div class="ask-row">
+												<span class="ask-text">
+													<span class="ask-title">{task.title}</span>
+													<span class="ask-meta">
+														<!-- WHO ticked it, because "they did it" and "I recorded it
+													     for them" are different facts and only one of them is
+													     the customer saying so. -->
+														<span class="ask-chip"
+															>{task.completedBy === 'customer'
+																? 'They marked it done'
+																: 'You marked it done'}</span
+														>
+													</span>
+												</span>
+												<form method="POST" action="?/reopenTask" use:enhance>
+													<input type="hidden" name="taskId" value={task.id} />
+													<button type="submit" class="crew-btn">Reopen</button>
+												</form>
+											</div>
+										</li>
+									{/each}
+								</ul>
+							</details>
+						{/if}
+					</div>
+
 					<div
 						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
 					>
 						<h2 style={sectionTitle}>History</h2>
+						<!-- Says what it does. A bare 📝 square asked you to guess whether it
+						     meant "add a note", "edit the history" or "notes about this order",
+						     and the answer was only ever found by pressing it. -->
 						<button
 							type="button"
-							class="icon-btn"
+							class="note-btn"
 							class:on={noteOpen}
-							style="width: 2.1rem; height: 2.1rem; font-size: 1.05rem;"
-							title="Add note"
-							aria-label="Add note"
 							aria-expanded={noteOpen}
-							onclick={() => (noteOpen = !noteOpen)}>📝</button
+							onclick={() => (noteOpen = !noteOpen)}
 						>
+							<span class="note-btn-sign" aria-hidden="true">+</span>
+							Add note
+						</button>
 					</div>
 					{#if noteOpen}
 						<form
@@ -964,172 +2319,7 @@
 							{/each}
 						</ol>
 					{/if}
-				{:else if tab === 'workers'}
-					<!-- The commit control lives up here: while changes are staged, the
-					     roster link hands its corner to a compact save + discard pair, so
-					     confirming is one glance up instead of a banner under the list. -->
-					<div
-						style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
-					>
-						<h2 style={sectionTitle}>Workers</h2>
-						{#if stagedCount > 0}
-							<div class="subs-commit">
-								<button type="button" class="sub-discard" onclick={() => (stagedSubs = {})}
-									>Discard</button
-								>
-								<form
-									method="POST"
-									action="?/saveSubs"
-									use:enhance={() =>
-										async ({ result, update }) => {
-											await update();
-											if (result.type === 'success') {
-												stagedSubs = {};
-												subQuery = '';
-											}
-										}}
-								>
-									<input type="hidden" name="assign" value={stagedAssign.join(',')} />
-									<input type="hidden" name="unassign" value={stagedUnassign.join(',')} />
-									<button type="submit" class="subs-save">
-										<span aria-hidden="true">✓</span> Save {stagedCount}
-									</button>
-								</form>
-							</div>
-						{:else if hasRoster}
-							<!-- Only once there is a roster to manage: with nobody on the books
-							     the empty state below already offers the one useful next step,
-							     and two links to the same page is one too many. -->
-							<a class="panel-link" href={resolve('/contractor/subcontractors')}>Manage roster →</a>
-						{/if}
-					</div>
-
-					{#if !hasRoster}
-						<!-- Nothing to explain here: an empty roster has exactly one useful
-						     next step, so it's a button rather than a sentence about one. -->
-						<div class="panel-empty">
-							<span class="empty-mark" aria-hidden="true">👷</span>
-							<p class="editor-note">No subcontractors found</p>
-							<a class="subs-empty-cta" href={resolve('/contractor/subcontractors')}
-								>Add subcontractors</a
-							>
-						</div>
-					{:else}
-						<!-- The crew on this job (including staged adds), then a search box to
-						     pull more people in. The roster is never dumped wholesale — with a
-						     few dozen subs the old flat list buried the three assigned people
-						     under everyone else. -->
-						{#if data.assignedSubs.length === 0 && stagedAddSubs.length === 0}
-							<p class="editor-note">No one is on this job yet — search your roster below.</p>
-						{:else}
-							<p class="editor-note">
-								Tap a row to stage a change; nothing applies until you save.
-							</p>
-							<div class="sub-list">
-								{#each data.assignedSubs as sub (sub.id)}
-									{@render crewRow(sub, true)}
-								{/each}
-								{#each stagedAddSubs as sub (sub.id)}
-									{@render crewRow(sub, false)}
-								{/each}
-							</div>
-						{/if}
-
-						{#if data.availableSubs.length > 0}
-							<div class="crew-add">
-								<span class="crew-add-icon" aria-hidden="true">🔍</span>
-								<input
-									class="crew-search"
-									type="search"
-									placeholder="Add crew — search name or trade…"
-									aria-label="Search your roster to add crew"
-									bind:value={subQuery}
-								/>
-							</div>
-							{#if subQuery.trim()}
-								{#if subMatches.length === 0}
-									<p class="crew-none">No one in your roster matches “{subQuery.trim()}”.</p>
-								{:else}
-									<div class="sub-list">
-										{#each subMatches.slice(0, SUB_RESULT_LIMIT) as sub (sub.id)}
-											{@render crewRow(sub, false)}
-										{/each}
-									</div>
-									{#if subMatches.length > SUB_RESULT_LIMIT}
-										<p class="crew-none">
-											+{subMatches.length - SUB_RESULT_LIMIT} more — keep typing to narrow it down.
-										</p>
-									{/if}
-								{/if}
-							{/if}
-						{/if}
-					{/if}
-				{:else if tab === 'messages'}
-					<h2 style={sectionTitle}>Messages</h2>
-
-					{#if data.customerLinked}
-						<p class="msg-lede">
-							Your conversation with {data.order.customerName}. They see this in their portal.
-						</p>
-
-						<!-- The same component the customer sees this conversation through. Two
-						     ends of one Thread should not be able to drift apart, which is exactly
-						     what happened while each surface rendered its own. Only the palette
-						     differs — "mine" is the safety yellow here, teal in the portal. -->
-						<MessageThread
-							messages={data.thread}
-							mineRole="contractor"
-							otherName={data.order.customerName ?? 'your customer'}
-							empty="No messages yet — say the first thing."
-						/>
-
-						<MessageComposer
-							action="?/replyToCustomer"
-							placeholder="Reply to {data.order.customerName}…"
-						/>
-						{#if form?.action === 'replyToCustomer' && form?.message}
-							<p class="msg-note">{form.message}</p>
-						{/if}
-					{:else}
-						<!-- No portal, so there is no conversation to show and nothing a reply
-						     could land in. This used to be an empty thread box, a disabled
-						     composer AND a sentence explaining the disabled composer — three
-						     pieces of furniture around one absent thing. It is now the single
-						     action that changes the situation. -->
-						<div class="panel-empty">
-							<span class="empty-mark" aria-hidden="true">✉</span>
-							<p class="msg-invite-lede">
-								{data.order.customerName ?? 'This customer'} isn’t on their portal yet. Invite them and
-								your conversation starts here.
-							</p>
-							{#if order.customerId}
-								<form method="POST" action="?/sendInvite" use:enhance={inviteEnhance}>
-									<input type="hidden" name="customerId" value={order.customerId} />
-									{#if openInviteId}
-										<input type="hidden" name="inviteId" value={openInviteId} />
-									{/if}
-									<button type="submit" class="msg-invite-send" disabled={inviting}>
-										{inviting
-											? 'Sending…'
-											: data.portal.state === 'none'
-												? 'Send invite'
-												: 'Resend invite'}
-									</button>
-								</form>
-								{#if data.portal.state === 'pending'}
-									<span class="msg-invite-status">
-										Invite sent · expires {fmtDate(data.portal.expiresAt ?? null)}
-									</span>
-								{:else if data.portal.state === 'expired'}
-									<span class="msg-invite-status">The last invite expired.</span>
-								{/if}
-							{/if}
-							{#if form?.action === 'invite' && form?.message}
-								<span class="msg-invite-status">{form.message}</span>
-							{/if}
-						</div>
-					{/if}
-				{/if}
+				</div>
 			</div>
 		</div>
 
@@ -1139,27 +2329,35 @@
 			<div class="closeout-summary" class:done={order.state === 'Work Complete'}>
 				{#if order.state === 'Work Complete'}
 					<span class="cs-badge done">✓ Completed</span>
+					<!-- Read from the invoice, not from the order's old `paid_at` stamp:
+					     a job settled by a deposit plus a balance was never "paid" in
+					     one moment, and the sum is the only thing that can say whether
+					     it is square. Details live on the Invoice card above; this is
+					     the one-line verdict. -->
 					<dl class="cs-facts">
-						{#if order.finalAmountCents != null}
+						{#if invoice.totalCents != null}
 							<div>
 								<dt>Final invoice</dt>
-								<dd>{formatCents(order.finalAmountCents)}</dd>
+								<dd>{formatCents(invoice.totalCents)}</dd>
 							</div>
 						{/if}
 						<div>
 							<dt>Payment</dt>
 							<dd>
-								{#if order.paidAt}
-									Received{order.paymentMethod
-										? ` · ${paymentMethodLabel(order.paymentMethod)}`
-										: ''}
+								{#if invoice.status === 'settled'}
+									Paid in full
+								{:else if invoice.status === 'overpaid'}
+									Overpaid by {formatCents(-(invoice.balanceCents ?? 0))}
+								{:else if invoice.status === 'open'}
+									{formatCents(invoice.balanceCents)} outstanding
+								{:else if invoice.paidCents !== 0}
+									{formatCents(invoice.paidCents)} received
 								{:else}
 									<span class="cs-muted">Not recorded as paid</span>
 								{/if}
 							</dd>
 						</div>
 					</dl>
-					{#if order.finalNotes}<p class="cs-notes">{order.finalNotes}</p>{/if}
 				{:else}
 					<span class="cs-badge stop">Cancelled</span>
 				{/if}
@@ -1305,9 +2503,22 @@
 							>{order.finalNotes ?? ''}</textarea
 						>
 					</label>
+					<!-- Says the amount, because this checkbox no longer means "the whole
+					     total arrived" — it records whatever is still OUTSTANDING as a
+					     final payment, so on a job with a deposit it is the balance and
+					     not the total. A contractor ticking it should be able to read
+					     the figure they were handed. -->
 					<label class="co-check">
 						<input type="checkbox" name="markPaid" bind:checked={markPaid} />
-						<span>Mark final payment received</span>
+						<span>
+							{#if invoice.balanceCents != null && invoice.balanceCents > 0}
+								Mark the remaining {formatCents(invoice.balanceCents)} received
+							{:else if invoice.status === 'settled'}
+								Already paid in full
+							{:else}
+								Mark final payment received
+							{/if}
+						</span>
 					</label>
 					{#if markPaid}
 						<div class="co-methods" role="radiogroup" aria-label="Payment method">
@@ -1323,6 +2534,12 @@
 						<input type="checkbox" name="sendInvoice" />
 						<span>Email the final invoice to {order.customerName}</span>
 					</label>
+					<a
+						class="co-preview"
+						href={resolve(`/contractor/orders/${order.id}/invoice`)}
+						target="_blank"
+						rel="noopener">See exactly what they'll get <span aria-hidden="true">↗</span></a
+					>
 					<div class="co-actions">
 						<button type="button" class="co-cancel" onclick={() => (statusModal = 'status')}
 							>Back</button
@@ -1361,6 +2578,19 @@
 {/if}
 
 <style>
+	/* ------------------------------------------------------------------ Type
+	   One weight scale for this page, because it did not have one: 58 of the
+	   declarations below were 700 or 800, which is the same as having none — when
+	   everything is bold nothing reads as emphasis and the page reads as noise.
+
+	     400  body copy, labels, values, dates, metadata — most of the page
+	     500  things you can click, and a value that needs a nudge over its label
+	     600  names, badges, section eyebrows, primary buttons
+	     700  the ONE thing per card that is the point: the order's title, its
+	          current state, the invoice total and the balance. Four places.
+
+	   Nothing on this page is 800. If something needs to shout, it gets size or
+	   colour — another weight step is not available. */
 	/* Page canvas. In light this is the familiar sunken grey; in dark it has to be
 	   *darker* than the cards sitting on it (the old #f6f8fa literal got remapped
 	   to a raised grey, so cards read as holes punched into the page). */
@@ -1368,13 +2598,18 @@
 		background: var(--surface-sunken);
 		min-height: 100%;
 	}
+	/* Gutters, gap and the growth curve come from `.page-shell` (app.css).
+	   
+	   The 1180px cap this used to carry is GONE. Its reasoning — "this page is a
+	   document, and a line of prose 1300px long is harder to read, not easier" —
+	   was correct about one column and stopped applying the moment there were two:
+	   no single column below ever gets near that width, so capping the page just
+	   left empty gutters on a large monitor. Mobile is untouched either way; the
+	   column only grows where there is room for it. */
 	.page {
-		max-width: 1040px;
-		margin: 0 auto;
-		padding: 1.25rem 1rem 2.5rem;
 		display: grid;
-		gap: 1rem;
 	}
+
 	/* Header. The title row is always two columns — project + customer on the left,
 	   status across from them on the right — because the status is *about* the title
 	   and reads as a caption to it. The prompts and follow-up sit full width below,
@@ -1393,8 +2628,8 @@
 		grid-template-columns: minmax(0, 1fr);
 		gap: 0.9rem;
 	}
-	/* The header sits on the page's sunken canvas — and so did the inline editors it
-	   opens (customer, files, tags), a sunken panel on a sunken page, which is why an
+	/* The header sits on the page's sunken canvas — and so did the inline editor it
+	   opens (files), a sunken panel on a sunken page, which is why an
 	   expanded card barely showed. Raise them onto the card surface with a soft shadow
 	   so opening one clearly lifts a panel out of the header. Scoped to this header so
 	   inline editors elsewhere (which sit on lighter backgrounds) are untouched. */
@@ -1413,14 +2648,14 @@
 	.back-link {
 		flex: none;
 		font-size: 0.9rem;
-		font-weight: 600;
+		font-weight: 500;
 		color: var(--fg-muted);
 		text-decoration: none;
 	}
 	.back-link:hover {
 		color: var(--fg);
 	}
-	/* Title and customer line only. The editors and the tags row are siblings of
+	/* Title and customer line only. The editors and the facts row are siblings of
 	   .head-top, not children of this column — inside it they were boxed into
 	   whatever width the status badge left over, which on a phone is not much. */
 	.head-main {
@@ -1430,15 +2665,9 @@
 		min-width: 0;
 	}
 
-	/* Toggle icon button in its open state — filled accent so the "hide" (✕)
-	   state is clearly on. */
-	.icon-btn.on {
-		background: #ece7fb;
-		color: #4b2fa8;
-	}
-	.icon-btn.on:hover {
-		background: #e2daf7;
-	}
+	/* The open state is `.icon-btn.on` in app.css — brand-driven and correct in
+	   both themes. The literal lilac wash that used to live here predated that and
+	   clashed with every palette but the one it was drawn against. */
 	/* The document rows themselves live in DocumentList. What stays here is only
 	   what the contractor has and the other surfaces do not. */
 	.add-file {
@@ -1451,7 +2680,7 @@
 		background: var(--surface);
 		color: var(--fg);
 		cursor: pointer;
-		font-weight: 600;
+		font-weight: 500;
 		font-size: 0.85rem;
 		white-space: nowrap;
 	}
@@ -1492,7 +2721,7 @@
 		color: var(--fg);
 		font-family: inherit;
 		font-size: 0.75rem;
-		font-weight: 700;
+		font-weight: 500;
 		cursor: pointer;
 		white-space: nowrap;
 	}
@@ -1501,16 +2730,16 @@
 		color: var(--danger);
 	}
 	.doc-btn.primary {
-		background: var(--yellow);
-		border-color: var(--yellow-deep);
-		color: var(--on-yellow);
+		background: var(--brand);
+		border-color: var(--brand-deep);
+		color: var(--on-brand);
 	}
 	/* New since the contractor last opened this order's files. */
 	.new-badge {
 		display: inline-block;
 		margin: 0.2rem 0 0 0.3rem;
 		font-size: 0.66rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		padding: 0.1rem 0.4rem;
@@ -1554,13 +2783,13 @@
 		display: inline-block;
 		margin-top: 0.2rem;
 		font-size: 0.66rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		padding: 0.1rem 0.4rem;
 		border-radius: 999px;
-		background: color-mix(in srgb, var(--yellow) 30%, transparent);
-		border: 1px solid var(--yellow-deep);
+		background: color-mix(in srgb, var(--brand) 30%, transparent);
+		border: 1px solid var(--brand-deep);
 		color: var(--fg);
 	}
 	.from-badge.sub {
@@ -1573,11 +2802,6 @@
 	   The conversation with the customer, styled as a thread rather than a rail so
 	   it reads as speech and not as job history. Mirrors the customer portal's own
 	   bubbles, with the sides swapped: "mine" is the contractor here. */
-	.msg-lede {
-		margin: -0.2rem 0 0;
-		color: var(--fg-muted);
-		font-size: 0.85rem;
-	}
 	/* The thread itself is MessageThread's; what stays here is its palette, the
 	   lede, the reply composer and the note under it.
 
@@ -1585,7 +2809,7 @@
 	   inline on the component, because it needs a dark-mode variant and inline
 	   style props cannot carry one.
 
-	   What it fixes: "mine" used to be a solid `--yellow` fill with `--ink` text.
+	   What it fixes: "mine" used to be a solid `--brand` fill with `--ink` text.
 	   `--ink` FLIPS to near-white in dark mode (app.css), so the bubbles came out
 	   white-on-light-yellow and unreadable — and even in light mode a saturated
 	   #ffcc00 slab is a lot of shouting for something you wrote yourself. It is
@@ -1609,15 +2833,15 @@
 		padding: 0.5rem 1.2rem;
 		border: none;
 		border-radius: 999px;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-family: inherit;
 		font-size: 0.88rem;
-		font-weight: 800;
+		font-weight: 600;
 		cursor: pointer;
 	}
 	.msg-invite-send:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.msg-invite-send:disabled {
 		opacity: 0.6;
@@ -1637,6 +2861,55 @@
 		flex-wrap: wrap;
 		gap: 0.4rem;
 	}
+
+	/* "+ Note", across from the History heading. Shares the timeline toggles'
+	   geometry so the pane's three controls read as one family, but carries the
+	   border weight of a real action rather than a quiet toggle. */
+	.note-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		flex-shrink: 0;
+		padding: 0.3rem 0.75rem;
+		border: 1px solid var(--line-strong);
+		border-radius: var(--radius-pill);
+		background: var(--surface);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.78rem;
+		font-weight: 600;
+		white-space: nowrap;
+		cursor: pointer;
+		transition:
+			background 0.14s ease,
+			border-color 0.14s ease,
+			color 0.14s ease;
+	}
+	/* The sign leads at a larger size than the word — it is the part that is read
+	   at a glance, and at label size a "+" all but disappears. */
+	.note-btn-sign {
+		font-size: 1rem;
+		line-height: 1;
+		font-weight: 700;
+	}
+	.note-btn:hover {
+		border-color: var(--brand);
+		background: var(--surface-sunken);
+	}
+	/* Open: the fill says the form below is this button's doing. The "+" does NOT
+	   flip to "−" — the visible words are the accessible name (WCAG 2.5.3), so the
+	   label has to hold still, and "− Add note" would read as nonsense next to it.
+	   `aria-expanded` carries the state for anyone not seeing the fill. */
+	.note-btn.on,
+	.note-btn.on:hover {
+		background: color-mix(in srgb, var(--brand) 14%, var(--surface));
+		border-color: var(--brand);
+		color: var(--brand);
+	}
+	.note-btn:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
+	}
 	.tl-toggle {
 		padding: 0.25rem 0.7rem;
 		border: 1px solid var(--line-strong);
@@ -1645,7 +2918,7 @@
 		color: var(--fg-muted);
 		font-family: inherit;
 		font-size: 0.75rem;
-		font-weight: 700;
+		font-weight: 500;
 		text-transform: none;
 		letter-spacing: normal;
 		cursor: pointer;
@@ -1672,21 +2945,26 @@
 		gap: 0.5rem;
 		border-left: 2px solid var(--line);
 	}
+	/* Flattened. Every entry used to be its own bordered, filled, rounded box —
+	   twelve of them stacked read as twelve cards inside a card, and the history
+	   ended up the tallest thing on the page while saying the least. It is a
+	   reference list: hairlines between entries, no chrome, and the signals that
+	   actually mean something (internal, latest) carry their own marks below. */
 	.tl-entry {
 		position: relative;
-		padding: 0.65rem 0.75rem;
-		border-radius: 10px;
-		background: var(--surface-sunken);
-		border: 1px solid var(--line);
+		padding: 0.4rem 0.1rem 0.45rem;
 		display: grid;
-		gap: 0.2rem;
+		gap: 0.1rem;
+	}
+	.tl-entry + .tl-entry {
+		border-top: 1px solid var(--line);
 	}
 	/* The dot on the rail, aligned with the entry's title line. */
 	.tl-entry::before {
 		content: '';
 		position: absolute;
 		left: -1.24rem;
-		top: 0.95rem;
+		top: 0.72rem;
 		width: 0.5rem;
 		height: 0.5rem;
 		border-radius: 999px;
@@ -1695,9 +2973,14 @@
 		border: 2px solid var(--surface);
 		box-sizing: content-box;
 	}
+	/* An internal note is the one distinction worth a fill: it is the entry the
+	   customer will never see, and mistaking it for one they can is the expensive
+	   error. Kept as a tint plus its own dot rather than the full box. */
 	.tl-entry.internal {
 		background: #fffdf5;
-		border-color: #f0e6c0;
+		border-radius: 8px;
+		padding-left: 0.5rem;
+		box-shadow: inset 2px 0 0 #d4a72c;
 	}
 	.tl-entry.internal::before {
 		background: #d4a72c;
@@ -1705,17 +2988,19 @@
 	/* The most recent entry, lifted just enough to catch the eye first: an accent
 	   left edge, a hair more contrast than the entries below it, and a soft shadow.
 	   After .internal so it wins the shared dot when the newest entry is also a note. */
-	.tl-entry.latest {
-		background: var(--surface);
-		border-color: var(--yellow-deep);
-		border-left-width: 3px;
-		box-shadow: var(--pop-shadow-sm);
+	/* The newest entry needs no box: it is already first, and it already wears the
+	   "Latest" pill. Weighting the title is enough. */
+	.tl-entry.latest .tl-title {
+		font-weight: 600;
 	}
 	.tl-entry.latest::before {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
+		/* Same as above: an empty dot, coloured only to satisfy the brand-fill
+		   guard. This one has been tripping it since before the invoice work. */
+		color: var(--on-brand);
 	}
 	.tl-title {
-		font-size: 0.92rem;
+		font-size: 0.88rem;
 		color: var(--fg);
 	}
 	.tl-head {
@@ -1737,31 +3022,33 @@
 	.tl-latest {
 		flex-shrink: 0;
 		font-size: 0.62rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: var(--on-yellow);
-		background: var(--yellow);
-		border: 1px solid var(--yellow-deep);
+		color: var(--on-brand);
+		background: var(--brand);
+		border: 1px solid var(--brand-deep);
 		border-radius: 999px;
 		padding: 0.05rem 0.45rem;
 	}
 	.tl-tag {
 		flex-shrink: 0;
 		font-size: 0.68rem;
-		font-weight: 700;
+		font-weight: 500;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: #9a6700;
 	}
 	.tl-detail {
-		font-size: 0.9rem;
+		font-size: 0.86rem;
+		line-height: 1.4;
 		color: var(--fg-muted);
 		white-space: pre-wrap;
 	}
 	.tl-meta {
-		font-size: 0.75rem;
+		font-size: 0.72rem;
 		color: var(--fg-muted);
+		opacity: 0.85;
 	}
 
 	/* The page's filled submit — add-note and save-status. Was an inline blue fill
@@ -1773,16 +3060,16 @@
 		border-radius: 999px;
 		border: none;
 		/* Pinned dark: yellow stays light in both themes. */
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-family: inherit;
 		font-size: 0.9rem;
-		font-weight: 700;
+		font-weight: 600;
 		cursor: pointer;
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.primary-btn:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 
 	/* The status-view Save stays inert until a different stage is picked; greyed out
@@ -1809,15 +3096,15 @@
 		background: var(--surface);
 		cursor: pointer;
 		font-size: 0.95rem;
-		font-weight: 600;
+		font-weight: 400;
 		color: var(--fg);
 	}
 	.st-option:hover {
 		border-color: var(--fg-muted);
 	}
 	.st-option.on {
-		border-color: var(--yellow-deep);
-		background: color-mix(in srgb, var(--yellow) 16%, var(--surface));
+		border-color: var(--brand-deep);
+		background: color-mix(in srgb, var(--brand) 16%, var(--surface));
 	}
 	.st-option input {
 		position: absolute;
@@ -1832,7 +3119,7 @@
 	.st-current {
 		flex: none;
 		font-size: 0.68rem;
-		font-weight: 800;
+		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--fg-muted);
@@ -1856,8 +3143,8 @@
 	}
 	.st-input:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
 	/* Small and quiet: the note is an occasional extra on a status change, so its
@@ -1875,7 +3162,7 @@
 	.co-check.st-note-check input {
 		width: 0.95rem;
 		height: 0.95rem;
-		accent-color: var(--yellow-deep);
+		accent-color: var(--brand-deep);
 	}
 	.co-check.st-note-check:hover {
 		color: var(--fg);
@@ -1898,7 +3185,7 @@
 	}
 	.st-closeout-label {
 		font-size: 0.72rem;
-		font-weight: 700;
+		font-weight: 400;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		color: var(--fg-muted);
@@ -1915,36 +3202,111 @@
 	   The customer carries the line, so it takes the full text colour and the
 	   location trails it in muted — the whole line used to sit at one muted weight,
 	   which gave the eye nothing to land on. */
-	.order-sub {
+	/* ------------------------------------------------------- Who it is for
+	   The People directory's row, on this page. Same photo-or-initial, same name,
+	   same 💬 in the same seat — a person should not be drawn three different ways
+	   in one product. */
+	/* A card of its own rather than two lines of text under the title.
+
+	   It had no box at all and sat on the page's own ground, which on a phone put
+	   an avatar a quarter of a rem from the screen edge — the gutter is 0.6rem
+	   there and the row was pulled left of it to line its picture up with the
+	   title. Flush against the glass, it read as something that had slipped rather
+	   than something that had been placed. Its own surface gives it room on the
+	   inside and keeps it honestly within the page's margin on the outside. */
+	.head-customer {
 		display: flex;
 		align-items: center;
-		flex-wrap: wrap;
-		gap: 0.3rem;
-		font-size: 0.95rem;
-		font-weight: 500;
-		line-height: 1.5;
+		gap: 0.6rem;
+		min-width: 0;
+		padding: 0.55rem 0.65rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-card);
+		background: var(--surface);
+		box-shadow: var(--card-shadow);
+	}
+	/* The identity half. Not a link and not a button: every other press on this
+	   page does something to the job, and "who is this for" is a fact you read. */
+	.cust-identity {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+	}
+	.cust-avatar {
+		flex: none;
+		width: 2rem;
+		height: 2rem;
+		border-radius: var(--radius-round);
+		object-fit: cover;
+		background: var(--surface-sunken);
+	}
+	.cust-avatar.fallback {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: 1px solid var(--line-strong);
+		font-size: 0.9rem;
+		font-weight: 800;
 		color: var(--fg-muted);
-		overflow-wrap: anywhere;
 	}
-	.sub-customer {
-		font-weight: 700;
+	.cust-who {
+		min-width: 0;
+		display: grid;
+		gap: 0.05rem;
+	}
+	.cust-name {
+		font-size: 0.95rem;
+		font-weight: 600;
 		color: var(--fg);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
-	.sub-sep {
-		opacity: 0.55;
+	.cust-name.orphan {
+		color: var(--fg-muted);
 	}
-	/* What's on the job, listed under the customer line. Labelled rather than a bare
-	   run of chips so tags and subcontractors don't read as one undifferentiated
-	   pile once both are present. */
-	/* Tags, follow-up and files as three bordered widgets rather than three runs
-	   of loose text.
+	/* Where they are and how to reach them, on one line and ellipsised as a pair.
+	   These used to be a panel you opened; as a caption they are simply there, and
+	   cost the header nothing it was not already spending. */
+	.cust-meta {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		min-width: 0;
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+	}
+	.cust-where,
+	.cust-reach {
+		flex: 0 1 auto;
+		min-width: 0;
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.2rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.cust-contact {
+		flex: none;
+		position: relative;
+	}
+	/* The email is the first thing to go when the header is narrow: the name and
+	   the town are what identify a job, and an address that ellipsises to "ja…" is
+	   worth less than the space it takes. */
+	@media (max-width: 40rem) {
+		.cust-reach {
+			display: none;
+		}
+	}
+	/* Follow-up and files as labelled pairs rather than two runs of loose text.
 
 	   They were `LABEL value ⊕` triplets separated only by whitespace, so on any
 	   width where they shared a line you could not tell where one ended and the
-	   next began — "TAGS cedar FOLLOW-UP 20 Aug FILES 3" reads as one sentence.
-	   Giving each a border and its own padding makes them three things, and drops
-	   the shouty uppercase labels for sentence case now that the boundary is
-	   doing that work. */
+	   next began — "FOLLOW-UP 20 Aug FILES 3" reads as one sentence. The label's
+	   colour is what separates it from its value. */
 	.order-facts {
 		display: flex;
 		flex-wrap: wrap;
@@ -1952,20 +3314,21 @@
 		gap: 0.4rem;
 		margin: 0;
 	}
+	/* Plain text, not chips. Follow-up / Files each used to sit in its own
+	   bordered, filled, rounded box — boxes across the header, each framing about
+	   six characters. Removing the chrome is most of what makes this page feel
+	   lighter; the label's colour is enough to separate it from its value. */
 	.fact {
 		display: flex;
 		align-items: center;
-		gap: 0.45rem;
+		gap: 0.4rem;
 		min-width: 0;
-		padding: 0.3rem 0.5rem 0.3rem 0.65rem;
-		border: 1px solid var(--line);
-		border-radius: 10px;
-		background: var(--surface-sunken);
+		padding: 0.15rem 0;
 	}
 	.fact dt {
 		flex: none;
 		font-size: 0.72rem;
-		font-weight: 700;
+		font-weight: 400;
 		color: var(--fg-muted);
 	}
 	.fact dd {
@@ -1980,59 +3343,42 @@
 		font-size: 0.78rem;
 		color: var(--fg-muted);
 	}
-	/* A fact's value, where it is a value rather than a run of chips. */
+	/* A fact's value. */
 	.fact-value {
 		font-size: 0.85rem;
-		font-weight: 700;
+		font-weight: 500;
 		color: var(--fg);
 	}
 	.fact-value.due {
 		color: var(--danger);
 	}
-	/* Reads as a tag chip, behaves as a control — it's the overflow count, so it
-	   belongs to the run of chips rather than standing apart from it. */
-	.tag-more {
-		padding: 0.1rem 0.55rem;
-		border-radius: 999px;
-		border: 1px dashed var(--line-strong);
-		background: transparent;
-		color: var(--fg-muted);
-		font-family: inherit;
-		font-size: 0.72rem;
-		font-weight: 700;
-		line-height: 1.5;
-		white-space: nowrap;
-		cursor: pointer;
-	}
-	.tag-more:hover {
-		border-color: var(--fg-muted);
-		color: var(--fg);
-	}
-	.tag-more:focus-visible {
-		outline: 2px solid var(--yellow);
-		outline-offset: 1px;
-	}
-	/* Nudged off the chips so the toggle doesn't read as one of them. */
-	.tag-toggle {
-		margin-left: 0.15rem;
-		font-weight: 700;
-	}
 	/* The project type rides the title without competing with it. */
 	.order-type {
 		font-size: 0.95rem;
-		font-weight: 600;
+		font-weight: 400;
 		color: var(--fg-muted);
 	}
+	/* The page's own title, opting out of the slab treatment a bare `h1` gets in
+	   app.css — the accent block belongs on a section heading, not on a name that
+	   can run to three lines.
+
+	   What it no longer opts out of is the THEME. It used to pin Helvetica and the
+	   literal `#1f2328`, which predate the palettes: the face ignored whichever
+	   display type the theme ships, and near-black on a near-black page is what
+	   that colour is in dark mode. Both now come from tokens — the face and its
+	   tracking are inherited from the shared `h1, h2, h3` rule, and only the size
+	   and the slab are restated here. */
 	.order-title {
 		margin: 0;
-		font-family: 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif;
 		font-size: 1.6rem;
 		overflow-wrap: anywhere;
-		font-weight: 700;
-		line-height: 1.25;
-		letter-spacing: -0.015em;
+		line-height: 1.2;
+		color: var(--fg);
+		/* The one thing it still overrides: a project name is CONTENT, typed by the
+		   contractor, and the themes that uppercase their headings mean labels.
+		   "Rear elevation re-clad" shouted back at you is not a house style, it is
+		   the app disagreeing with what you typed. */
 		text-transform: none;
-		color: #1f2328;
 		background: none;
 		border: none;
 		border-radius: 0;
@@ -2046,25 +3392,40 @@
 	   same treatment as the subcontractor detail pane — so it reads as one object
 	   rather than buttons floating above a box. Scrolls sideways on narrow screens
 	   instead of wrapping to two rows and shoving the content down. */
-	.panel {
-		min-width: 0;
-		gap: 0;
-		padding: 0;
-		overflow: hidden;
+	/* The strip is a standalone control now rather than the lid of a card: the
+	   panes each carry their own chrome, so there is no box for it to be the top
+	   of. Rounded and bordered on its own so it still reads as one object. */
+	.tabs {
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		/* Scrolls sideways, never clips. It was `overflow: hidden` — fine for the
+		   radius, quietly fatal once the strip outgrew a phone: the tabs are
+		   `nowrap`, so the last one was cut off and unreachable rather than
+		   narrowed. Billing joining as a fifth is what made that visible, but four
+		   already overflowed 360px once "Waiting on them" is spelled out. */
+		overflow: auto hidden;
+		/* A scrollbar across a five-item tab strip is louder than the strip. The
+		   overflow is discoverable by dragging, which is how a phone is used. */
+		scrollbar-width: none;
 	}
-	/* Three tabs sharing the strip evenly rather than bunched at the left with a
-	   long empty tail — with only three of them there is nothing for that space to
-	   be saving. Each is a full-height target, which is what a thumb wants. */
+	.tabs::-webkit-scrollbar {
+		display: none;
+	}
+	/* Tabs share the strip evenly rather than bunching at the left with a long
+	   empty tail — where there is room to share. Each is a full-height target,
+	   which is what a thumb wants. */
 	.tabs {
 		display: flex;
 		gap: 0.15rem;
 		padding: 0 0.35rem;
-		border-bottom: 1px solid var(--line);
 		background: var(--surface-sunken);
 	}
 	.tab {
-		flex: 1 1 0;
-		min-width: 0;
+		/* Grows into spare room, never shrinks below its own label: `1 1 0` with
+		   `min-width: 0` let a tab be narrower than the word inside it, which with
+		   `nowrap` above means the word simply left the box. */
+		flex: 1 1 auto;
+		min-width: max-content;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -2075,7 +3436,7 @@
 		color: var(--fg-muted);
 		font-family: inherit;
 		font-size: 0.82rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
 		white-space: nowrap;
@@ -2088,10 +3449,10 @@
 	}
 	.tab.on {
 		color: var(--fg);
-		border-bottom-color: var(--yellow-deep);
+		border-bottom-color: var(--brand-deep);
 	}
 	.tab:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: -3px;
 	}
 	.tab-count {
@@ -2100,13 +3461,13 @@
 		background: var(--line);
 		color: var(--fg-muted);
 		font-size: 0.7rem;
-		font-weight: 800;
+		font-weight: 600;
 		font-variant-numeric: tabular-nums;
 	}
 	/* Pinned dark: yellow stays light in both themes. */
 	.tab.on .tab-count {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 	/* Unanswered messages. The one count on this strip that is a notification
 	   rather than an inventory, so it is the only one that carries the accent —
@@ -2115,15 +3476,15 @@
 	   in the app: docs/adr/0009-waiting-counts-use-the-accent-not-danger.md. */
 	.tab-count.as-pending,
 	.tab.on .tab-count.as-pending {
-		background: var(--yellow);
-		border-color: var(--yellow-deep);
-		color: var(--on-yellow);
+		background: var(--brand);
+		border-color: var(--brand-deep);
+		color: var(--on-brand);
 	}
 	/* Quiet link in a panel's header row, across from its title. */
 	.panel-link {
 		flex: none;
 		font-size: 0.78rem;
-		font-weight: 700;
+		font-weight: 500;
 		color: var(--fg-muted);
 		text-decoration: none;
 		white-space: nowrap;
@@ -2136,81 +3497,10 @@
 	/* ------------------------------------------------ Subcontractor picker
 	   A row per person rather than a pill: the trade and tier were previously only
 	   in a title tooltip, which a phone never shows, so picking came down to
-	   recognising a name. The mark on the left carries the on/off state. */
-	.sub-list {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
-		gap: 0.5rem;
-	}
-	.sub-row {
-		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-		width: 100%;
-		/* No global border-box in this app — every `width: 100%` next to padding
-		   needs this or it overflows its grid cell by the padding. */
-		box-sizing: border-box;
-		padding: 0.55rem 0.7rem;
-		border: 1.5px solid var(--line-strong);
-		border-radius: 12px;
-		background: var(--surface);
-		font: inherit;
-		text-align: left;
-		cursor: pointer;
-		transition:
-			border-color 0.12s ease,
-			background 0.12s ease;
-	}
-	.sub-row:hover {
-		border-color: var(--fg-muted);
-	}
-	.sub-row:focus-visible {
-		outline: 2px solid var(--yellow-deep);
-		outline-offset: 2px;
-	}
-	.sub-row.on {
-		border-color: var(--yellow-deep);
-		background: color-mix(in srgb, var(--yellow) 16%, var(--surface));
-	}
-	.sub-mark {
-		flex: none;
-		display: grid;
-		place-items: center;
-		width: 1.4rem;
-		height: 1.4rem;
-		border-radius: 999px;
-		border: 1.5px solid var(--line-strong);
-		color: var(--fg-muted);
-		font-size: 0.8rem;
-		font-weight: 700;
-		line-height: 1;
-	}
-	.sub-row.on .sub-mark {
-		background: var(--yellow);
-		border-color: var(--yellow-deep);
-		color: var(--on-yellow);
-	}
-	/* A staged, uncommitted toggle: dashed amber so it clearly isn't saved yet.
+	   recognising a name. The mark on the left carries the on/off state. */ /* A staged, uncommitted toggle: dashed amber so it clearly isn't saved yet.
 	   The header's "✓ Save N" is the other half of the signal. */
-	.sub-row.pending {
-		border-style: dashed;
-		border-color: var(--yellow-deep);
-	}
 
 	/* The add box: the roster only ever appears as search matches under it. */
-	.crew-add {
-		position: relative;
-		margin-top: 0.35rem;
-	}
-	.crew-add-icon {
-		position: absolute;
-		left: 0.7rem;
-		top: 50%;
-		transform: translateY(-50%);
-		font-size: 0.85rem;
-		color: #8c959f;
-		pointer-events: none;
-	}
 	.crew-search {
 		width: 100%;
 		box-sizing: border-box;
@@ -2224,97 +3514,12 @@
 	}
 	.crew-search:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
-	.crew-none {
-		margin: 0;
-		font-size: 0.82rem;
-		color: var(--fg-muted);
-	}
-
 	/* The header commit pair: discard as quiet text, save as a compact yellow
 	   pill carrying the staged count. */
-	.subs-commit {
-		display: flex;
-		align-items: center;
-		gap: 0.3rem;
-		flex-shrink: 0;
-	}
-	.subs-save {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.35rem;
-		padding: 0.4rem 0.85rem;
-		border: none;
-		border-radius: 999px;
-		background: var(--yellow);
-		color: var(--on-yellow);
-		font-family: inherit;
-		font-size: 0.85rem;
-		font-weight: 700;
-		cursor: pointer;
-		box-shadow: var(--pop-shadow-sm);
-	}
-	.subs-save:hover {
-		background: var(--yellow-deep);
-	}
-	.subs-save:focus-visible {
-		outline: 2px solid var(--fg);
-		outline-offset: 2px;
-	}
-	.sub-discard {
-		border: none;
-		background: none;
-		padding: 0.45rem 0.6rem;
-		color: var(--fg-muted);
-		font-family: inherit;
-		font-size: 0.85rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-	.sub-discard:hover {
-		color: var(--fg);
-	}
-	.sub-text {
-		display: flex;
-		flex-direction: column;
-		gap: 0.1rem;
-		min-width: 0;
-	}
-	.sub-name {
-		font-size: 0.9rem;
-		font-weight: 700;
-		color: var(--fg);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.sub-meta {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-		min-width: 0;
-		font-size: 0.72rem;
-		color: var(--fg-muted);
-	}
-	.sub-trade {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.tier {
-		flex: none;
-		padding: 0.05rem 0.35rem;
-		border: 1px solid var(--line-strong);
-		border-radius: 999px;
-		font-weight: 700;
-	}
-	.tier.guest {
-		border-style: dashed;
-	}
-
 	/* A glyph on its own — no chip, no border. For secondary affordances (the
 	   document-rules ℹ️) that shouldn't compete with the real controls beside them. */
 	.bare-icon {
@@ -2335,7 +3540,7 @@
 		opacity: 1;
 	}
 	.bare-icon:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 2px;
 		border-radius: 8px;
 	}
@@ -2343,54 +3548,11 @@
 	/* ----------------------------------------------------- Editor cards
 	   The panel shell itself lives in InlineEditor.svelte; what's left here is only
 	   what goes *inside* one. */
-	.cust-facts {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr);
-		gap: 0.35rem;
-		margin: 0;
-	}
-	.cust-value {
-		margin: 0;
-		font-size: 0.88rem;
-		color: var(--fg);
-		overflow-wrap: anywhere;
-	}
-	/* Sits on the customer line the way the tag toggle sits after the tags. */
-	.cust-toggle {
-		margin-left: 0.15rem;
-		flex: none;
-	}
 	.editor-note {
 		margin: 0;
 		font-size: 0.82rem;
 		line-height: 1.5;
 		color: var(--fg-muted);
-	}
-	.subs-empty-cta {
-		padding: 0.4rem 0.9rem;
-		border-radius: 999px;
-		background: var(--yellow);
-		/* Pinned dark: yellow stays light in both themes. */
-		color: var(--on-yellow);
-		font-size: 0.82rem;
-		font-weight: 700;
-		text-decoration: none;
-		white-space: nowrap;
-	}
-	.subs-empty-cta:hover {
-		background: var(--yellow-deep);
-	}
-	.editor-form {
-		display: grid;
-		gap: 0.8rem;
-	}
-	/* Save reads as a footer action — right-aligned under the picker, above a hairline
-	   — rather than a lone button floating at the bottom-left of the panel. */
-	.editor-footer {
-		display: flex;
-		justify-content: flex-end;
-		border-top: 1px solid var(--line);
-		padding-top: 0.7rem;
 	}
 	/* Upload controls in the Files editor header: a compact pill and the rules glyph,
 	   sized to sit on the InlineEditor's title row next to the close button. */
@@ -2408,21 +3570,6 @@
 		height: 1.6rem;
 		font-size: 0.95rem;
 	}
-	.editor-save {
-		padding: 0.5rem 1rem;
-		border-radius: 999px;
-		border: none;
-		background: var(--yellow);
-		/* Pinned dark: yellow stays light in both themes. */
-		color: var(--on-yellow);
-		font-family: inherit;
-		font-size: 0.9rem;
-		font-weight: 700;
-		text-transform: none;
-		letter-spacing: normal;
-		cursor: pointer;
-		box-shadow: var(--pop-shadow-sm);
-	}
 	/* ------------------------------------------------------------ Phones */
 	@media (max-width: 560px) {
 		/* Phones were spending roughly 2rem of every row on chrome — 0.75rem of page
@@ -2432,7 +3579,12 @@
 		   in, and the stack tightens, so the page carries appreciably more per
 		   screenful without anything actually feeling cramped. */
 		.page {
-			padding: 0.85rem 0.6rem 2rem;
+			/* 0.8rem of gutter, not 0.6. The tighter figure was reclaiming width the
+			   desktop chrome was spending, which is right for a list of cards and
+			   wrong here: this page's blocks carry their own borders, and a bordered
+			   card six pixels off the glass reads as a rendering fault rather than a
+			   tight margin. Seven pixels of content width is a cheap price. */
+			padding: 0.85rem 0.8rem 2rem;
 			gap: 0.7rem;
 		}
 		.page :global(.card) {
@@ -2448,7 +3600,7 @@
 		   and sending the status ABOVE the title gives the name the full width — it
 		   usually drops to one or two lines — and turns the status into the small
 		   chip a phone layout wants it to be. */
-		/* The blocks below it stack; at 0.9rem apart the tags, follow-up and files
+		/* The blocks below it stack; at 0.9rem apart the follow-up and files
 		   rows pushed the tabs off the bottom of the screen. */
 		.order-head {
 			gap: 0.6rem;
@@ -2464,7 +3616,7 @@
 			font-size: 1.25rem;
 			overflow-wrap: anywhere;
 		}
-		.panel-body {
+		.pane {
 			padding: 0.85rem;
 		}
 		.tabs {
@@ -2481,13 +3633,6 @@
 		}
 	}
 
-	@media (max-width: 480px) {
-		/* Full-width targets on a phone rather than a ragged wrap. */
-		.editor-save {
-			width: 100%;
-		}
-	}
-
 	/* -------------------------------------------------------- Close out
 	   The two ways to end a live order (in the status modal), and the record of how
 	   once it's ended (the footer summary). */
@@ -2498,17 +3643,17 @@
 		border-radius: 12px;
 		font-family: inherit;
 		font-size: 0.95rem;
-		font-weight: 700;
+		font-weight: 500;
 		cursor: pointer;
 	}
 	.closeout-complete {
 		border: none;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.closeout-complete:hover {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.closeout-cancel {
 		border: 1px solid var(--line-strong);
@@ -2519,6 +3664,628 @@
 		border-color: var(--danger);
 		color: var(--danger);
 	}
+	/* ------------------------------------------------------------------ Details
+	   What the job is, where and when. Reads as a short reference card; it is the
+	   thing you check, not the thing you work in. */
+	/* Reads like a page of an invoice rather than a form: hairline rules between
+	   the three things it says, room to breathe between them, and labels that sit
+	   quietly beside their values instead of announcing themselves.
+
+	   What made this heavy was never the font weight — it was FOUR uppercase,
+	   letter-spaced labels inside one small card (Details, Starts, Target, Site),
+	   each drawing as much attention as the value it introduced. One eyebrow per
+	   card is a signpost; four is shouting. */
+	.details {
+		gap: 0;
+	}
+	/* Every block after the first is separated by a rule and its own space,
+	   rather than by a gap alone. */
+	.details > * + * {
+		margin-top: 0.85rem;
+		padding-top: 0.85rem;
+		border-top: 1px solid var(--line);
+	}
+	/* The head is the exception — a heading with a rule immediately under it is a
+	   box lid, which is the look this card is getting away from. */
+	.details > .det-head + * {
+		border-top: none;
+		padding-top: 0;
+		margin-top: 0.7rem;
+	}
+	.det-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+	.det-head h2 {
+		margin: 0;
+		font-size: 0.78rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--fg-muted);
+	}
+	.det-scope {
+		margin: 0;
+		font-size: 0.95rem;
+		/* Loose. This is the only real prose on the page and the thing most likely
+		   to be read start to finish. */
+		line-height: 1.65;
+		color: var(--fg);
+		white-space: pre-wrap;
+	}
+	/* The schedule. Two dates joined by a rule, so they read as one span of time
+	   rather than as two facts filed next to each other. */
+	.det-schedule {
+		display: flex;
+		align-items: flex-end;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+	.det-when {
+		display: grid;
+		gap: 0.05rem;
+	}
+	.det-when-label {
+		font-size: 0.75rem;
+		color: var(--fg-muted);
+	}
+	.det-when-value {
+		font-size: 1.05rem;
+		font-variant-numeric: tabular-nums;
+		color: var(--fg);
+	}
+	/* The join. A rule rather than an arrow glyph: it does not need reading, it
+	   needs to look like a span, and it is hidden from assistive tech because the
+	   two labels already say which end is which. */
+	.det-arrow {
+		flex: 1;
+		min-width: 1.5rem;
+		height: 1px;
+		margin-bottom: 0.6rem;
+		background: var(--line);
+	}
+	.det-site {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+		font-size: 0.92rem;
+		line-height: 1.5;
+		color: var(--fg);
+	}
+	.det-site-label {
+		flex-shrink: 0;
+		font-size: 0.75rem;
+		color: var(--fg-muted);
+	}
+	.det-visit {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+		font-size: 0.92rem;
+	}
+	.det-visit-value {
+		margin-right: auto;
+		color: var(--fg);
+	}
+	.det-visit-form {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+	.det-visit input[type='date'] {
+		padding: 0.3rem 0.45rem;
+		border: 1px solid var(--field-border);
+		border-radius: 8px;
+		background: var(--field-bg);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.85rem;
+	}
+	.det-empty {
+		margin: 0;
+		font-size: 0.86rem;
+		line-height: 1.45;
+		color: var(--fg-muted);
+	}
+	.det-form {
+		display: grid;
+		gap: 0.6rem;
+	}
+	.det-form textarea {
+		padding: 0.45rem 0.55rem;
+		border: 1px solid var(--field-border);
+		border-radius: 8px;
+		background: var(--field-bg);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.9rem;
+		line-height: 1.5;
+		resize: vertical;
+	}
+	.det-dates,
+	.det-site-row {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.det-dates .inv-field {
+		flex: 1;
+		min-width: 7rem;
+	}
+	.det-state input {
+		width: 3.5rem;
+		text-transform: uppercase;
+	}
+	.det-zip input {
+		width: 5.5rem;
+	}
+	.det-check {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		font-size: 0.86rem;
+		color: var(--fg-muted);
+		cursor: pointer;
+	}
+
+	/* ------------------------------------------------------------------ Invoice
+	   The money card. Reads top to bottom as an account does: what it costs, what
+	   came in, what is left — with the balance given the weight, because it is the
+	   only line anyone opens this card to read. */
+	.invoice {
+		gap: 0.7rem;
+	}
+	.inv-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+	.inv-head h2 {
+		margin: 0;
+		font-size: 0.78rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--fg-muted);
+	}
+	.inv-preview {
+		font-size: 0.82rem;
+		font-weight: 500;
+		color: var(--fg-muted);
+		text-decoration: none;
+		white-space: nowrap;
+	}
+	.inv-preview:hover {
+		color: var(--fg);
+		text-decoration: underline;
+	}
+	.inv-total-read,
+	.inv-total-form {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+	}
+	.inv-total-label {
+		font-size: 0.9rem;
+		color: var(--fg-muted);
+	}
+	.inv-total-value {
+		font-size: 1.05rem;
+		font-weight: 700;
+		color: var(--fg);
+	}
+	/* An unset total is a prompt, not a figure — it must not read as "$0.00". */
+	.inv-total-value.unset {
+		font-size: 0.9rem;
+		font-weight: 400;
+		color: var(--fg-muted);
+	}
+	.inv-total-read .inv-btn,
+	.inv-total-form .inv-btn {
+		margin-left: auto;
+	}
+	.inv-total-form .inv-btn + .inv-btn {
+		margin-left: 0;
+	}
+
+	/* The payment lines. */
+	.inv-lines {
+		list-style: none;
+		margin: 0;
+		padding: 0.15rem 0 0;
+		display: grid;
+		gap: 0.1rem;
+		border-top: 1px solid var(--line);
+	}
+	.inv-line {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.4rem 0;
+		border-bottom: 1px solid var(--line);
+	}
+	.inv-line-text {
+		flex: 1;
+		min-width: 0;
+	}
+	.inv-line-label {
+		display: block;
+		font-size: 0.92rem;
+		color: var(--fg);
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.inv-line-date {
+		display: block;
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+	}
+	.inv-line-amount {
+		font-variant-numeric: tabular-nums;
+		font-weight: 500;
+		white-space: nowrap;
+	}
+	/* Sized and coloured to be findable but not inviting — removing a payment is a
+	   correction, and corrections should take a deliberate click. */
+	.inv-remove {
+		flex-shrink: 0;
+		width: 1.6rem;
+		height: 1.6rem;
+		display: grid;
+		place-items: center;
+		padding: 0;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: none;
+		color: var(--fg-muted);
+		font-size: 1.1rem;
+		line-height: 1;
+		cursor: pointer;
+	}
+	.inv-remove:hover {
+		border-color: var(--danger);
+		color: var(--danger);
+	}
+	.inv-line-confirm {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.82rem;
+		color: var(--danger);
+		white-space: nowrap;
+	}
+	.inv-remove-yes {
+		padding: 0.15rem 0.5rem;
+		border: 1px solid var(--danger);
+		border-radius: 8px;
+		background: var(--danger);
+		color: #fff;
+		font-family: inherit;
+		font-size: 0.8rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	/* ---- The breakdown. Rows are buttons: the whole line is the edit target, so
+	   there is no pencil icon per row competing with the figures. */
+	.inv-items {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.1rem;
+	}
+	.inv-item {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.inv-item-read {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.35rem 0.4rem;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: none;
+		color: inherit;
+		font-family: inherit;
+		font-size: 0.9rem;
+		text-align: left;
+		cursor: pointer;
+	}
+	.inv-item-read:hover {
+		border-color: var(--line-strong);
+		background: var(--surface-sunken);
+	}
+	.inv-item-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.inv-item-amount {
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	/* A discount is a line like any other, but it should not read as a charge. */
+	.inv-item-amount.credit {
+		color: var(--ok-fg);
+	}
+	.inv-item-form {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		flex-wrap: wrap;
+	}
+	.inv-item-label-input {
+		flex: 1;
+		min-width: 6rem;
+		padding: 0.35rem 0.5rem;
+		border: 1px solid var(--field-border);
+		border-radius: 8px;
+		background: var(--field-bg);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.88rem;
+	}
+	.inv-amount.tight input {
+		width: 5.5rem;
+	}
+	.inv-add-line {
+		justify-self: start;
+		padding: 0.25rem 0.5rem;
+		border: none;
+		border-radius: 8px;
+		background: none;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.82rem;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.inv-add-line:hover {
+		color: var(--fg);
+		background: var(--surface-sunken);
+	}
+
+	/* ---- Paid-so-far. A track the width of the card with the paid portion filled;
+	   the figures beneath it are what actually report the numbers. */
+	.inv-progress {
+		height: 6px;
+		border-radius: 999px;
+		/* A wash of the foreground rather than a surface token: the track sits on
+		   the hero's own tint, and --surface-sunken on top of that is invisible. */
+		background: color-mix(in srgb, var(--fg) 12%, transparent);
+		overflow: hidden;
+	}
+	.inv-progress-fill {
+		height: 100%;
+		width: calc(var(--paid) * 100%);
+		background: var(--brand);
+		/* No text lives in here, so this is for the guard rather than for a reader:
+		   theme.contrast.test.ts fails any brand fill that lets a flipping colour
+		   token through, and the rule is worth keeping absolute rather than carving
+		   out exceptions for the elements that happen to be empty today. */
+		color: var(--on-brand);
+		transition: width 0.3s ease;
+	}
+	/* Settled turns the bar the same green the verdict line wears, so the two
+	   agree at a glance rather than one saying "done" over a brand-yellow bar. */
+	.inv-progress.full .inv-progress-fill {
+		background: var(--ok-fg);
+	}
+
+	/* ---- The headline. A tinted block at the top of the card carrying the one
+	   figure the card exists to report, at a size nothing else on the page
+	   competes with. The rest of the invoice is the working-out. */
+	.inv-hero {
+		display: grid;
+		gap: 0.3rem;
+		padding: 0.75rem 0.9rem 0.85rem;
+		border-radius: 12px;
+		border: 1px solid var(--line);
+		background: var(--surface-sunken);
+	}
+	/* Money owed wears the brand accent, not --danger: an outstanding balance is
+	   ordinary business, and ADR-0009 reserves red for faults and destruction. */
+	.inv-hero.owed {
+		border-color: var(--brand-deep);
+		background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+	}
+	.inv-hero.settled {
+		border-color: var(--ok-line);
+		background: var(--ok-bg);
+	}
+	.inv-hero-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.07em;
+		color: var(--fg-muted);
+	}
+	.inv-hero.settled .inv-hero-label,
+	.inv-hero.settled .inv-hero-value {
+		color: var(--ok-fg);
+	}
+	/* The number. Size and tabular figures do the work here — this is the one
+	   place on the page allowed to be loud, and it earns it by being the only one. */
+	.inv-hero-value {
+		font-size: 2rem;
+		font-weight: 700;
+		line-height: 1.05;
+		font-variant-numeric: tabular-nums;
+		letter-spacing: -0.02em;
+		color: var(--fg);
+	}
+	/* Nothing recorded is a sentence, not a figure, and must not be set like one. */
+	.inv-hero-value.unset {
+		font-size: 0.95rem;
+		font-weight: 400;
+		color: var(--fg-muted);
+	}
+	.inv-hero-sub {
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+	}
+
+	/* Record-a-payment. */
+	.inv-record {
+		justify-self: start;
+		padding: 0.4rem 0.8rem;
+		border: 1px dashed var(--line-strong);
+		border-radius: 10px;
+		background: none;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.88rem;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.inv-record:hover {
+		border-style: solid;
+		border-color: var(--brand-deep);
+		color: var(--fg);
+	}
+	.inv-pay-form {
+		display: grid;
+		gap: 0.6rem;
+		padding: 0.8rem;
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		background: var(--surface-sunken);
+	}
+	.inv-pay-row {
+		display: flex;
+		align-items: flex-end;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.inv-field {
+		display: grid;
+		gap: 0.2rem;
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+	}
+	.inv-field.grow {
+		flex: 1;
+		min-width: 8rem;
+	}
+	.inv-field input {
+		padding: 0.4rem 0.55rem;
+		border: 1px solid var(--field-border);
+		border-radius: 8px;
+		background: var(--field-bg);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.92rem;
+		width: 100%;
+		box-sizing: border-box;
+	}
+	.inv-amount {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding-left: 0.5rem;
+		border: 1px solid var(--field-border);
+		border-radius: 8px;
+		background: var(--field-bg);
+	}
+	.inv-amount input {
+		border: none;
+		background: none;
+		padding-left: 0;
+		width: 7rem;
+	}
+	.inv-amount input:focus {
+		outline: none;
+	}
+	.inv-cur {
+		color: var(--fg-muted);
+		font-size: 0.92rem;
+	}
+	/* The radio groups render as chips: the native control is hidden from sight but
+	   NOT from the accessibility tree, so the group is still a radiogroup to a
+	   screen reader and still keyboard-navigable with the arrow keys. */
+	.inv-chip {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.28rem 0.7rem;
+		border: 1px solid var(--line-strong);
+		border-radius: 999px;
+		background: var(--surface);
+		color: var(--fg-muted);
+		font-size: 0.82rem;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.inv-chip input {
+		position: absolute;
+		opacity: 0;
+		width: 1px;
+		height: 1px;
+	}
+	.inv-chip.on {
+		border-color: var(--brand-deep);
+		background: var(--brand);
+		/* Pinned dark: yellow stays light in both themes. See app.css. */
+		color: var(--on-brand);
+	}
+	.inv-chip:focus-within {
+		outline: 2px solid var(--brand-deep);
+		outline-offset: 2px;
+	}
+	.inv-pay-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+	}
+	.inv-btn {
+		padding: 0.35rem 0.7rem;
+		border: 1px solid var(--line-strong);
+		border-radius: 8px;
+		background: var(--surface);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.85rem;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.inv-btn:hover {
+		border-color: var(--brand-deep);
+	}
+	.inv-btn.primary {
+		background: var(--brand);
+		border-color: var(--brand-deep);
+		color: var(--on-brand);
+	}
+	.inv-notes {
+		margin: 0;
+		font-size: 0.88rem;
+		line-height: 1.5;
+		color: var(--fg-muted);
+		white-space: pre-wrap;
+	}
+	.co-preview {
+		font-size: 0.85rem;
+		font-weight: 500;
+		color: var(--fg-muted);
+		text-decoration: none;
+	}
+	.co-preview:hover {
+		color: var(--fg);
+		text-decoration: underline;
+	}
+
 	.closeout-summary {
 		display: grid;
 		gap: 0.5rem;
@@ -2531,16 +4298,16 @@
 	.cs-badge {
 		justify-self: start;
 		font-size: 0.72rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		padding: 0.15rem 0.6rem;
 		border-radius: 999px;
 	}
 	.cs-badge.done {
-		background: var(--yellow);
-		color: var(--on-yellow);
-		border: 1px solid var(--yellow-deep);
+		background: var(--brand);
+		color: var(--on-brand);
+		border: 1px solid var(--brand-deep);
 	}
 	.cs-badge.stop {
 		background: color-mix(in srgb, var(--danger) 14%, transparent);
@@ -2563,20 +4330,13 @@
 	}
 	.cs-facts dd {
 		margin: 0;
-		font-weight: 700;
+		font-weight: 500;
 		color: var(--fg);
 	}
 	.cs-muted {
 		color: var(--fg-muted);
-		font-weight: 500;
+		font-weight: 400;
 	}
-	.cs-notes {
-		margin: 0;
-		font-size: 0.88rem;
-		color: var(--fg-muted);
-		white-space: pre-wrap;
-	}
-
 	/* ------------------------------------------------ Close-out modal
 	   A centred sheet over a dimmed page — full-screen on a phone, a card on
 	   desktop — so completing/cancelling gets the room its form needs. */
@@ -2624,7 +4384,7 @@
 	.co-head h2 {
 		margin: 0;
 		font-size: 1.1rem;
-		font-weight: 800;
+		font-weight: 700;
 	}
 	.co-x {
 		flex: none;
@@ -2658,7 +4418,7 @@
 		display: grid;
 		gap: 0.3rem;
 		font-size: 0.78rem;
-		font-weight: 700;
+		font-weight: 400;
 		color: var(--fg-muted);
 	}
 	.co-field textarea {
@@ -2677,8 +4437,8 @@
 	}
 	.co-field textarea:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
 	/* Amount input with a leading $ sign. */
@@ -2692,12 +4452,12 @@
 		background: var(--field-bg);
 	}
 	.co-amount:focus-within {
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 	}
 	.co-cur {
 		font-size: 1.05rem;
-		font-weight: 700;
+		font-weight: 400;
 		color: var(--fg-muted);
 	}
 	.co-amount input {
@@ -2709,7 +4469,7 @@
 		color: var(--fg);
 		font-family: inherit;
 		font-size: 1.05rem;
-		font-weight: 600;
+		font-weight: 400;
 	}
 	.co-amount input:focus {
 		outline: none;
@@ -2740,14 +4500,14 @@
 		border: 1px solid var(--line-strong);
 		border-radius: 999px;
 		font-size: 0.85rem;
-		font-weight: 700;
+		font-weight: 400;
 		color: var(--fg-muted);
 		cursor: pointer;
 	}
 	.co-method.on {
-		border-color: var(--yellow-deep);
-		background: var(--yellow);
-		color: var(--on-yellow);
+		border-color: var(--brand-deep);
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 	.co-method input {
 		position: absolute;
@@ -2782,17 +4542,17 @@
 	.co-save {
 		border: none;
 		border-radius: 999px;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-family: inherit;
 		font-size: 0.9rem;
-		font-weight: 700;
+		font-weight: 600;
 		padding: 0.55rem 1.2rem;
 		cursor: pointer;
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.co-save:hover {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.co-save.danger {
 		background: var(--danger);
@@ -2816,7 +4576,7 @@
 		color: var(--fg-muted);
 		font-family: inherit;
 		font-size: 0.78rem;
-		font-weight: 700;
+		font-weight: 500;
 		cursor: pointer;
 		text-decoration: underline;
 		text-underline-offset: 3px;
@@ -2847,7 +4607,7 @@
 		border-radius: 999px;
 		font-family: inherit;
 		font-size: 0.78rem;
-		font-weight: 700;
+		font-weight: 600;
 		cursor: pointer;
 	}
 	.danger-yes {
@@ -2884,14 +4644,45 @@
 	.empty-mark {
 		font-size: 1.5rem;
 		line-height: 1;
-		color: var(--yellow-deep);
+		color: var(--brand-deep);
 	}
 
-	.panel-body {
+	/* The tab strip's actual mechanism now that all three panes are in the DOM at
+	   once: the selected one shows, the other two are display:none — out of the
+	   layout AND out of the accessibility tree, which is what a tab panel that is
+	   not selected should be. Above 1100px the desktop block overrides this and
+	   all three show at once. */
+	/* Each pane carries its own card chrome. It used to inherit it from one
+	   `.panel` wrapper that held all three; with the panes laid out separately
+	   there is no shared box to inherit from. */
+	.pane {
 		display: grid;
 		gap: 0.85rem;
-		padding: 1.1rem 1.2rem;
 		min-width: 0;
+		padding: 1.1rem 1.2rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-card);
+		background: var(--surface);
+		box-shadow: var(--card-shadow);
+	}
+	.pane:not(.on) {
+		display: none;
+	}
+	/* The billing pane wraps a card that draws its own frame, so the pane must not
+	   draw a second one around it. Every other pane IS the card. */
+	.pane-billing {
+		padding: 0;
+		border: none;
+		background: none;
+		box-shadow: none;
+	}
+
+	/* These custom properties used to live on `.panel-body`, the one card that
+	   wrapped all three tabs. The panes are their own cards now, so the properties
+	   move onto each pane — MessageThread reads them from its nearest ancestor, and
+	   left where they were they would have resolved to nothing and the thread would
+	   have rendered uncoloured. */
+	.pane {
 		--thread-max-height: 26rem;
 		/* Coloured by WHO, not by which app: the contractor's own replies are yellow
 		   here and yellow in the customer's portal; the customer's are teal in both.
@@ -2950,18 +4741,18 @@
 	}
 	.fu-title {
 		font-size: 0.72rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--fg-muted);
 	}
 	.fu-current {
 		font-size: 0.85rem;
-		font-weight: 700;
+		font-weight: 600;
 		color: var(--fg);
 	}
 	.fu-current.unset {
-		font-weight: 500;
+		font-weight: 400;
 		color: var(--fg-muted);
 	}
 
@@ -2999,12 +4790,12 @@
 		background: var(--surface-sunken);
 	}
 	.fu-opt:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 1px;
 	}
 	.fu-opt-label {
 		font-size: 0.8rem;
-		font-weight: 700;
+		font-weight: 400;
 		white-space: nowrap;
 	}
 	.fu-opt-date {
@@ -3015,7 +4806,7 @@
 	.fu-set-label {
 		display: block;
 		font-size: 0.72rem;
-		font-weight: 700;
+		font-weight: 400;
 		color: var(--fg-muted);
 		margin-bottom: 0.3rem;
 	}
@@ -3041,7 +4832,7 @@
 		color: var(--fg);
 		font: inherit;
 		font-size: 0.82rem;
-		font-weight: 600;
+		font-weight: 500;
 		white-space: nowrap;
 		cursor: pointer;
 	}
@@ -3050,19 +4841,19 @@
 		background: var(--surface-inset);
 	}
 	.fu-btn:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 1px;
 	}
 	.fu-btn.primary {
 		width: auto;
 		flex: none;
-		background: var(--yellow);
-		border-color: var(--yellow-deep);
-		color: var(--on-yellow);
-		font-weight: 700;
+		background: var(--brand);
+		border-color: var(--brand-deep);
+		color: var(--on-brand);
+		font-weight: 600;
 	}
 	.fu-btn.primary:hover {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.fu-btn.danger {
 		color: var(--danger);
@@ -3140,32 +4931,521 @@
 	}
 	:global(:root[data-theme='dark']) .tl-entry.internal {
 		background: #2a2415;
-		border-color: #4a3f22;
 	}
 	:global(:root[data-theme='dark']) .tl-entry.internal::before {
 		background: #e3b341;
 	}
-	/* After the dark .internal rules (equal specificity) so the newest entry keeps
-	   its accent even when it is also an internal note. */
-	:global(:root[data-theme='dark']) .tl-entry.latest {
-		background: var(--surface);
-		border-color: var(--yellow-deep);
-	}
-	:global(:root[data-theme='dark']) .tl-entry.latest::before {
-		background: var(--yellow-deep);
-	}
 	:global(:root[data-theme='dark']) .tl-tag {
 		color: #e3b341;
 	}
-	:global(:root[data-theme='dark']) .icon-btn.on {
-		background: #2e2a44;
-		border-color: #4a3f6b;
-		color: #cabff5;
-	}
-	:global(:root[data-theme='dark']) .icon-btn.on:hover {
-		background: #383352;
-	}
 	:global(:root[data-theme='dark']) .order-title {
 		color: var(--fg);
+	}
+
+	/* ==================================================================
+	   The workspace: one column on a phone, two from 1100px.
+
+	   Real column ELEMENTS rather than placing every card directly on the page
+	   grid. The difference matters: siblings on one grid share rows, so a tall
+	   conversation beside a short details card left a hole under the short one —
+	   which is what made every arrangement of this page feel gappy. Two grids that
+	   each stack their own children have no such relationship.
+
+	   Below 1100px all three wrappers are `display: contents`, so the cards fall
+	   back into the page's single column and the tab strip does its old job.
+
+	   WHY THE RAIL IS FIRST IN THE MARKUP. Details and Invoice are always on screen;
+	   only the three panes are behind the tabs. With the rail written second, a phone
+	   read `tabs → pane → Details → Invoice`, so the two always-on cards landed under
+	   whichever tab was open — which is exactly how "the order's details" came to look
+	   like part of the People tab. Writing the rail first puts them ABOVE the strip,
+	   which leaves the strip and the one pane it selects touching, in every tab.
+	   Desktop is unaffected: both columns are placed explicitly, so the source order
+	   the phone needs costs the two-column layout nothing.
+	   ================================================================== */
+	.workspace,
+	.col-main,
+	.col-rail {
+		display: contents;
+	}
+
+	@media (min-width: 1100px) {
+		/* Nothing is behind a tab any more, so the control that switches between
+		   them has no job. Scoped to this page's own strip — `:global(.tabs)` also
+		   matches ContactPanel's channel tablist, which is how the composer once
+		   silently lost its Email / Text / Call tabs. */
+		.tabs {
+			display: none;
+		}
+		.pane:not(.on) {
+			display: grid;
+		}
+		.workspace {
+			display: grid;
+			/* The conversation gets the wider half. It is the working surface; the
+			   rail is reference. */
+			grid-template-columns: minmax(0, 1.5fr) minmax(21rem, 1fr);
+			gap: var(--page-gap);
+			align-items: start;
+		}
+		.col-main,
+		.col-rail {
+			display: grid;
+			gap: var(--page-gap);
+			align-content: start;
+			min-width: 0;
+		}
+		/* Placed rather than flowed, because the markup order is the phone's (rail
+		   first, see above) and the desktop's is the opposite. Both on row 1: neither
+		   column spans the other's rows, so a tall conversation can never open a gap
+		   in the rail beside it. */
+		.col-main {
+			grid-column: 1;
+			grid-row: 1;
+		}
+		.col-rail {
+			grid-column: 2;
+			grid-row: 1;
+		}
+	}
+	/* ------------------------------------------------------------------ Crew
+	   Who is on this job and when. The visual weight sits on the ONE fact that
+	   is actionable — who is here today — and everything else stays quiet. */
+	.crew-today {
+		margin: 0;
+		padding: 0.45rem 0.65rem;
+		border-radius: var(--radius-control);
+		border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--surface));
+		background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+		color: var(--fg);
+		font-size: 0.85rem;
+		font-weight: 700;
+	}
+	.crew-error {
+		margin: 0;
+		color: var(--danger);
+		font-size: 0.85rem;
+		font-weight: 600;
+	}
+	/* ------------------------------------------------------- Waiting on them
+	   Deliberately built from the crew panel's parts — the same row, the same
+	   chips, the same two-step remove. They are the same KIND of thing (a small
+	   list of records with an inline editor each), and a second visual language
+	   for the second one is how a workspace stops feeling like one place. */
+	/* The asks block, sitting above the history rather than behind a tab of its
+	   own. Only its gap is set here — everything in it already had a style. */
+	.asks {
+		display: grid;
+		gap: 0.55rem;
+		margin-bottom: 0.9rem;
+	}
+	/* The blurb. Amber, which is this app's tone for waiting on somebody — the
+	   same --wait-* trio the status chips wear, so "with the customer" reads the
+	   same here as it does on a card in the orders list. NOT --danger: an
+	   unanswered question is not a fault, per docs/adr/0009.
+
+	   It replaced a dashed "They see …" quote box. Same sentence, but that one
+	   was drawn as an aside about the portal when it is in fact the one line on
+	   this panel that says whose turn it is. */
+	.ask-banner {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.45rem;
+		margin: 0;
+		padding: 0.55rem 0.7rem;
+		border-radius: var(--radius-control);
+		border: 1px solid var(--wait-line);
+		background: var(--wait-bg);
+		font-size: 0.88rem;
+		font-weight: 600;
+		line-height: 1.4;
+		color: var(--fg);
+	}
+	.ask-banner-tag {
+		flex: none;
+		padding: 0.1rem 0.4rem;
+		border-radius: var(--radius-pill);
+		background: var(--who-customer);
+		color: var(--on-brand);
+		font-size: 0.62rem;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+	.ask-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.4rem;
+	}
+	.ask-item {
+		border: 1px solid var(--line);
+		border-left: 3px solid var(--who-customer);
+		border-radius: var(--radius-control);
+		background: var(--surface-sunken);
+		padding: 0.5rem 0.6rem;
+		display: grid;
+		gap: 0.4rem;
+	}
+	/* Past its date. The rim carries it, the way an overdue follow-up does on the
+	   dashboard — a list where lateness is a word you have to read is a list where
+	   you miss it. */
+	.ask-item.late {
+		border-left-color: var(--danger);
+	}
+	/* Done: the rim goes quiet rather than green. Finished work should recede, and
+	   a row of ticks competing with the outstanding ones above defeats the panel. */
+	.ask-list.done .ask-item {
+		border-left-color: var(--line-strong);
+		opacity: 0.75;
+	}
+	.ask-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.ask-text {
+		flex: 1;
+		min-width: 0;
+		display: grid;
+		gap: 0.15rem;
+	}
+	.ask-title {
+		font-size: 0.9rem;
+		font-weight: 700;
+		overflow-wrap: anywhere;
+	}
+	.ask-detail {
+		font-size: 0.82rem;
+		line-height: 1.5;
+		color: var(--fg-muted);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.ask-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.3rem;
+	}
+	.ask-chip {
+		padding: 0.1rem 0.4rem;
+		border-radius: var(--radius-pill);
+		border: 1px solid var(--line-strong);
+		font-size: 0.66rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--fg-muted);
+	}
+	.ask-chip.late {
+		border-color: var(--danger);
+		color: var(--danger);
+	}
+	.ask-chip.hold {
+		border-color: var(--wait-fg);
+		color: var(--wait-fg);
+	}
+	.ask-form {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+		gap: 0.4rem 0.5rem;
+		align-items: end;
+		padding: 0.55rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		background: var(--surface-sunken);
+	}
+	.ask-form label {
+		display: grid;
+		gap: 0.2rem;
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+	}
+	.ask-form textarea {
+		font-family: inherit;
+		resize: vertical;
+	}
+	/* The checkbox reads left-to-right like a sentence, not like the stacked
+	   label/field pairs beside it. */
+	.ask-check {
+		grid-column: 1 / -1;
+		display: flex !important;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.78rem;
+		color: var(--fg);
+	}
+	.ask-done {
+		margin-top: 0.2rem;
+	}
+	.ask-done summary {
+		cursor: pointer;
+		font-size: 0.78rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+	}
+	.ask-done-count {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.1rem;
+		padding: 0 0.3rem;
+		border-radius: var(--radius-pill);
+		background: var(--surface-sunken);
+		border: 1px solid var(--line);
+		font-size: 0.68rem;
+	}
+	.ask-list.done {
+		margin-top: 0.45rem;
+	}
+
+	.crew-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.4rem;
+	}
+	.crew-item {
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		background: var(--surface-sunken);
+		padding: 0.5rem 0.6rem;
+		display: grid;
+		gap: 0.4rem;
+		/* Transparent by default so the "here today" variant can colour the edge
+		   without the contents shifting sideways when it does. */
+		border-left: 3px solid transparent;
+	}
+	.crew-item.here {
+		border-left-color: var(--brand);
+	}
+	.crew-row {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		min-width: 0;
+	}
+	.crew-face {
+		width: 30px;
+		height: 30px;
+		flex: none;
+		border-radius: var(--radius-round);
+		object-fit: cover;
+		border: 1px solid var(--line-strong);
+	}
+	.crew-face.placeholder {
+		display: grid;
+		place-items: center;
+		background: var(--surface);
+		color: var(--fg-muted);
+		font-size: 0.68rem;
+		font-weight: 800;
+	}
+	.crew-who {
+		flex: 1;
+		min-width: 0;
+		display: grid;
+		gap: 0.05rem;
+	}
+	.crew-name {
+		font-size: 0.88rem;
+		font-weight: 700;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	/* Somebody who has left the crew but really did work this job. Stated, not
+	   hidden — dropping them would rewrite the job's history. */
+	.crew-gone {
+		margin-left: 0.3rem;
+		font-weight: 600;
+		font-size: 0.72rem;
+		color: var(--fg-muted);
+	}
+	.crew-meta {
+		font-size: 0.74rem;
+		color: var(--fg-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.crew-badge {
+		flex: none;
+		padding: 0.05rem 0.4rem;
+		border-radius: var(--radius-pill);
+		background: var(--brand-sweep);
+		color: var(--on-brand);
+		font-size: 0.65rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.crew-note {
+		margin: 0;
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+		white-space: pre-wrap;
+	}
+	.crew-btn,
+	.crew-save {
+		flex: none;
+		padding: 0.28rem 0.6rem;
+		border-radius: var(--radius-control);
+		font-family: inherit;
+		font-size: 0.76rem;
+		font-weight: 700;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.crew-btn {
+		border: 1px solid var(--line-strong);
+		background: var(--surface);
+		color: var(--fg);
+	}
+	.crew-btn.danger {
+		color: var(--danger);
+		border-color: var(--danger);
+	}
+	.wide-btn {
+		width: 100%;
+	}
+	.crew-save {
+		border: none;
+		background: var(--brand-sweep);
+		color: var(--on-brand);
+		box-shadow: 0 0 12px var(--brand-glow);
+	}
+	.crew-form {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+		gap: 0.5rem;
+		padding-top: 0.4rem;
+		border-top: 1px solid var(--line);
+	}
+	.crew-form label {
+		display: grid;
+		gap: 0.2rem;
+		font-size: 0.7rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+		min-width: 0;
+	}
+	.crew-wide {
+		grid-column: 1 / -1;
+	}
+	.crew-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+	}
+	.crew-spacer {
+		flex: 1;
+	}
+	.crew-confirm {
+		font-size: 0.78rem;
+		font-weight: 700;
+		color: var(--danger);
+	}
+	.crew-add-open {
+		justify-self: start;
+		padding: 0.45rem 0.8rem;
+		border: 1px dashed var(--line-strong);
+		border-radius: var(--radius-control);
+		background: none;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.82rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.crew-add-open:hover {
+		color: var(--fg);
+		border-color: var(--brand);
+	}
+	/* Same dashed affordance as "Put someone on this job", one level in: it is the
+	   same kind of offer — an empty outline you fill — and giving the inner one
+	   solid button chrome made it look like the primary action of the panel when
+	   picking an existing person is the commoner path by far. */
+	.crew-new-open {
+		justify-self: start;
+		padding: 0.4rem 0.7rem;
+		border: 1px dashed var(--line-strong);
+		border-radius: var(--radius-control);
+		background: none;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.8rem;
+		font-weight: 700;
+		text-align: left;
+		cursor: pointer;
+	}
+	.crew-new-open:hover {
+		color: var(--fg);
+		border-color: var(--brand);
+	}
+	/* The three fields, laid out like the dates form below it so the panel has one
+	   grammar for "a small form inside a row" rather than two. */
+	.crew-new {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+		gap: 0.4rem 0.5rem;
+		align-items: end;
+		padding: 0.5rem 0.55rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		background: var(--surface-sunken);
+	}
+	.crew-new label {
+		display: grid;
+		gap: 0.2rem;
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+	}
+	.crew-add-box {
+		display: grid;
+		gap: 0.45rem;
+		padding: 0.55rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		background: var(--surface-sunken);
+	}
+	.crew-search-row {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+	.crew-search {
+		flex: 1;
+		min-width: 0;
+		padding: 0.35rem 0.5rem;
+		border-radius: var(--radius-control);
+		border: 1px solid var(--field-border);
+		background: var(--field-bg);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.85rem;
+	}
+	.crew-picker {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.3rem;
+	}
+	.crew-pick-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.35rem 0.45rem;
+		border-radius: var(--radius-control);
+		background: var(--surface);
+		border: 1px solid var(--line);
 	}
 </style>

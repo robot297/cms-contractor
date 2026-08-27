@@ -359,9 +359,24 @@ const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * recognises them, and what a duplicate is judged on. So a contact without one
  * is offered with somewhere to type it rather than quietly dropped.
  */
-export function contactIssue(contact: ImportedContact, existingEmails: Set<string>): ContactIssue {
+export function contactIssue(
+	contact: ImportedContact,
+	existingEmails: Set<string>,
+	/**
+	 * Whether a missing address blocks the import.
+	 *
+	 * True for customers, who are IDENTIFIED by their email — it is the invite
+	 * channel and the uniqueness key, so a customer without one cannot be created.
+	 * False for crew, who are not: a labourer may only ever be a name and a mobile
+	 * number, and refusing to record them until somebody invents an address for
+	 * them would be the app being wrong about the world.
+	 */
+	options: { emailRequired?: boolean } = {}
+): ContactIssue {
+	const { emailRequired = true } = options;
 	const email = normalizeEmail(contact.email);
-	if (email === '') return 'no-email';
+	if (email === '') return emailRequired ? 'no-email' : null;
+	// A malformed address is a problem either way — it was typed, so it was meant.
 	if (!EMAIL_SHAPE.test(email)) return 'bad-email';
 	if (existingEmails.has(email)) return 'duplicate';
 	return null;

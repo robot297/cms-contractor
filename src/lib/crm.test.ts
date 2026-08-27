@@ -21,7 +21,6 @@ import {
 	feedbackTypeLabel,
 	isFeedbackType,
 	normalizeEmail,
-	parseTags,
 	redactCustomerForGuest,
 	validateFeedback,
 	isSubcontractorLinked,
@@ -365,7 +364,7 @@ describe('customer contact validation', () => {
 	});
 });
 
-describe('phone formatting and tags', () => {
+describe('phone formatting', () => {
 	it('strips non-digits', () => {
 		expect(digitsOnly('(555) 123-4567')).toBe('5551234567');
 	});
@@ -375,11 +374,6 @@ describe('phone formatting and tags', () => {
 		expect(formatPhone('555123')).toBe('(555) 123');
 		expect(formatPhone('5551234567')).toBe('(555) 123-4567');
 		expect(formatPhone('(555) 123-4567 ext ignored')).toBe('(555) 123-4567');
-	});
-
-	it('parses, trims, and de-duplicates tags', () => {
-		expect(parseTags(' a, b ,a, ,c ')).toEqual(['a', 'b', 'c']);
-		expect(parseTags('')).toEqual([]);
 	});
 });
 
@@ -547,15 +541,13 @@ describe('subcontractor profile validation', () => {
 			email: '  Rae@Sparks.CO ',
 			phone: '5551234567',
 			trade: 'Electrical',
-			company: 'Sparks Co',
-			tags: 'licensed, insured'
+			company: 'Sparks Co'
 		});
 		expect(result.ok).toBe(true);
 		if (result.ok) {
 			expect(result.value.email).toBe('rae@sparks.co');
 			expect(result.value.phone).toBe('(555) 123-4567');
 			expect(result.value.trade).toBe('Electrical');
-			expect(result.value.tags).toEqual(['licensed', 'insured']);
 		}
 	});
 

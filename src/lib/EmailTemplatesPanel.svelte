@@ -277,7 +277,7 @@
 							<input type="hidden" name="direction" value="up" />
 							<button
 								class="icon-btn"
-								style="width: 1.9rem; height: 1.9rem; font-size: 0.9rem;"
+								style="width: 1.9rem; height: 1.9rem; font-size: 1.15rem;"
 								title="Move up"
 								disabled={i === 0}>↑</button
 							>
@@ -287,7 +287,7 @@
 							<input type="hidden" name="direction" value="down" />
 							<button
 								class="icon-btn"
-								style="width: 1.9rem; height: 1.9rem; font-size: 0.9rem;"
+								style="width: 1.9rem; height: 1.9rem; font-size: 1.15rem;"
 								title="Move down"
 								disabled={i === data.templates.length - 1}>↓</button
 							>
@@ -468,8 +468,8 @@
 	.field input:focus,
 	.field textarea:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
 	.preview {
@@ -515,9 +515,9 @@
 		cursor: pointer;
 	}
 	.preview-switch button.on {
-		background: var(--yellow);
+		background: var(--brand);
 		/* Pinned dark: yellow stays light in both themes. */
-		color: var(--on-yellow);
+		color: var(--on-brand);
 	}
 	/* The email renders in its own document, so app.css can't leak into it and the
 	   preview is the real thing rather than a styled approximation. */
@@ -655,14 +655,14 @@
 	   inverted near-white slab, which read as "lit up" against the dark UI. Yellow
 	   is light in either theme, so its text/border stay pinned dark. */
 	.btn.primary {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		/* Transparent, not none: keeps the box the same size as its siblings. */
 		border-color: transparent;
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.btn.primary:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	/* Nothing to commit → the accent drains away and the button goes flat, faded
 	   and dashed-outlined, so "inert" is obvious at a glance rather than something

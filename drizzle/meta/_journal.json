@@ -204,6 +204,55 @@
       "when": 1787057728618,
       "tag": "0028_supreme_exiles",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787500740532,
+      "tag": "0029_wealthy_quentin_quire",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787513949237,
+      "tag": "0030_steep_madripoor",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787536942367,
+      "tag": "0031_omniscient_crusher_hogan",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787678652360,
+      "tag": "0032_little_mercury",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787685528167,
+      "tag": "0033_luxuriant_magma",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787769687515,
+      "tag": "0034_yummy_invisible_woman",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787836996957,
+      "tag": "0035_dry_blacklash",
+      "breakpoints": true
     }
   ]
 }

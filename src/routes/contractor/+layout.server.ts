@@ -6,8 +6,8 @@ import {
 } from '$lib/server/templates.server';
 import { getLimitStatus, getSubscriptionView } from '$lib/server/billing.server';
 import { isEmailConfigured, isEmailDevToolsEnabled } from '$lib/server/email.server';
+import { isNavPlacement } from '$lib/crm';
 import { isDemoUser } from '$lib/server/demo.server';
-import { listContractorTags } from '$lib/server/tags.server';
 import { findDevCustomer, isViewAsEnabled } from '$lib/server/view-as.server';
 import { isDevLoginEnabled } from '$lib/server/dev-login.server';
 import { awaitingReplyForContractor } from '$lib/server/messaging.server';
@@ -37,13 +37,10 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 	// place every contractor passes through regardless of how they signed up —
 	// GitHub OAuth never runs the sign-up form action, so hooking it there would
 	// miss those accounts entirely.
-	const [templates, settings, subscription, contractorTags] = await Promise.all([
+	const [templates, settings, subscription] = await Promise.all([
 		listEmailTemplates(contractorId),
 		getContractorSettings(contractorId),
-		getSubscriptionView(contractorId, locals.user.createdAt),
-		// The tag vocabulary is derived from usage, so it travels with every
-		// contractor surface the same way templates do — the picker appears on six.
-		listContractorTags(contractorId)
+		getSubscriptionView(contractorId, locals.user.createdAt)
 	]);
 	// Only meaningful while a trial is live; skip the three counts otherwise.
 	const limits = subscription.access.limitsApply ? await getLimitStatus(contractorId) : null;
@@ -61,7 +58,9 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 	return {
 		userName: locals.user.name,
 		awaitingReply,
-		contractorTags,
+		// Where this contractor keeps their navigation on a phone. Read here rather
+		// than per-page because the bar and the bottom bar are both layout chrome.
+		navPlacement: isNavPlacement(settings.navPlacement) ? settings.navPlacement : 'top',
 		viewAsEnabled,
 		viewAsCustomer,
 		// The real-session swap needs the seeded accounts as well as the dev-tools

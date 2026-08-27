@@ -180,7 +180,7 @@
 	.demo:focus-visible,
 	.primary:focus-visible,
 	.github:focus-visible {
-		outline: 3px solid var(--yellow);
+		outline: 3px solid var(--brand);
 		outline-offset: 3px;
 	}
 
@@ -191,9 +191,8 @@
 		margin: 0 auto;
 		padding: 0.45rem 1.1rem;
 		border-radius: 999px;
-		/* Brand yellow is light in both themes, so the label stays pinned dark. */
-		background: #ffcc00;
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		border: none;
 		box-shadow: var(--pop-shadow-sm);
 		font-size: 0.75rem;
@@ -250,8 +249,8 @@
 	/* Selected tab takes the app's brand-yellow pill — same active-state language
 	   as the nav. Label pinned dark: yellow is light in both themes. */
 	.tabs button.active {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		box-shadow: 0 1px 3px rgba(27, 31, 36, 0.18);
 	}
 	.tabs button:focus-visible {
@@ -301,7 +300,7 @@
 		outline: none;
 		background: var(--field-fill-lift);
 		border-color: var(--field-line-focus);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.25);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 	}
 	/* The submit action wears the brand: safety yellow with the pinned dark border
 	   and label, same as every other primary action in the app. --pop-shadow keeps
@@ -310,8 +309,8 @@
 		padding: 0.6rem;
 		border: none;
 		border-radius: 10px;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-size: 0.85rem;
 		box-shadow: var(--pop-shadow-sm);
 	}
@@ -351,7 +350,7 @@
 		font-size: 0.85rem;
 		font-weight: 700;
 		text-decoration: underline;
-		text-decoration-color: var(--yellow-deep);
+		text-decoration-color: var(--brand-deep);
 		text-decoration-thickness: 2px;
 		text-underline-offset: 3px;
 		cursor: pointer;

@@ -434,9 +434,9 @@
 		color: var(--fg);
 	}
 	.tab.on {
-		background: var(--yellow);
+		background: var(--brand);
 		/* Pinned dark: yellow stays light in both themes. */
-		color: var(--on-yellow);
+		color: var(--on-brand);
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.tab:focus-visible {
@@ -479,8 +479,8 @@
 	/* The active job is coloured in with the app accent, matching the channel tabs —
 	   a subtle raised tint didn't read clearly as "this is the one you're viewing". */
 	.proj-tab.on {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.proj-nav {
@@ -563,8 +563,8 @@
 		padding: 0.35rem 0.9rem;
 		border: none;
 		border-radius: 999px;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-family: inherit;
 		font-size: 0.82rem;
 		font-weight: 700;
@@ -572,7 +572,7 @@
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.sent-done:hover {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 
 	/* The Chat tab for a customer who isn't on the portal yet: a short reason to
@@ -647,8 +647,8 @@
 		height: 1.6rem;
 		border-radius: 999px;
 		/* Pinned dark: yellow stays light in both themes. */
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-size: 0.85rem;
 		font-weight: 800;
 	}
@@ -681,8 +681,8 @@
 		padding: 0.55rem 1rem;
 		border: none;
 		border-radius: 999px;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-family: inherit;
 		font-size: 0.88rem;
 		font-weight: 700;
@@ -690,7 +690,7 @@
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.invite-send:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.invite-send:disabled {
 		opacity: 0.6;

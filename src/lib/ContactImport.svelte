@@ -14,7 +14,13 @@
 	} from '$lib/contact-import';
 
 	/**
-	 * Import customers from the contractor's own contacts.
+	 * Import people from the contractor's own contacts.
+	 *
+	 * Used for both halves of the directory: customers, and the crew who work
+	 * alongside the contractor. Both come out of the same address book through the
+	 * same review list — where they land is the caller's `action`, and whether an
+	 * email is compulsory is `emailRequired`, because a customer is identified by
+	 * theirs and a crew member is not.
 	 *
 	 * Two ways in, because no single one covers the devices this app is used on:
 	 * the OS contact picker where the browser has one (Chromium on Android), and a
@@ -25,7 +31,7 @@
 	 * without them ticking it. The OS picker hands back only the entries they
 	 * selected in its own sheet; the file path only sees a file they picked. The
 	 * review list in between exists so an address book of four hundred people
-	 * doesn't become four hundred customers.
+	 * doesn't become four hundred records.
 	 *
 	 * The parsing lives in $lib/contact-import, where it is tested. This file is
 	 * the choosing and the reviewing.
@@ -34,13 +40,44 @@
 	let {
 		existingEmails = [],
 		remaining = null,
+		action = '?/importCustomers',
+		noun = 'customer',
+		emailRequired = true,
+		kinds,
 		onclose,
 		onimported
 	}: {
 		/** Emails already in the directory, so repeats can be flagged, not created. */
 		existingEmails?: string[];
-		/** Customers a trial still has room for; null when uncapped. */
+		/** Records a trial still has room for; null when uncapped. */
 		remaining?: number | null;
+		/**
+		 * The form action to post to. Customers and crew both come out of the same
+		 * address book and through the same review list, and only differ in which
+		 * directory they land in.
+		 */
+		action?: string;
+		/** What is being imported, for the button and the empty state. */
+		noun?: string;
+		/**
+		 * Whether an address is required. See `contactIssue`: a customer is
+		 * identified by their email, a crew member is not. Ignored for a row whose
+		 * chosen `kind` states its own answer.
+		 */
+		emailRequired?: boolean;
+		/**
+		 * What each contact may become, when that is a choice.
+		 *
+		 * Left unset the import has one destination and every row goes there. Set,
+		 * each row carries a radio group and the contractor answers per person —
+		 * because an address book is a flat list of people and which of them you
+		 * engage as a business is not written anywhere in it. The FIRST option is
+		 * the default, so the common case stays a two-click import.
+		 *
+		 * `emailRequired` is per option, since the answer differs by destination:
+		 * a subcontractor is identified by their address, a crew member is not.
+		 */
+		kinds?: { id: string; label: string; hint?: string; emailRequired?: boolean }[];
 		onclose: () => void;
 		onimported: (summary: ImportSummary) => void;
 	} = $props();
@@ -51,7 +88,14 @@
 	// `id` is what the list is keyed on. Keying on anything derived from the
 	// contact would re-key the row as its email is typed into, which tears the
 	// input out of the DOM and takes the caret with it.
-	type Row = { id: number; contact: ImportedContact; selected: boolean };
+	type Row = { id: number; contact: ImportedContact; selected: boolean; kind: string };
+
+	/** The destination a row lands in, and whether it demands an email. */
+	const defaultKind = $derived(kinds?.[0]?.id ?? '');
+	function kindNeedsEmail(kind: string): boolean {
+		const chosen = kinds?.find((k) => k.id === kind);
+		return chosen ? (chosen.emailRequired ?? emailRequired) : emailRequired;
+	}
 
 	let stage: 'source' | 'review' = $state('source');
 	let rows: Row[] = $state([]);
@@ -62,13 +106,20 @@
 	const picker = contactsPicker();
 	const known = $derived(new Set(existingEmails.map((e) => e.trim().toLowerCase())));
 
-	/** Recomputed as emails are typed in, so a filled-in row unblocks itself. */
-	const issues = $derived(rows.map((row) => contactIssue(row.contact, known)));
+	/** Recomputed as emails are typed in — and as a row's destination is changed,
+	    since what one destination accepts another refuses. */
+	const issues = $derived(
+		rows.map((row) => contactIssue(row.contact, known, { emailRequired: kindNeedsEmail(row.kind) }))
+	);
 	const selected = $derived(rows.filter((row, i) => row.selected && issues[i] === null));
 	const duplicateCount = $derived(issues.filter((i) => i === 'duplicate').length);
 	const overCap = $derived(remaining !== null && selected.length > remaining);
 	const overMax = $derived(selected.length > IMPORT_MAX);
-	const payload = $derived(JSON.stringify(selected.map((row) => row.contact)));
+	const payload = $derived(
+		JSON.stringify(
+			selected.map((row) => (kinds ? { ...row.contact, kind: row.kind } : row.contact))
+		)
+	);
 
 	function load(found: (ImportedContact | null)[]) {
 		const contacts = dedupeContacts(found.filter((c): c is ImportedContact => c !== null));
@@ -84,7 +135,9 @@
 		rows = contacts.map((contact, id) => ({
 			id,
 			contact,
-			selected: contactIssue(contact, known) === null
+			kind: defaultKind,
+			selected:
+				contactIssue(contact, known, { emailRequired: kindNeedsEmail(defaultKind) }) === null
 		}));
 		stage = 'review';
 	}
@@ -148,6 +201,18 @@
 	</div>
 
 	{#if stage === 'source'}
+		<!-- WHERE they land, which is the one thing this dialog cannot leave
+		     ambiguous: it is mounted on two directories, and importing your crew
+		     into your customer list is not a mistake you would notice quickly. The
+		     heading stays generic — it names the action, and it is what the whole
+		     dialog is addressed by. -->
+		{#if kinds}
+			<p class="destination">
+				You choose what each contact becomes — <strong>{kinds[0].label}</strong> unless you say otherwise.
+			</p>
+		{:else}
+			<p class="destination">These become <strong>{noun}s</strong>.</p>
+		{/if}
 		<!-- Two ways in, said in as few words as each needs. The permission prompt
 		     and the review list are the real explanations; a paragraph in front of
 		     them was just something to scroll past. -->
@@ -207,10 +272,36 @@
 						{#if detailLine(row.contact) !== ''}
 							<p class="row-sub">{detailLine(row.contact)}</p>
 						{/if}
+						{#if kinds}
+							<!-- One person, one answer. A radio group rather than a bulk switch at
+							     the top of the list: an address book is a mix, and a control that
+							     sets all of them is a control you have to undo for most of them. -->
+							<div
+								class="row-kinds"
+								role="radiogroup"
+								aria-label="What {row.contact.name || 'this contact'} becomes"
+							>
+								{#each kinds as kind (kind.id)}
+									<label class="kind" class:on={row.kind === kind.id}>
+										<input
+											class="kind-radio"
+											type="radio"
+											name="kind-{row.id}"
+											value={kind.id}
+											checked={row.kind === kind.id}
+											onchange={() => (rows[i].kind = kind.id)}
+										/>
+										<span>{kind.label}</span>
+									</label>
+								{/each}
+							</div>
+						{/if}
 						{#if issue === 'no-email' || issue === 'bad-email'}
-							<!-- A customer is identified by their email in this app, so a
-							     contact without one gets somewhere to add it rather than
-							     being dropped from the list. -->
+							<!-- Whoever needs an address is identified by it — a customer always, a
+							     subcontractor when that is what this row is becoming — so a contact
+							     without one gets somewhere to add it rather than being dropped from
+							     the list. Never disabled: picking a destination that does not need an
+							     email clears the block on its own. -->
 							<input
 								type="email"
 								class="row-email"
@@ -239,7 +330,7 @@
 
 		<form
 			method="POST"
-			action="?/importCustomers"
+			{action}
 			use:enhance={() => {
 				busy = true;
 				return async ({ result }) => {
@@ -322,12 +413,12 @@
 	}
 	/* Pinned dark on yellow: yellow stays light in both themes. */
 	.source.primary {
-		background: var(--yellow);
+		background: var(--brand);
 		border-color: transparent;
-		color: var(--on-yellow);
+		color: var(--on-brand);
 	}
 	.source.primary:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 		border-color: transparent;
 	}
 
@@ -393,7 +484,7 @@
 		height: 1.05rem;
 		margin-top: 0.15rem;
 		flex: none;
-		accent-color: var(--yellow-deep);
+		accent-color: var(--brand-deep);
 		cursor: pointer;
 	}
 	.row-check:disabled {
@@ -434,6 +525,53 @@
 		border-color: var(--danger);
 		color: var(--danger);
 	}
+	/* The destination picker: two segments of one control, not two loose radios.
+	   The radio itself stays in the DOM for the keyboard and the screen reader —
+	   `role="radiogroup"` on the wrapper, arrow keys and all — and the segment
+	   around it is only the paint. */
+	.row-kinds {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin-top: 0.35rem;
+	}
+	.kind {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.15rem 0.6rem;
+		border: 1.5px solid var(--line-strong);
+		border-radius: 999px;
+		background: var(--surface);
+		color: var(--fg-muted);
+		font-size: 0.74rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.kind:hover {
+		border-color: var(--fg-muted);
+		color: var(--fg);
+	}
+	.kind.on {
+		background: var(--brand);
+		border-color: transparent;
+		color: var(--on-brand);
+	}
+	.kind:focus-within {
+		outline: 2px solid var(--brand-deep);
+		outline-offset: 1px;
+	}
+	.kind-radio {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		margin: -1px;
+		padding: 0;
+		border: 0;
+		clip-path: inset(50%);
+		overflow: hidden;
+		white-space: nowrap;
+	}
+
 	.row-email {
 		width: 100%;
 		max-width: 20rem;
@@ -487,13 +625,13 @@
 	}
 	.go {
 		border: 1px solid transparent;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-weight: 700;
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.go:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.go:disabled {
 		opacity: 0.55;
@@ -503,5 +641,15 @@
 	.source:focus-visible {
 		outline: 2px solid var(--fg);
 		outline-offset: 2px;
+	}
+	/* Where an import lands. Quiet, but never absent — the dialog serves two
+	   directories and the difference is not recoverable at a glance afterwards. */
+	.destination {
+		margin: 0;
+		font-size: 0.85rem;
+		color: var(--fg-muted);
+	}
+	.destination strong {
+		color: var(--fg);
 	}
 </style>

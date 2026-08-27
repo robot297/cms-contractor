@@ -281,8 +281,8 @@
 		border: 1.5px solid transparent;
 	}
 	.pill.trial {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		border-color: #14171c;
 	}
 	.pill.active,
@@ -336,7 +336,7 @@
 	.meter-fill {
 		display: block;
 		height: 100%;
-		background: linear-gradient(90deg, var(--yellow), var(--yellow-deep));
+		background: linear-gradient(90deg, var(--brand), var(--brand-deep));
 	}
 	.usage li.at .meter-fill {
 		background: var(--danger);
@@ -366,8 +366,8 @@
 		cursor: pointer;
 	}
 	.toggle-opt.on {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 	.save {
 		font-size: 0.68rem;
@@ -409,7 +409,7 @@
 		content: '✓';
 		position: absolute;
 		left: 0;
-		color: var(--yellow-deep);
+		color: var(--brand-deep);
 		font-weight: 800;
 	}
 
@@ -428,7 +428,7 @@
 		background: #000;
 	}
 	.btn:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 2px;
 	}
 
@@ -488,7 +488,7 @@
 		border-color: var(--fg-muted);
 	}
 	.dev-btn:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 2px;
 	}
 </style>
