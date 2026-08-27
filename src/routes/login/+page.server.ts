@@ -3,11 +3,12 @@ import { APIError } from 'better-auth/api';
 import { auth } from '$lib/server/auth';
 import { isDemoEnabled, prepareDemoSession } from '$lib/server/demo.server';
 import { isEmailConfigured } from '$lib/server/email.server';
+import { isSignupEnabled } from '$lib/server/dev-login.server';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) redirect(302, '/');
-	return { demoEnabled: isDemoEnabled() };
+	return { demoEnabled: isDemoEnabled(), signupEnabled: isSignupEnabled() };
 };
 
 /**
@@ -71,6 +72,15 @@ export const actions: Actions = {
 	},
 
 	signUp: async (event) => {
+		// Refused on the SERVER as well as hidden in the page. The tab being gone
+		// stops the honest route in; this stops a saved bookmark, a stale tab and a
+		// posted form — the action is a URL, and a hidden button is not a lock.
+		if (!isSignupEnabled())
+			return fail(403, {
+				mode: 'signUp',
+				message: 'New accounts are closed for the moment. Try the demo, or get in touch.'
+			});
+
 		const form = await event.request.formData();
 		const email = (form.get('email')?.toString() ?? '').trim();
 		const password = form.get('password')?.toString() ?? '';

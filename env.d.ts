@@ -188,6 +188,24 @@ export type CoercedEnvSchema = {
   EMAIL_DEV_TOOLS?: string;
   
   /**
+   * **SIGNUPS_ENABLED**  
+   * Self-serve signup. Set to "true" to let anyone create a contractor account  
+   * from the login page; anything else (including unset) hides the Sign up tab and  
+   * refuses the action.  
+   *   
+   * OFF by default, and deliberately: creating an account sends a verification  
+   * email, and until this domain's DKIM is published that mail is unsigned — which  
+   * means it lands in spam, or is dropped outright, and the person who just signed  
+   * up is left holding an account they cannot get into. A signup form that cannot  
+   * deliver its own verification link is worse than no signup form.  
+   *   
+   * Turn it on once DKIM (and SPF/DMARC) resolve for EMAIL_FROM's domain. The demo  
+   * entry and SEED_DEV_LOGIN are unaffected — neither sends mail.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SIGNUPS_ENABLED?: string;
+  
+  /**
    * **SEED_DEV_LOGIN**  
    * Set to "true" to provision pre-verified logins at boot, so local development  
    * doesn't require completing a real email-verification loop against a fresh  
@@ -312,11 +330,11 @@ export type CoercedEnvSchema = {
   
 };
 
-type _CoercedEnvSchema_16204262 = CoercedEnvSchema;
+type _CoercedEnvSchema_38816588 = CoercedEnvSchema;
 
 declare module 'varlock/env' {
-  export interface TypedEnvSchema extends Readonly<_CoercedEnvSchema_16204262> {}
-  export interface PublicTypedEnvSchema extends Readonly<Pick<_CoercedEnvSchema_16204262, 'MIGRATIONS_FOLDER' | 'ORIGIN' | 'GITHUB_REPO' | 'GITHUB_LABEL_BUG' | 'GITHUB_LABEL_FEATURE' | 'TURNSTILE_SITE_KEY' | 'STRIPE_PRICE_MONTHLY' | 'STRIPE_PRICE_ANNUAL' | 'BILLING_DEV_TOOLS' | 'EMAIL_FROM' | 'EMAIL_DEV_TOOLS' | 'SEED_DEV_LOGIN' | 'ID_SCAN_DEV_TOOLS' | 'SENTRY_DSN' | 'SENTRY_ENVIRONMENT' | 'SENTRY_TRACES_SAMPLE_RATE' | 'SENTRY_ORG' | 'SENTRY_PROJECT' | 'CUSTOMER_PORTAL_DEV_TOOLS'>> {}
+  export interface TypedEnvSchema extends Readonly<_CoercedEnvSchema_38816588> {}
+  export interface PublicTypedEnvSchema extends Readonly<Pick<_CoercedEnvSchema_38816588, 'MIGRATIONS_FOLDER' | 'ORIGIN' | 'GITHUB_REPO' | 'GITHUB_LABEL_BUG' | 'GITHUB_LABEL_FEATURE' | 'TURNSTILE_SITE_KEY' | 'STRIPE_PRICE_MONTHLY' | 'STRIPE_PRICE_ANNUAL' | 'BILLING_DEV_TOOLS' | 'EMAIL_FROM' | 'EMAIL_DEV_TOOLS' | 'SIGNUPS_ENABLED' | 'SEED_DEV_LOGIN' | 'ID_SCAN_DEV_TOOLS' | 'SENTRY_DSN' | 'SENTRY_ENVIRONMENT' | 'SENTRY_TRACES_SAMPLE_RATE' | 'SENTRY_ORG' | 'SENTRY_PROJECT' | 'CUSTOMER_PORTAL_DEV_TOOLS'>> {}
 }
 
 
@@ -326,17 +344,17 @@ export type EnvSchemaAsStrings = {
       : (CoercedEnvSchema[Property] extends boolean ? ('true' | 'false') : string)
 };
 
-type _EnvSchemaAsStrings_16204262 = EnvSchemaAsStrings;
+type _EnvSchemaAsStrings_38816588 = EnvSchemaAsStrings;
 declare global {
 
   // add types for global import.meta.env
-  interface ImportMetaEnv extends _EnvSchemaAsStrings_16204262 {}
+  interface ImportMetaEnv extends _EnvSchemaAsStrings_38816588 {}
   interface ImportMeta {
     readonly env: ImportMetaEnv;
   }
 
   // add types for global process.env
   namespace NodeJS {
-    interface ProcessEnv extends _EnvSchemaAsStrings_16204262 {}
+    interface ProcessEnv extends _EnvSchemaAsStrings_38816588 {}
   }
 }

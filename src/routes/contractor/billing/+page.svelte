@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -42,6 +43,13 @@
 
 <div class="wrap">
 	<header class="head">
+		<!-- Billing is its own route rather than a Settings tab — one surface owns
+		     plans and payment — but it is reached FROM Settings, and it had no way
+		     back. The nav bar's Settings gear is not that way out: it is a
+		     destination, not a return, and on the tab layouts where the bar is
+		     collapsed it is not on screen at all. Same treatment as the order
+		     workspace's "← Orders". -->
+		<a class="back-link" href={resolve('/contractor/settings')}>← Settings</a>
 		<h1>Billing</h1>
 		<p class="sub">One subscription, priced per contractor. No tiers to compare.</p>
 	</header>
@@ -230,6 +238,19 @@
 		margin: 0.35rem 0 0;
 		color: var(--fg-muted);
 		font-size: 0.92rem;
+	}
+	/* Above the title, not beside it: the way out of a page reads as the first
+	   thing on it. Matches `.back-link` on the order workspace. */
+	.back-link {
+		display: inline-block;
+		margin-bottom: 0.35rem;
+		font-size: 0.9rem;
+		font-weight: 500;
+		color: var(--fg-muted);
+		text-decoration: none;
+	}
+	.back-link:hover {
+		color: var(--fg);
 	}
 
 	.card {

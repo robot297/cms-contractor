@@ -6,6 +6,14 @@
 	let { form, data }: { form: ActionData; data: PageData } = $props();
 	let mode = $state<'signIn' | 'signUp'>('signIn');
 	let demoLoading = $state(false);
+
+	/**
+	 * Whether anyone may make their own account. Off while this domain's DKIM is
+	 * unpublished: a verification email nobody receives leaves the person who just
+	 * signed up holding an account they cannot get into, which is worse than not
+	 * offering the form. The server refuses the action too — see the route.
+	 */
+	const signupEnabled = $derived(data.signupEnabled);
 </script>
 
 <svelte:head>
@@ -38,14 +46,18 @@
 			<div class="divider"><span>or</span></div>
 		{/if}
 
-		<div class="tabs">
-			<button type="button" class:active={mode === 'signIn'} onclick={() => (mode = 'signIn')}
-				>Sign in</button
-			>
-			<button type="button" class:active={mode === 'signUp'} onclick={() => (mode = 'signUp')}
-				>Sign up</button
-			>
-		</div>
+		<!-- One way in means no tabs to switch between. A strip with a single lit
+		     tab on it is chrome asking a question with one answer. -->
+		{#if signupEnabled}
+			<div class="tabs">
+				<button type="button" class:active={mode === 'signIn'} onclick={() => (mode = 'signIn')}
+					>Sign in</button
+				>
+				<button type="button" class:active={mode === 'signUp'} onclick={() => (mode = 'signUp')}
+					>Sign up</button
+				>
+			</div>
+		{/if}
 
 		{#if form?.message}
 			<p class="error">{form.message}</p>
@@ -66,7 +78,7 @@
 			</form>
 		{/if}
 
-		{#if mode === 'signIn'}
+		{#if mode === 'signIn' || !signupEnabled}
 			<form method="POST" action="?/signIn" use:enhance class="fields">
 				<label>Email<input name="email" type="email" required autocomplete="email" /></label>
 				<label

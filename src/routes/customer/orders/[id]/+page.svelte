@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import DocumentList from '$lib/DocumentList.svelte';
+	import { reviewPlatformLabel } from '$lib/reviews';
 	import DocumentViewer from '$lib/DocumentViewer.svelte';
 	import MessageComposer from '$lib/MessageComposer.svelte';
 	import MessageThread from '$lib/MessageThread.svelte';
@@ -411,6 +412,52 @@
 			Payments are arranged with {data.order.contractorName} directly. This page is a record of what has
 			been paid.
 		</p>
+	</section>
+{/if}
+
+<!-- The ask, and only once the work is actually done.
+     
+     The whole point of putting it here is timing. A contractor who wants reviews
+     has to remember to ask at the one moment the customer is most inclined to
+     say yes — which is the moment they are least likely to remember, because the
+     job just ended and they are already on the next site. This is the portal
+     doing it for them, on every job, without anyone deciding to.
+     
+     `reviewLinks` is empty unless the job is Completed AND the contractor has
+     configured at least one — the server does not send them otherwise, so there
+     is no state where this renders early. See the load's note on why that is a
+     query condition rather than a display one.
+     
+     A section, so it lands on the Project tab and not Messages: the phone tabs
+     hide every `section` that is not the thread. -->
+{#if data.reviewLinks.length > 0}
+	<section class="card reviews" id="reviews">
+		<div class="card-head">
+			<h2>How did we do?</h2>
+		</div>
+		<p class="reviews-ask">
+			{order.contractorName} finished your project. If they did right by you, a review is the single most
+			useful thing you can leave them — it is how the next person finds them.
+		</p>
+		<ul class="review-links">
+			{#each data.reviewLinks as link (link.platform)}
+				<li>
+					<!-- eslint-disable svelte/no-navigation-without-resolve --
+					     Not a route in this app: `link.url` is an external review platform,
+					     validated as absolute http(s) on the way in (see validateReviewUrl —
+					     the scheme check is what keeps a pasted `javascript:` out of this
+					     href). A block disable rather than `-next-line`, because the rule
+					     reports on the attribute and a multi-line comment lands the
+					     exemption on the wrong row. -->
+					<a class="review-link" href={link.url} target="_blank" rel="noopener noreferrer">
+						<span class="review-link-name">{reviewPlatformLabel(link.platform)}</span>
+						<span class="review-link-go" aria-hidden="true">↗</span>
+					</a>
+					<!-- eslint-enable svelte/no-navigation-without-resolve -->
+				</li>
+			{/each}
+		</ul>
+		<p class="reviews-fine">Opens in a new tab. No pressure — and thank you either way.</p>
 	</section>
 {/if}
 
@@ -975,6 +1022,60 @@
 	.history {
 		scroll-margin-top: 5rem;
 	}
+	/* ------------------------------------------------------------------ Reviews
+	   The ask on a finished job. Accent-edged rather than plain, because it is the
+	   one thing on this page addressed TO the customer rather than reporting to
+	   them — everything else here is the state of their job. */
+	.reviews {
+		border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+	}
+	.reviews-ask {
+		margin: 0;
+		font-size: 0.9rem;
+		line-height: 1.5;
+		color: var(--fg);
+	}
+	.review-links {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+	}
+	/* Pills, not a stacked list. These are alternatives — one review is the ask,
+	   not eight — and a column of full-width rows reads as a checklist. */
+	.review-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.5rem 0.85rem;
+		border: 1px solid var(--accent);
+		border-radius: 999px;
+		background: var(--accent-soft);
+		color: var(--fg);
+		font-size: 0.88rem;
+		font-weight: 700;
+		text-decoration: none;
+	}
+	.review-link:hover {
+		background: var(--accent);
+		color: var(--accent-fg);
+	}
+	.review-link:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.review-link-go {
+		font-size: 0.8rem;
+		opacity: 0.75;
+	}
+	.reviews-fine {
+		margin: 0;
+		font-size: 0.78rem;
+		color: var(--fg-muted);
+	}
+
 	/* ------------------------------------------------------------------ Invoice
 	   The customer's copy of the money. Same figures as the contractor's card and
 	   the emailed invoice — all three read one server-computed summary — drawn in

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { composeEmail, EMAIL_BODY_LENGTH_GUIDANCE, EMAIL_TEMPLATE_PLACEHOLDERS } from '$lib/crm';
 	import { renderEmail } from '$lib/email';
@@ -116,7 +116,54 @@
 	);
 	// One toggle for the page: the accordion only ever has a single panel open.
 	let previewMode = $state<'html' | 'text'>('html');
+
+	// Element handles for the fields that accept placeholders. Only one editor is
+	// ever open (create *or* one template), so a single pair of edit refs is enough.
+	let signatureEl = $state<HTMLTextAreaElement | null>(null);
+	let editSubjectEl = $state<HTMLInputElement | null>(null);
+	let editBodyEl = $state<HTMLTextAreaElement | null>(null);
+	let newSubjectEl = $state<HTMLInputElement | null>(null);
+	let newBodyEl = $state<HTMLTextAreaElement | null>(null);
+
+	/**
+	 * Drop `{{token}}` into a field at the caret (replacing any selection) rather
+	 * than making people type the braces — mistyped tokens don't substitute, they
+	 * just ship literally. The caret lands after the inserted token and focus goes
+	 * back to the field, so inserting then typing reads as one continuous edit.
+	 * `tick()` waits for the bound value to land in the DOM before we move the
+	 * caret; setting it any earlier would be undone by the re-render.
+	 */
+	async function insertToken(
+		el: HTMLInputElement | HTMLTextAreaElement | null,
+		token: string,
+		current: string,
+		apply: (next: string) => void
+	) {
+		const text = `{{${token}}}`;
+		const start = el?.selectionStart ?? current.length;
+		const end = el?.selectionEnd ?? current.length;
+		apply(current.slice(0, start) + text + current.slice(end));
+		await tick();
+		el?.focus();
+		el?.setSelectionRange(start + text.length, start + text.length);
+	}
 </script>
+
+<!-- The insert row that sits under a placeholder-accepting field. `insert` is the
+     caller's binding of `insertToken` to that particular field. -->
+{#snippet tokenBar(insert: (token: string) => void)}
+	<div class="tokenbar">
+		<span class="tokenbar-label">Insert</span>
+		{#each EMAIL_TEMPLATE_PLACEHOLDERS as p (p.token)}
+			<button
+				type="button"
+				class="token-chip"
+				title={`Insert {{${p.token}}} — ${p.label}`}
+				onclick={() => insert(p.token)}>{p.label}</button
+			>
+		{/each}
+	</div>
+{/snippet}
 
 <!-- Preview header, shared by the create and edit panels: a label plus the
      formatted/plain-text switch. Both parts are sent, so both are viewable. -->
@@ -156,9 +203,13 @@
 			<span>Signature</span>
 			<textarea
 				name="signature"
+				bind:this={signatureEl}
 				bind:value={signature}
 				rows="3"
 				placeholder="Thanks so much,&#10;{`{{contractor}}`}"></textarea>
+			{@render tokenBar((token) =>
+				insertToken(signatureEl, token, signature, (next) => (signature = next))
+			)}
 		</label>
 		<div class="preview">
 			<span class="preview-label">Signature preview</span>
@@ -168,14 +219,14 @@
 					signature
 				).body || '—'}</pre>
 		</div>
-		<div class="row-actions">
+		<div class="row-actions end">
+			{#if form?.saved === 'signature' && !signatureDirty}<span class="ok">Saved ✓</span>{/if}
 			<button
 				type="submit"
 				class="btn primary"
 				disabled={!signatureDirty}
 				title={signatureDirty ? 'Save signature' : 'No changes to save'}>Save signature</button
 			>
-			{#if form?.saved === 'signature' && !signatureDirty}<span class="ok">Saved ✓</span>{/if}
 		</div>
 	</form>
 </section>
@@ -207,17 +258,25 @@
 					<span>Subject</span>
 					<input
 						name="subject"
+						bind:this={newSubjectEl}
 						bind:value={newSubject}
 						placeholder="Following on {`{{project}}`}"
 					/>
+					{@render tokenBar((token) =>
+						insertToken(newSubjectEl, token, newSubject, (next) => (newSubject = next))
+					)}
 				</label>
 				<label class="field">
 					<span>Body</span>
 					<textarea
 						name="body"
+						bind:this={newBodyEl}
 						bind:value={newBody}
 						rows="5"
 						placeholder="Hi {`{{customer}}`},&#10;&#10;…"></textarea>
+					{@render tokenBar((token) =>
+						insertToken(newBodyEl, token, newBody, (next) => (newBody = next))
+					)}
 					<small class="muted"
 						>Keep under ~{EMAIL_BODY_LENGTH_GUIDANCE.toLocaleString()} characters — some mail apps trim
 						long <code>mailto:</code> messages.</small
@@ -323,11 +382,23 @@
 							</label>
 							<label class="field">
 								<span>Subject</span>
-								<input name="subject" bind:value={editSubject} placeholder="Subject" />
+								<input
+									name="subject"
+									bind:this={editSubjectEl}
+									bind:value={editSubject}
+									placeholder="Subject"
+								/>
+								{@render tokenBar((token) =>
+									insertToken(editSubjectEl, token, editSubject, (next) => (editSubject = next))
+								)}
 							</label>
 							<label class="field">
 								<span>Body</span>
-								<textarea name="body" bind:value={editBody} rows="5"></textarea>
+								<textarea name="body" bind:this={editBodyEl} bind:value={editBody} rows="5"
+								></textarea>
+								{@render tokenBar((token) =>
+									insertToken(editBodyEl, token, editBody, (next) => (editBody = next))
+								)}
 							</label>
 							<div class="preview">
 								{@render previewHead()}
@@ -384,6 +455,10 @@
      while writing a template, not the headline of the page. -->
 <section class="card">
 	<h2>Placeholders</h2>
+	<p class="muted">
+		Use the <strong>Insert</strong> buttons under a field to drop one in at the cursor — no need to type
+		the braces.
+	</p>
 	<ul class="chips">
 		{#each EMAIL_TEMPLATE_PLACEHOLDERS as p (p.token)}
 			<li><code>{`{{${p.token}}}`}</code> <span>{p.label}</span></li>
@@ -471,6 +546,47 @@
 		border-color: var(--brand-deep);
 		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
+	}
+	/* Insert row: sits directly under the field it fills, small enough to read as
+	   a tool attached to the input rather than another row of form controls. */
+	.tokenbar {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin-top: 0.05rem;
+	}
+	.tokenbar-label {
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		font-weight: 700;
+		color: #8b949e;
+	}
+	.token-chip {
+		border: 1px solid var(--field-border);
+		background: var(--surface);
+		color: var(--fg-muted);
+		border-radius: 999px;
+		padding: 0.15rem 0.55rem;
+		font-family: inherit;
+		font-size: 0.75rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition:
+			background 0.12s ease,
+			border-color 0.12s ease,
+			color 0.12s ease;
+	}
+	.token-chip:hover {
+		background: var(--brand);
+		border-color: transparent;
+		color: var(--on-brand);
+	}
+	.token-chip:focus-visible {
+		outline: none;
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 	}
 	.preview {
 		background: #f9fafb;
@@ -622,6 +738,11 @@
 		gap: 0.4rem;
 		flex-wrap: wrap;
 	}
+	/* Signature save sits at the trailing edge of its card, under the field it
+	   commits, rather than leading the row. */
+	.row-actions.end {
+		justify-content: flex-end;
+	}
 	.spacer {
 		flex: 1;
 	}
@@ -722,6 +843,9 @@
 	:global(:root[data-theme='dark']) .field input,
 	:global(:root[data-theme='dark']) .field textarea {
 		color: var(--fg);
+	}
+	:global(:root[data-theme='dark']) .tokenbar-label {
+		color: var(--fg-muted);
 	}
 	:global(:root[data-theme='dark']) .preview {
 		background: var(--surface-inset);

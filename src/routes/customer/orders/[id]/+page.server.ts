@@ -17,6 +17,7 @@ import {
 	ThreadForbiddenError
 } from '$lib/server/messaging.server';
 import { completeTaskAsCustomer, TaskNotFoundError } from '$lib/server/tasks.server';
+import { listReviewLinks } from '$lib/server/reviews.server';
 import type { Actions, PageServerLoad } from './$types';
 
 /** The portal's subject for this request, and whether it is an impersonated view. */
@@ -92,7 +93,20 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	// second copy of it living here.
 	const documents = await listDocuments(viewerFromLocals(locals)!, params.id);
 
-	return { order, thread, documents, viewing, unreadReplies, owesReply };
+	// Where this contractor can be reviewed — loaded ONLY for a finished job.
+	//
+	// Not a display condition: an unfinished job must not carry the links to the
+	// browser at all. A review ask that appears mid-job is worse than no ask,
+	// and "we send it but hide it" is one CSS mistake away from doing exactly
+	// that. Nothing is queried on the other nine states.
+	//
+	// Read unguarded by billing on purpose: a lapsed contractor cannot ADD a link
+	// (that check is in reviews.server.ts) but the ones already there keep
+	// working, because nothing about lapsing may reach a customer — ADR-0005.
+	const reviewLinks =
+		order.customerVisibleState === 'Completed' ? await listReviewLinks(order.contractorId) : [];
+
+	return { order, thread, documents, viewing, unreadReplies, owesReply, reviewLinks };
 };
 
 export const actions: Actions = {

@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { test } from './fixtures/app';
+import { uid } from './fixtures/app';
 import { customerPage } from './fixtures/portal';
 
 /**
@@ -43,6 +44,55 @@ test.describe('portal phone tabs', () => {
 		await page.goto(`${order}?view=messages`);
 		await page.waitForSelector('#messages');
 		expect(await visibleSections(page)).toEqual(['#messages']);
+
+		await page.close();
+	});
+
+	/**
+	 * Opening Messages puts you on the newest message.
+	 *
+	 * The thread is mounted the whole time on this layout — Project and Messages
+	 * are one page with the other half hidden — so the scroll-to-bottom used to
+	 * run against a `display: none` box, where `scrollHeight` is 0 and setting
+	 * `scrollTop` does nothing. The tab then opened on the OLDEST message.
+	 *
+	 * Reached by the bottom bar rather than `goto`, because that is the path with
+	 * the bug in it: a full load remounts the thread with the section already
+	 * visible and passes either way.
+	 */
+	test('opening Messages lands on the newest message', async ({ browser }) => {
+		const page = await customerPage(browser);
+		await page.waitForSelector('#status');
+
+		const messagesTab = page.locator('nav.bottombar').getByRole('link', { name: 'Messages' });
+		const thread = page.locator('#messages .thread');
+
+		await messagesTab.click();
+		await expect(thread).toBeVisible();
+
+		// The seeded thread is short enough to fit, and a thread that fits cannot
+		// prove anything about scrolling. Say enough to overflow the box first.
+		const composer = page.locator('form[action="?/send"]');
+		for (let i = 1; i <= 6; i++) {
+			const line = `Scroll check ${i} — ${uid()}`;
+			await composer.locator('textarea').fill(line);
+			await composer.getByRole('button', { name: 'Send message' }).click();
+			await expect(page.getByText(line)).toBeVisible();
+		}
+		const overflows = await thread.evaluate((el) => el.scrollHeight > el.clientHeight + 8);
+		expect(overflows, 'thread should overflow after six messages').toBe(true);
+
+		// Land on Project, so the thread mounts while it is `display: none` — this
+		// is the state the bug lived in. Coming BACK from Messages is not the same
+		// thing: the box keeps the scroll position it was already given.
+		await page.goto(page.url().split('?')[0]);
+		await expect(page.locator('#messages')).toBeHidden();
+		await messagesTab.click();
+		await expect(thread).toBeVisible();
+
+		await expect
+			.poll(async () => thread.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+			.toBeLessThanOrEqual(2);
 
 		await page.close();
 	});

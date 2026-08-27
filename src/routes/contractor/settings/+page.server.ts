@@ -12,6 +12,13 @@ import {
 	updateEmailTemplate
 } from '$lib/server/templates.server';
 import { setGuideState } from '$lib/server/guide.server';
+import {
+	InvalidReviewUrlError,
+	listReviewLinks,
+	removeReviewLink,
+	saveReviewLink,
+	UnknownReviewPlatformError
+} from '$lib/server/reviews.server';
 import { isEmailConfigured, isEmailDevToolsEnabled } from '$lib/server/email.server';
 import { isBillingConfigured } from '$lib/server/stripe.server';
 import {
@@ -25,7 +32,7 @@ import {
 	type SupportScreenshot
 } from '$lib/server/support.server';
 import { validateFeedback } from '$lib/crm';
-import { isFollowUpDays, isNavPlacement, TRIAL_LIMITS } from '$lib/crm';
+import { DEFAULT_NAV_PLACEMENT, isFollowUpDays, isNavPlacement, TRIAL_LIMITS } from '$lib/crm';
 import type { Actions, PageServerLoad } from './$types';
 
 function requireContractor(locals: App.Locals) {
@@ -47,14 +54,19 @@ export const load: PageServerLoad = async ({ locals }) => {
 	// and keeps the page honest if it is ever mounted elsewhere.
 	const user = requireContractor(locals);
 
-	const [view, settings, templates] = await Promise.all([
+	const [view, settings, templates, reviewLinks] = await Promise.all([
 		getSubscriptionView(user.id, user.createdAt),
 		getContractorSettings(user.id),
-		listEmailTemplates(user.id)
+		listEmailTemplates(user.id),
+		listReviewLinks(user.id)
 	]);
 	const limits = view.access.limitsApply ? await getLimitStatus(user.id) : null;
 
 	return {
+		// Where a finished job can be reviewed. Keyed by platform on the client so
+		// the form can render the whole catalogue with the configured ones filled
+		// in — the empty fields are the offer to add one.
+		reviewLinks,
 		// Support folded in from its own top-level route: filing a bug is
 		// configuration-adjacent, not a place you work, and it was spending one of
 		// five nav slots to say so.
@@ -97,7 +109,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 		followUpDays: settings.followUpDays,
 		// The layout reads this too — it is what draws the chrome. Repeated on the
 		// page's own data so the control renders from the same load that saves it.
-		navPlacement: isNavPlacement(settings.navPlacement) ? settings.navPlacement : 'top'
+		navPlacement: isNavPlacement(settings.navPlacement)
+			? settings.navPlacement
+			: DEFAULT_NAV_PLACEMENT
 	};
 };
 
@@ -309,5 +323,40 @@ export const actions: Actions = withBillingErrors({
 			return fail(400, { action: 'followUp', message: 'Pick one of the listed intervals' });
 		await saveFollowUpDays(user.id, days);
 		return { success: true, saved: 'followUp' };
+	},
+
+	/**
+	 * Set or clear ONE review platform's link.
+	 *
+	 * One platform per submit rather than a save-everything form. The eight fields
+	 * are eight independent facts, a contractor edits one of them at a time, and a
+	 * bulk save would make a typo in Yelp a reason for the Google link not to be
+	 * written either. It also means the failure message can name the field it
+	 * belongs to, which a whole-form error cannot.
+	 *
+	 * Blank is not an error — it is how you remove one. A separate "delete" button
+	 * beside every field would be a second control for something the field already
+	 * expresses by being empty.
+	 */
+	saveReviewLink: async ({ request, locals }) => {
+		const user = requireContractor(locals);
+		const form = await request.formData();
+		const platform = form.get('platform')?.toString() ?? '';
+		const url = form.get('url')?.toString() ?? '';
+
+		try {
+			if (url.trim() === '') {
+				await removeReviewLink(user.id, platform);
+				return { success: true, saved: 'review', platform };
+			}
+			await saveReviewLink(user.id, platform, url);
+			return { success: true, saved: 'review', platform };
+		} catch (error) {
+			if (error instanceof InvalidReviewUrlError)
+				return fail(400, { action: 'review', platform, message: error.message });
+			if (error instanceof UnknownReviewPlatformError)
+				return fail(400, { action: 'review', platform, message: error.message });
+			throw error;
+		}
 	}
 });

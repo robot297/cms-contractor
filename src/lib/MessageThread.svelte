@@ -124,12 +124,63 @@
 		return days;
 	});
 
-	// Keep the newest message in view when the thread grows.
+	/**
+	 * A thread opens on its newest message, always. Every surface that shows one
+	 * keeps it MOUNTED and hides it with CSS — the contractor's workspace toggles
+	 * `.pane:not(.on) { display: none }`, the portal's phone layout hides whichever
+	 * of Project / Messages you are not on — so "scroll to the bottom once, when
+	 * the messages arrive" ran against a `display: none` element, where
+	 * `scrollHeight` is 0 and the assignment is a no-op. The thread was then
+	 * revealed sitting at the top of the conversation, showing the oldest message.
+	 *
+	 * So the scroll is driven by three things rather than one:
+	 *   - the conversation changing (a reply sent, or a different job picked in
+	 *     the contact panel — which can swap the thread for one of the SAME
+	 *     length, so the message identity has to be watched, not just the count);
+	 *   - the box going from hidden to visible, i.e. gaining a size;
+	 *   - growing while already parked at the bottom.
+	 * Someone who has scrolled up to read back is left alone until one of those
+	 * first two happens.
+	 */
+	function toBottom() {
+		if (threadEl) threadEl.scrollTop = threadEl.scrollHeight;
+	}
+
+	/** Within a hair of the bottom counts as "following the conversation". */
+	const PIN_SLACK = 24;
+	let pinned = true;
+
+	function onThreadScroll() {
+		if (!threadEl) return;
+		pinned = threadEl.scrollHeight - threadEl.scrollTop - threadEl.clientHeight <= PIN_SLACK;
+	}
+
 	$effect(() => {
+		// Both reads matter: the count catches a message arriving, the last id
+		// catches a swap to a different conversation of the same length.
 		void messages.length;
-		tick().then(() => {
-			if (threadEl) threadEl.scrollTop = threadEl.scrollHeight;
+		void messages.at(-1)?.id;
+		pinned = true;
+		tick().then(toBottom);
+	});
+
+	$effect(() => {
+		const el = threadEl;
+		if (!el) return;
+		// A hidden element has no box. Reveal is therefore a resize from nothing to
+		// something, which is the one moment we can be sure a scroll will take.
+		let wasVisible = el.clientHeight > 0;
+		if (wasVisible) toBottom();
+		const observer = new ResizeObserver(() => {
+			const visible = el.clientHeight > 0;
+			if (visible && (!wasVisible || pinned)) {
+				pinned = true;
+				toBottom();
+			}
+			wasVisible = visible;
 		});
+		observer.observe(el);
+		return () => observer.disconnect();
 	});
 </script>
 
@@ -139,7 +190,7 @@
 		<p>{empty}</p>
 	</div>
 {:else}
-	<div class="thread" bind:this={threadEl}>
+	<div class="thread" bind:this={threadEl} onscroll={onThreadScroll}>
 		{#each grouped as day (day.key)}
 			<div class="day"><span>{day.label}</span></div>
 			{#each day.runs as run (run.key)}
@@ -193,6 +244,14 @@
 		gap: 0.55rem;
 		min-width: 0;
 		max-height: var(--thread-max-height, 24rem);
+		/* Inert on the surfaces that stack their card down the page, and the whole
+		   mechanism on the ones that turn Messages into a screen: given a column of
+		   known height, the thread takes the space the heading and the composer do
+		   not, and scrolls inside it. Those surfaces pass `--thread-max-height: none`
+		   and let this do the sizing, so the composer is on screen with the newest
+		   message rather than below the fold under a fixed 24rem box. */
+		flex: 1 1 auto;
+		min-height: 0;
 		overflow-y: auto;
 		padding: 0.15rem 0.1rem 0.25rem;
 		scrollbar-width: thin;

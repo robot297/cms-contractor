@@ -57,6 +57,25 @@ export function isDevLoginEnabled(): boolean {
 }
 
 /**
+ * Whether anyone may create their own contractor account.
+ *
+ * OFF unless explicitly "true", which is the opposite of how a signup form
+ * normally works and is the point: creating an account sends a verification
+ * email, and while this domain's DKIM is unpublished that mail is unsigned — so
+ * it lands in spam or is dropped, and the person who just signed up holds an
+ * account they cannot get into. A form that cannot deliver its own verification
+ * link is worse than no form.
+ *
+ * Read the same way as the flags above, and stringified for the same reason:
+ * varlock coerces an unquoted `FLAG=true` to a real boolean and keeps
+ * `FLAG="true"` a string, so a bare `=== 'true'` ignores half the ways you would
+ * write it.
+ */
+export function isSignupEnabled(): boolean {
+	return String(ENV.SIGNUPS_ENABLED) === 'true';
+}
+
+/**
  * Provision (or repair) one pre-verified login and return its user id.
  *
  * Rows are written directly rather than through auth.api.signUpEmail: the

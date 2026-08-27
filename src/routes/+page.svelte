@@ -117,10 +117,7 @@
 
 <svelte:head>
 	<title>Contractor CRM — manage client relationships with ease</title>
-	<meta
-		name="description"
-		content="Simple, powerful contractor enablement. Focus more on your projects and less on the tedium."
-	/>
+	<meta name="description" content="Powerful yet simple client relation management." />
 </svelte:head>
 
 <ThemeToggle />
@@ -136,9 +133,7 @@
 			<h1 class="headline">
 				Manage client relationships<br /><span class="accent">with ease.</span>
 			</h1>
-			<p class="subhead">
-				Simple, powerful contractor enablement to enable you to focus on projects, not tedium.
-			</p>
+			<p class="subhead">Powerful yet simple client relation management.</p>
 
 			<div class="cta-row">
 				{#if data.demoEnabled}
@@ -324,7 +319,21 @@
 			linear-gradient(180deg, #ffffff 0%, #f5f6f8 100%);
 		--hero-fg: var(--fg);
 		--hero-sub: rgba(31, 35, 40, 0.7);
-		--accent-fg: #14171c;
+		/*
+		 * The label on the accent slab, from the token that exists for exactly this.
+		 *
+		 * It was the literal `#14171c`, which was correct when the brand was safety
+		 * yellow — light in both themes, so a near-black label was always right. Now
+		 * the brand is whichever of thirteen palettes is on, and most of their LIGHT
+		 * accents are deep: near-black on Halogen's `#1f3b4d` measures 1.53:1, which
+		 * is not a contrast problem so much as an invisible headline. Every palette
+		 * failed AA here; none was above 3.95.
+		 *
+		 * `--on-brand` is app.css's answer to "text on a brand fill" and moves with
+		 * the accent by design — a bright accent gets a dark label, a deep one gets
+		 * white. It lands between 4.6:1 and 11.7:1 across all thirteen.
+		 */
+		--accent-fg: var(--on-brand);
 		--accent-bg: var(--brand);
 		--ghost-bg: rgba(17, 17, 17, 0.04);
 		--ghost-bg-hover: rgba(17, 17, 17, 0.09);
@@ -920,8 +929,11 @@
 		--accent-b: #a78bfa;
 		--accent-c: #4aa8e0;
 
-		/* The hero keeps the dark treatment it has always had, and the accent goes
-		   back to plain yellow type — it has the contrast for it here. */
+		/* The hero keeps the dark treatment it has always had, and the accent drops
+		   the slab for plain brand-coloured type — in dark every palette's accent is
+		   a bright one, and it clears 5.9:1 against this ground at worst (Overdrive)
+		   and 14.6:1 at best (Halogen). The slab is a LIGHT-mode fix, for accents
+		   that are deep there and would otherwise be type you cannot read. */
 		--hero-bg:
 			radial-gradient(
 				1200px 600px at 70% -10%,

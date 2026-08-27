@@ -92,6 +92,12 @@ export default defineConfig({
 			// The seeded contractor and customer logins, for the specs that need the
 			// customer portal (which needs a customer User bound to a customer row).
 			SEED_DEV_LOGIN: 'true',
+			// The suite makes its own contractor per spec, so self-signup has to be
+			// on here. It is OFF by default in the app — see SIGNUPS_ENABLED — while
+			// this domain's DKIM is unpublished and a verification email would not
+			// arrive. That gate is a deployment decision, not a behaviour these tests
+			// are about, so they opt back in rather than working around it.
+			SIGNUPS_ENABLED: 'true',
 			// Blank ON PURPOSE, and load-bearing. With no deliverable mail the app
 			// stops enforcing email verification (see auth.ts) — which is what lets a
 			// spec sign up a brand-new contractor and land straight in the app instead
