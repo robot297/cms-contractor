@@ -1,14 +1,17 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
-	import { ORDER_ICONS, followUpLabel, followUpUrgency, portalInfoFor } from '$lib/crm';
+	import { followUpLabel, followUpUrgency, portalInfoFor, PROJECT_TYPES } from '$lib/crm';
+	import { toast } from '$lib/toast.svelte';
 	import ContactPanel from '$lib/ContactPanel.svelte';
+	import OrderCard from '$lib/OrderCard.svelte';
 	import Guide from '$lib/Guide.svelte';
 	import TrialNotice from '$lib/TrialNotice.svelte';
-	import type { PageData } from './$types';
+	import WeatherWidget from '$lib/WeatherWidget.svelte';
+	import type { PageData, ActionData } from './$types';
 
-	let { data }: { data: PageData } = $props();
+	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	// Trial state comes from the contractor layout. Only shown while a trial is
 	// actually live — a paid or comped subscription has nothing to say here.
@@ -38,19 +41,43 @@
 		now = new Date();
 	});
 
+	// ------------------------------------------------------- First job
+	// The getting-started card's one action. A customer and their first job in
+	// one dialog, on this page — it used to be two steps across two screens, and
+	// getting a single job into the app meant crossing four of them.
+	let firstJobDialog: HTMLDialogElement | undefined = $state();
+	/** Empty means "a new customer", and the name/email fields show. */
+	let firstJobCustomerId = $state('');
+	let firstJobType = $state('');
+
+	function openFirstJob() {
+		firstJobCustomerId = '';
+		firstJobType = '';
+		firstJobDialog?.showModal();
+	}
+
+	// ------------------------------------------------------- Snooze
+	// Swipe-to-snooze posts through ONE form rather than a form per card. Twenty
+	// cards meant twenty forms carrying an identical action and a single hidden
+	// field, and the gesture can only be running on one card at a time — so the
+	// card being acted on is state, and the form is furniture.
+	let snoozeForm: HTMLFormElement | undefined = $state();
+	let snoozeOrderId = $state('');
+	/** Named in the confirmation, so it says which job just moved. */
+	let snoozeProject = $state('');
+
+	async function snooze(order: { id: string; projectName: string | null }) {
+		snoozeOrderId = order.id;
+		snoozeProject = order.projectName ?? 'Untitled project';
+		// The hidden field is bound, so the DOM has to catch up with the assignment
+		// above before the form is worth submitting.
+		await tick();
+		snoozeForm?.requestSubmit();
+	}
+
 	// Which due card's contact panel is open. Which TAB it opens on is the panel's
 	// own business now — it knows which channels this customer can be reached on.
 	let contactOpenId: string | null = $state(null);
-
-	// Which due card's construction-icon picker is open.
-	let iconPickerId: string | null = $state(null);
-	// Close the icon picker once a choice is submitted.
-	const pickIconThenClose =
-		() =>
-		async ({ update }: { update: () => Promise<void> }) => {
-			iconPickerId = null;
-			await update();
-		};
 
 	/**
 	 * Bring a just-opened popover fully into view.
@@ -63,256 +90,425 @@
 	function revealPopover(node: HTMLElement) {
 		requestAnimationFrame(() => node.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
 	}
-
-	// Sizing only — the gold look comes from the shared `.icon-btn` class.
-	const iconBtn = 'width: 2.3rem; height: 2.3rem; font-size: 1.55rem;';
 </script>
 
 <svelte:head>
 	<title>Contractor dashboard</title>
 </svelte:head>
 
-<div style="max-width: 860px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem;">
-	<header
-		style="display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap;"
-	>
+<!-- The dashboard is a two-column layout from ~1100px up and a single stack
+     below it, and the DOM order is the reading order at every width: today's work
+     first, the numbers about it after. Nothing is visually reordered, so what a
+     screen reader hears and what the tab key visits match what is on screen. -->
+<div class="page-shell dash">
+	<!-- No "?" here any more. The checklist opens itself while there is something
+	     on it to do, and once it has been dismissed a permanent question mark on
+	     the busiest screen in the app is a control almost nobody presses twice.
+	     Bringing it back lives on the settings page. -->
+	<header class="dash-head">
 		<h1 class="page-title" style="margin: 0;">Dashboard</h1>
-		<span class="header-right">
-			<!-- Opens the checklist on demand. Subtle by design: most days there is
-			     nothing to learn and this should read as a footnote, not a feature. -->
-			<button
-				type="button"
-				class="icon-btn guide-btn"
-				aria-expanded={guideOpen}
-				aria-label={guideOpen ? 'Hide getting started' : 'Show getting started'}
-				title="Getting started"
-				onclick={() => (openOverride = !guideOpen)}>?</button
-			>
-		</span>
 	</header>
 
-	{#if onTrial}
-		<TrialNotice limits={data.billing.limits} />
+	{#if onTrial || guideOpen}
+		<div class="dash-notices">
+			{#if onTrial}
+				<TrialNotice limits={data.billing.limits} />
+			{/if}
+			{#if guideOpen}
+				<Guide guide={data.guide} onclose={() => (openOverride = false)} onstart={openFirstJob} />
+			{/if}
+		</div>
 	{/if}
 
-	{#if guideOpen}
-		<Guide guide={data.guide} onclose={() => (openOverride = false)} />
-	{/if}
+	<!-- THE DAY. First thing on the page because it is the only band that is about
+	     the next few hours rather than about the backlog: where the crew is going,
+	     and whether the sky will let them work when they get there. Those two are
+	     one question, so the forecast sits in the corner across from the heading
+	     rather than as a panel of its own — it is a fact about the day, not a
+	     second thing to read.
+
+	     Either half can be absent: no visits booked, or a forecast that never
+	     landed. The band hides itself when both are. -->
+	<div class="dash-day">
+		{#if data.visits.length > 0}
+			<section class="today dash-today" aria-labelledby="today-head">
+				<div class="today-head">
+					<h2 id="today-head">
+						Today's jobs
+						<span class="count-badge">{data.visits.length}</span>
+					</h2>
+					<!-- Renders nothing at all until its own fetch lands, and nothing ever
+					     if there is no work area to forecast for or the upstream is down. -->
+					<WeatherWidget zip={data.weatherZip} />
+				</div>
+
+				<ol class="today-list">
+					{#each data.visits as visit, i (visit.id)}
+						<li class="today-stop">
+							<span class="today-num" aria-hidden="true">{i + 1}</span>
+							<div class="today-body">
+								<a class="today-name" href={resolve(`/contractor/orders/${visit.id}`)}>
+									{visit.projectName ?? 'Untitled project'}
+								</a>
+								<span class="today-who">{visit.customerName}</span>
+								{#if visit.siteLabel}
+									<span class="today-where">{visit.siteLabel}</span>
+								{/if}
+							</div>
+						</li>
+					{/each}
+				</ol>
+			</section>
+		{:else}
+			<!-- Nothing booked, so there is no heading to sit across from — but the
+			     day's sky is still worth a glance, and it keeps its corner. -->
+			<WeatherWidget zip={data.weatherZip} />
+		{/if}
+	</div>
 
 	<!-- ONE list. Everything here is waiting on the contractor; whether it got here
 	     because of a follow-up they set or a customer who wrote in is a property of
 	     the row, not a reason for a second section. The split version showed an
 	     order that was both overdue AND unanswered twice, in two different visual
 	     languages, which is what gave the game away. -->
-	<section class="attention">
+	<section class="attention dash-feed">
 		{#if data.attention.length === 0}
 			{#if !guideOpen}
 				<div class="caught-up">Happy {today} — you are all caught up!</div>
 			{/if}
 		{:else}
+			<!-- Not "Due today": this list carries overdue follow-ups and unanswered
+			     messages too, and a heading that named only today's work made the
+			     late ones look like they had been filed under the wrong day. What
+			     every row here has in common is that the contractor owes a reply. -->
 			<h2 class="attention-head">
-				Due today
+				Response needed
 				<span class="count-badge">{data.attention.length}</span>
 			</h2>
 
-			{#each data.attention as o (o.id)}
-				{@const urgency = followUpUrgency(o.nextFollowUpAt, now)}
-				{@const overdue = o.followUpDue && urgency === 'overdue'}
-				<div class="due-card card" class:is-overdue={overdue} class:is-owed={o.pending > 0}>
-					<div class="due-top">
-						<!-- Settable construction icon -->
-						<div style="position: relative; flex-shrink: 0;">
-							<button
-								type="button"
-								class="icon-btn icon-bubble"
-								class:dim={!o.icon}
-								title="Set order icon"
-								aria-label="Set order icon"
-								aria-expanded={iconPickerId === o.id}
-								onclick={() => (iconPickerId = iconPickerId === o.id ? null : o.id)}
-								>{o.icon ?? '🏗️'}</button
-							>
-							{#if iconPickerId === o.id}
-								<!-- click-away backdrop -->
+			<!-- A GRID, not a column. One card per row left two thirds of a desktop as
+			     empty paper and made a working week look like a scroll; the orders list
+			     already flows into as many columns as the viewport holds, and this is
+			     the same card doing the same job. -->
+			<div class="due-list card-grid">
+				{#each data.attention as o (o.id)}
+					{@const urgency = followUpUrgency(o.nextFollowUpAt, now)}
+					{@const overdue = o.followUpDue && urgency === 'overdue'}
+					{@const dueToday = o.followUpDue && urgency === 'today'}
+					<OrderCard
+						orderId={o.id}
+						projectName={o.projectName}
+						customerName={o.customerName}
+						location={o.customerLocation}
+						tone={overdue ? 'overdue' : o.pending > 0 ? 'owed' : dueToday ? 'due' : null}
+						onsnooze={() => snooze(o)}
+						onswipestart={() => (contactOpenId = null)}
+					>
+						{#snippet actions()}
+							<!-- Message is the one control on the card. The "View order" button
+						     that used to sit beside it is gone — the card itself is the link
+						     now — and it lifts above the stretched link so a press on it
+						     opens the conversation rather than navigating. -->
+							<div class="above-stretch">
 								<button
 									type="button"
-									aria-label="Close icon picker"
-									onclick={() => (iconPickerId = null)}
-									style="position: fixed; inset: 0; z-index: 10; background: transparent; border: none; cursor: default;"
-								></button>
-								<form
-									method="POST"
-									action="?/setOrderIcon"
-									use:enhance={pickIconThenClose}
-									class="icon-picker"
+									title="Message {o.customerName}"
+									aria-label="Message {o.customerName}"
+									aria-expanded={contactOpenId === o.id}
+									onclick={() => (contactOpenId = contactOpenId === o.id ? null : o.id)}
+									class="card-btn"
 								>
-									<input type="hidden" name="orderId" value={o.id} />
-									{#each ORDER_ICONS as ic (ic)}
-										<button
-											type="submit"
-											name="icon"
-											value={ic}
-											title={ic}
-											class="icon-choice"
-											class:on={o.icon === ic}>{ic}</button
-										>
-									{/each}
-									{#if o.icon}
-										<button type="submit" name="icon" value="" class="icon-clear">Clear icon</button
-										>
+									<span aria-hidden="true">💬</span>
+									<!-- Always "Message", never "Reply (2)". The count is the badge's job,
+								     and a label that changes with it stops being a prefix of the
+								     accessible name — which is what keeps the visible words and the
+								     announced ones in step (WCAG 2.5.3). -->
+									<span class="card-btn-label">Message</span>
+									{#if o.pending > 0}
+										<span class="btn-count" aria-hidden="true">{o.pending}</span>
 									{/if}
-								</form>
-							{/if}
-						</div>
-
-						<div class="due-text">
-							<strong class="due-name">{o.customerName}</strong>
-							<div class="due-project">{o.projectName ?? 'Untitled project'}</div>
-						</div>
-
-						<!-- Why this card is here. Unanswered messages are NOT stated here:
-						     the count on the 💬 already says it, and saying it twice cost a
-						     line of vertical space per card to tell you something you were
-						     about to read anyway. -->
-						<div class="due-meta">
-							{#if o.followUpDue}
-								<span class="due-flag" class:overdue={urgency === 'overdue'}>
-									{followUpLabel(o.nextFollowUpAt, now)}
-								</span>
-							{/if}
-						</div>
-					</div>
-
-					<!-- Where the job is, sharing the action row rather than claiming a
-					     line of its own. The row had empty space on the left and the
-					     location is a fact you glance at, not one you act on. -->
-					<div class="due-actions">
-						{#if o.customerLocation}
-							<span class="due-loc"><span aria-hidden="true">📍</span>{o.customerLocation}</span>
-						{/if}
-						<a
-							href={resolve(`/contractor/orders/${o.id}`)}
-							title="View order details"
-							aria-label="View order details"
-							class="icon-btn"
-							style="{iconBtn} flex-shrink: 0; text-decoration: none;">📋</a
-						>
-
-						<!-- Snoozing a follow-up lives on the order detail page now, next to
-						     everything else about the date — the dashboard card is for acting
-						     on what's due, not rescheduling it. -->
-
-						<div style="position: relative; flex-shrink: 0;">
-							<button
-								type="button"
-								title="Message {o.customerName}"
-								aria-label="Message {o.customerName}"
-								aria-expanded={contactOpenId === o.id}
-								onclick={() => (contactOpenId = contactOpenId === o.id ? null : o.id)}
-								class="icon-btn"
-								style={iconBtn}
-								>💬{#if o.pending > 0}<span class="btn-count" aria-hidden="true">{o.pending}</span
-									>{/if}</button
-							>
-							{#if contactOpenId === o.id}
-								<button
-									type="button"
-									aria-label="Close contact menu"
-									onclick={() => (contactOpenId = null)}
-									class="contact-scrim"
-								></button>
-								<!-- Opens DOWNWARD: this panel carries a conversation, and opening a
+								</button>
+								{#if contactOpenId === o.id}
+									<button
+										type="button"
+										aria-label="Close contact menu"
+										onclick={() => (contactOpenId = null)}
+										class="contact-scrim"
+									></button>
+									<!-- Opens DOWNWARD: this panel carries a conversation, and opening a
 								     tall box upward from a card near the top of the page put its
 								     newest message — the thing it exists to show — above the top of
 								     the screen. -->
-								<!-- The conversation IS this panel. Email, text and call are real
-								     options but they are the exceptions — they used to sit open
-								     below the thread, which made a chat window look like a form
-								     with a chat stuck on top of it. Behind a toggle they cost one
-								     click and stop competing. -->
-								<div class="contact-pop wide" {@attach revealPopover}>
-									<ContactPanel
-										contact={{
-											name: o.customerName,
-											email: o.customerEmail,
-											phone: o.customerPhone,
-											preferredContact: o.customerPreferredContact
-										}}
-										project={o.projectName ?? ''}
-										orderId={o.id}
-										conversations={[
-											{ orderId: o.id, projectName: o.projectName, thread: o.thread }
-										]}
-										canChat={o.customerLinked}
-										customerId={o.customerId}
-										portal={portalInfoFor({
-											linked: o.customerLinked,
-											customerId: o.customerId,
-											invites: data.invites
-										})}
-										onsent={() => (contactOpenId = null)}
-										onclose={() => (contactOpenId = null)}
-									/>
-								</div>
-							{/if}
-						</div>
-					</div>
-				</div>
-			{/each}
+									<div class="contact-pop wide" {@attach revealPopover}>
+										<ContactPanel
+											contact={{
+												name: o.customerName,
+												email: o.customerEmail,
+												phone: o.customerPhone,
+												preferredContact: o.customerPreferredContact
+											}}
+											project={o.projectName ?? ''}
+											orderId={o.id}
+											conversations={[
+												{ orderId: o.id, projectName: o.projectName, thread: o.thread }
+											]}
+											canChat={o.customerLinked}
+											customerId={o.customerId}
+											portal={portalInfoFor({
+												linked: o.customerLinked,
+												customerId: o.customerId,
+												invites: data.invites
+											})}
+											onsent={() => (contactOpenId = null)}
+											onclose={() => (contactOpenId = null)}
+										/>
+									</div>
+								{/if}
+							</div>
+						{/snippet}
+					</OrderCard>
+				{/each}
+			</div>
+
+			<!-- The swipe's submit. Off-screen rather than hidden, because a form
+			     inside the card grid would be a grid item; `requestSubmit()` on it is
+			     what the gesture calls. -->
+			<form
+				bind:this={snoozeForm}
+				method="POST"
+				action="?/snoozeFollowUp"
+				class="sr-only-form"
+				use:enhance={() => {
+					const project = snoozeProject;
+					return async ({ result, update }) => {
+						await update();
+						if (result.type === 'success') {
+							toast.success('Snoozed for a week', {
+								detail: `${project} comes back on this list next week.`
+							});
+						} else {
+							toast.error('That could not be snoozed');
+						}
+					};
+				}}
+			>
+				<input type="hidden" name="orderId" value={snoozeOrderId} />
+			</form>
 		{/if}
 	</section>
 
-	<!-- What is coming, kept out of the list above. Everything up there needs the
-	     contractor today; folding next week's follow-ups in with it is how a
-	     to-do list stops being believed. Collapsed, because it is a glance
-	     forward rather than work. -->
-	{#if data.soon.length > 0}
-		<details class="soon">
-			<summary>
-				Due soon
-				<span class="soon-count">{data.soon.length}</span>
-			</summary>
-			<ul class="soon-list">
-				{#each data.soon as o (o.id)}
-					<li>
-						<a class="soon-row" href={resolve(`/contractor/orders/${o.id}`)}>
-							<span class="soon-icon" aria-hidden="true">{o.icon ?? '🏗️'}</span>
-							<span class="soon-text">
-								<span class="soon-name">{o.customerName}</span>
-								<span class="soon-project">{o.projectName ?? 'Untitled project'}</span>
-							</span>
-							<span class="soon-when">{followUpLabel(o.nextFollowUpAt, now)}</span>
-						</a>
-					</li>
-				{/each}
-			</ul>
-		</details>
-	{/if}
+	<!-- The rail beside the feed on a wide screen, and the block under it on a
+	     narrow one. Context for the work above rather than work itself. The
+	     forecast used to lead it and has moved up to the day band. -->
+	<aside class="dash-side">
+		<!-- What is coming, kept out of the list above. Everything up there needs the
+		     contractor today; folding next week's follow-ups in with it is how a
+		     to-do list stops being believed. Collapsed, because it is a glance
+		     forward rather than work. -->
+		{#if data.soon.length > 0}
+			<details class="soon">
+				<summary>
+					Due soon
+					<span class="soon-count">{data.soon.length}</span>
+				</summary>
+				<ul class="soon-list">
+					{#each data.soon as o (o.id)}
+						<li>
+							<a class="soon-row" href={resolve(`/contractor/orders/${o.id}`)}>
+								<span class="soon-text">
+									<span class="soon-title">{o.projectName ?? 'Untitled project'}</span>
+									<span class="soon-sub">{o.customerName}</span>
+								</span>
+								<span class="soon-when">{followUpLabel(o.nextFollowUpAt, now)}</span>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</details>
+		{/if}
+	</aside>
 </div>
 
-<style>
-	.header-right {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-	/* Small round "?" beside the follow-up count. Sizing only — the pressable feel
-	   comes from the global .icon-btn. */
-	.guide-btn {
-		width: 1.6rem;
-		height: 1.6rem;
-		border-radius: 999px;
-		font-size: 0.8rem;
-		font-weight: 800;
-		color: var(--fg-muted);
-	}
+<!-- ------------------------------------------------- First job
+     The getting-started card's one action, and the whole of it. A customer and
+     the work you are doing for them, created together — this used to be two
+     steps on two different pages, which meant four screens to get one job in.
 
+     The customer picker is here because a contractor who added somebody before
+     finding this card must not be made to add them twice. With none on file it
+     is not rendered at all, and the fields below are the only path. -->
+<dialog bind:this={firstJobDialog} class="firstjob">
+	<form
+		method="POST"
+		action="?/createFirstJob"
+		use:enhance={() =>
+			async ({ result, update }) => {
+				await update();
+				// A redirect means the job exists and we are on its page already.
+				if (result.type === 'redirect') firstJobDialog?.close();
+			}}
+		class="fj-body"
+	>
+		<div class="fj-head">
+			<h2>Add your first job</h2>
+			<button type="button" class="fj-x" aria-label="Close" onclick={() => firstJobDialog?.close()}
+				>✕</button
+			>
+		</div>
+
+		<div class="fj-group">
+			<span class="fj-legend">Who it's for</span>
+			{#if data.firstJobCustomers.length > 0}
+				<label class="fj-field">
+					<span>Customer</span>
+					<select class="field-input" name="customerId" bind:value={firstJobCustomerId}>
+						<option value="">＋ New customer</option>
+						{#each data.firstJobCustomers as c (c.id)}
+							<option value={c.id}>{c.name}</option>
+						{/each}
+					</select>
+				</label>
+			{/if}
+			{#if firstJobCustomerId === ''}
+				<div class="fj-row">
+					<label class="fj-field">
+						<span>Name</span>
+						<input class="field-input" name="name" required autocomplete="name" />
+					</label>
+					<label class="fj-field">
+						<span>Email</span>
+						<input class="field-input" name="email" type="email" required autocomplete="email" />
+					</label>
+					<label class="fj-field">
+						<span>Phone <em>optional</em></span>
+						<input class="field-input" name="phone" type="tel" autocomplete="tel" />
+					</label>
+				</div>
+			{/if}
+		</div>
+
+		<div class="fj-group">
+			<span class="fj-legend">What you're building</span>
+			<div class="fj-row">
+				<label class="fj-field wide">
+					<span>Project name</span>
+					<input class="field-input" name="projectName" required placeholder="Poolside pergola" />
+				</label>
+				<label class="fj-field">
+					<span>Type</span>
+					<select class="field-input" name="projectType" bind:value={firstJobType}>
+						<option value="">Choose…</option>
+						{#each PROJECT_TYPES as t (t)}
+							<option value={t}>{t}</option>
+						{/each}
+						<option value="Other">Other</option>
+					</select>
+				</label>
+				{#if firstJobType === 'Other'}
+					<label class="fj-field">
+						<span>Which?</span>
+						<input class="field-input" name="projectTypeOther" required />
+					</label>
+				{/if}
+			</div>
+		</div>
+
+		{#if form?.action === 'firstJob' && form?.message}
+			<p class="fj-error" role="alert">{form.message}</p>
+		{/if}
+
+		<p class="fj-note">
+			You can invite them to their own portal later — that is what lets you message inside the app,
+			and it is entirely optional.
+		</p>
+
+		<div class="fj-actions">
+			<button type="button" class="fj-cancel" onclick={() => firstJobDialog?.close()}>Cancel</button
+			>
+			<button type="submit" class="fj-save">Create job →</button>
+		</div>
+	</form>
+</dialog>
+
+<style>
+	/* ------------------------------------------------------------ Dashboard grid
+	   One stack on a phone, two columns from 1100px. `.page-shell` (app.css) is
+	   already a grid with the page gap, so this only has to say how many columns
+	   and which children span them.
+
+	   1100px rather than a tablet breakpoint: the rail needs ~19rem to hold a
+	   four-day forecast without wrapping, and the feed needs the rest to keep a
+	   card's name, follow-up flag and action row on the lines they were designed
+	   for. Splitting earlier than that gives two columns that are both too narrow. */
+	@media (min-width: 1100px) {
+		.dash {
+			grid-template-columns: minmax(0, 1.6fr) minmax(19rem, 1fr);
+			/* The rail sits level with the top of the feed rather than stretching to
+			   its height — a four-day forecast should not grow to match a list of
+			   eleven jobs. */
+			align-items: start;
+		}
+		/* Everything except the feed/rail pair runs the full width. */
+		.dash-head,
+		.dash-day,
+		.dash-notices {
+			grid-column: 1 / -1;
+		}
+		.dash-feed {
+			grid-column: 1;
+		}
+		.dash-side {
+			grid-column: 2;
+		}
+	}
+	.dash-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+	.dash-notices {
+		display: grid;
+		gap: var(--page-gap);
+	}
+	.dash-day {
+		display: grid;
+		gap: var(--page-gap);
+	}
+	/* Both halves are conditional, so the band can end up holding nothing at all,
+	   and an empty grid item still costs the page a full gap. `:has(*)` tests for
+	   an ELEMENT child, so the widget's own comment anchor doesn't count — the
+	   same reasoning as `.dash-side` below. */
+	.dash-day:not(:has(*)) {
+		display: none;
+	}
+	.dash-side {
+		display: grid;
+		gap: var(--page-gap);
+		align-content: start;
+		min-width: 0;
+	}
+	/* The rail is always in the markup because the forecast arrives after mount,
+	   but on a quiet week it can end up holding nothing at all — and an empty grid
+	   item still costs the page a full gap. `:has(*)` tests for an ELEMENT child,
+	   so Svelte's own comment anchors don't count as content. */
+	.dash-side:not(:has(*)) {
+		display: none;
+	}
 	/* Follow-up card: an info band over an action band. Overrides the shared
 	   `.card` grid gap — the two bands sit closer than card-level spacing. */
 	/* --------------------------------------------------------- Needs you
 	   One feed. Everything below is something the contractor has to act on. */
 	.attention {
 		display: grid;
+		gap: 0.6rem;
+		align-content: start;
+	}
+	/* Tighter than the page gap: these are rows of one list, not unrelated panels —
+	   the same minimum and the same reasoning as the orders list. */
+	.due-list {
+		--card-min: 19rem;
 		gap: 0.6rem;
 	}
 	.attention-head {
@@ -391,23 +587,19 @@
 	.soon-row:hover {
 		background: var(--surface-sunken);
 	}
-	.soon-icon {
-		font-size: 1.05rem;
-		flex: none;
-	}
 	.soon-text {
 		flex: 1;
 		min-width: 0;
 		display: grid;
 	}
-	.soon-name {
+	.soon-title {
 		font-size: 0.88rem;
 		font-weight: 700;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.soon-project {
+	.soon-sub {
 		font-size: 0.76rem;
 		color: var(--fg-muted);
 		overflow: hidden;
@@ -435,201 +627,231 @@
 		color: var(--fg-muted);
 	}
 
-	/* Order-icon picker. Was a wall of inline style; as a class it can use the theme
-	   tokens, which is what it always needed — the hardcoded #fff panel was
-	   invisible-on-invisible in dark mode. */
-	.icon-picker {
+	/* Off-screen, not `display: none`: a hidden form still submits, but keeping it
+	   in the layout at zero cost avoids any question about whether the browser
+	   will run its validation. */
+	.sr-only-form {
 		position: absolute;
-		left: 0;
-		top: calc(100% + 6px);
-		z-index: 20;
-		width: 13.5rem;
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.2rem;
-		padding: 0.5rem;
-		border: 1px solid var(--line-strong);
-		border-radius: 12px;
-		background: var(--surface);
-		box-shadow: var(--pop-shadow-sm);
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
 	}
-	.icon-choice {
-		width: 2.4rem;
-		height: 2.4rem;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0;
-		border: 1px solid transparent;
-		border-radius: 10px;
-		background: none;
-		cursor: pointer;
-		font-size: 1.3rem;
-		line-height: 1;
-	}
-	.icon-choice:hover {
-		background: var(--surface-sunken);
-	}
-	.icon-choice.on {
-		border-color: var(--yellow-deep);
-		background: var(--yellow);
-		/* Pinned dark: yellow stays light in both themes, so an inherited colour
-		   flips to near-white on it. */
-		color: var(--on-yellow);
-	}
-	.icon-clear {
-		width: 100%;
-		margin-top: 0.25rem;
-		padding: 0.4rem;
-		border: 1px solid var(--line-strong);
-		border-radius: 8px;
-		background: var(--surface-sunken);
-		color: var(--fg-muted);
-		font-family: inherit;
-		font-size: 0.82rem;
-		text-transform: none;
-		letter-spacing: normal;
-		cursor: pointer;
-	}
-	.due-card {
+
+	/* ---- Today's run.
+	   A numbered list rather than a stack of cards: it is one sequence read top to
+	   bottom, and giving each stop card chrome would have made five stops look
+	   like five separate concerns. */
+	.today {
 		display: grid;
 		gap: 0.5rem;
-		/* Transparent by default so the overdue variant can colour it without the
-		   card's contents shifting sideways when it does. */
-		border-left: 4px solid transparent;
 	}
-	/* The second carrier of the same signal. A row of cards that differ only by a
-	   small pill is a row you have to read; an edge is something you can scan.
-	   Overdue wins the edge when a card is both: late is the older problem. */
-	.due-card.is-owed {
-		border-left-color: var(--yellow-deep);
-	}
-	.due-card.is-overdue {
-		border-left-color: var(--danger);
-	}
-	.due-top {
+	/* Heading left, forecast right. `center` rather than `baseline`: the forecast
+	   is a three-line block and the heading is one line, so a shared baseline hung
+	   the heading off the readout's first line instead of centring on it. */
+	.today-head {
 		display: flex;
-		align-items: flex-start;
-		gap: 0.9rem;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
 	}
-	.due-text {
-		flex: 1;
-		min-width: 0;
+	/* With no visits there is no heading row, so the forecast is the band's only
+	   child and pins itself right. */
+	.dash-day > :global(.weather) {
+		justify-self: end;
 	}
-	.due-name {
-		font-size: 1rem;
-	}
-	.due-project {
-		font-size: 0.85rem;
+	.today-head h2 {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0;
+		font-size: 0.78rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
 		color: var(--fg-muted);
 	}
-	/* Right-hand facts column. Right-aligned so it reads as one edge with the
-	   action row beneath it. */
-	.due-meta {
-		flex-shrink: 0;
+	.today-list {
+		list-style: none;
+		margin: 0;
+		padding: 0.15rem 0.9rem 0.3rem;
 		display: grid;
-		justify-items: end;
-		gap: 0.25rem;
-		text-align: right;
+		border: 1px solid var(--line);
+		border-radius: 14px;
+		background: var(--surface);
+		box-shadow: var(--card-shadow);
 	}
-	/* Due today: the brand accent, because it is the work, not a fault — the same
-	   rule app.css states for the unanswered-message badge. Overdue escalates to
-	   --danger, which is reserved for exactly this kind of "something has gone
-	   wrong" signal. Tokens rather than the hex literals this used to carry, so
-	   both survive dark mode. */
-	.due-flag {
-		font-size: 0.72rem;
-		font-weight: 800;
-		letter-spacing: 0.01em;
-		color: var(--on-yellow);
-		background: var(--yellow);
-		border: 1px solid var(--yellow-deep);
-		border-radius: 999px;
-		padding: 0.1rem 0.55rem;
-		white-space: nowrap;
+	.today-stop {
+		display: flex;
+		align-items: center;
+		gap: 0.7rem;
+		padding: 0.55rem 0;
 	}
-	.due-flag.overdue {
-		color: #fff;
-		background: var(--danger);
-		border-color: var(--danger);
+	.today-stop + .today-stop {
+		border-top: 1px solid var(--line);
 	}
-	/* How many are unanswered, on the button that opens them. This replaced a
-	   "2 messages waiting" pill on the card: the pill and the dot were the same
-	   fact twice, and the pill was the one costing a line of height. */
-	/* The shared .icon-btn is not positioned, so the badge needs an anchor. Scoped
-	   here rather than added to the global class — nothing else pins anything to
-	   an icon button, and giving every one of them a stacking context to serve one
-	   badge is the kind of change that surfaces somewhere unrelated. */
-	.due-actions .icon-btn {
-		position: relative;
-		overflow: visible;
-	}
-	.btn-count {
-		position: absolute;
-		top: -0.2rem;
-		right: -0.2rem;
-		min-width: 1.1rem;
-		height: 1.1rem;
-		padding: 0 0.22rem;
-		box-sizing: border-box;
+	/* The stop number. The only thing carrying the sequence, so it is the one
+	   element here allowed any weight. */
+	.today-num {
+		flex-shrink: 0;
+		width: 1.5rem;
+		height: 1.5rem;
 		display: grid;
 		place-items: center;
 		border-radius: 999px;
-		border: 2px solid var(--surface);
-		background: var(--danger);
-		color: #fff;
-		font-size: 0.66rem;
-		font-weight: 800;
-		line-height: 1;
+		background: var(--brand);
+		color: var(--on-brand);
+		font-size: 0.75rem;
+		font-weight: 600;
 	}
-
-	.due-loc {
-		font-size: 0.8rem;
-		color: #8c959f;
-		display: inline-flex;
-		align-items: center;
-		gap: 0.2rem;
-		white-space: nowrap;
-	}
-	/* The action row. These are three unrelated destinations — open the job,
-	   push the date, start a conversation — and at a 0.4rem gap they read as one
-	   segmented control and are easy to mis-tap on a phone. */
-	.due-actions {
-		display: flex;
-		justify-content: flex-end;
-		align-items: center;
-		gap: 0.85rem;
-		padding-top: 0.15rem;
-	}
-	/* Pushes the buttons to the right and takes the slack itself, so a long
-	   location truncates instead of shoving them off the edge. */
-	.due-actions .due-loc {
-		margin-right: auto;
+	.today-body {
+		flex: 1;
 		min-width: 0;
+		display: grid;
+		gap: 0.02rem;
+	}
+	.today-name {
+		font-size: 0.92rem;
+		color: var(--fg);
+		text-decoration: none;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
-
-	/* The settable order-icon "avatar" is a round icon button: the raised/pressable
-	   feel comes from the global .icon-btn; this only makes it round + sized. */
-	.icon-bubble {
-		width: 2.6rem;
-		height: 2.6rem;
-		border-radius: 999px;
-		font-size: 1.6rem;
+	.today-name:hover {
+		text-decoration: underline;
 	}
-	.icon-bubble.dim {
-		opacity: 0.55;
+	.today-who,
+	.today-where {
+		font-size: 0.76rem;
+		color: var(--fg-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
-
-	/* Mobile used to hide this pill on the grounds that it was redundant — every
-	   card in this list is due, so "Needs update" told you nothing the section
-	   heading hadn't. It now says WHICH kind of due and how late, which is the one
-	   thing worth keeping when the row is narrow, so it stays and only tightens. */
-	@media (max-width: 560px) {
-		.due-flag {
-			font-size: 0.68rem;
-			padding: 0.1rem 0.45rem;
-		}
+	/* ------------------------------------------------------- First job
+	   The getting-started card's dialog: a customer and their first job on one
+	   surface, grouped so it reads as two short questions rather than six fields
+	   in a column. */
+	.firstjob {
+		border: 1px solid var(--line-strong);
+		border-radius: var(--radius-card);
+		padding: 0;
+		width: 34rem;
+		max-width: 94vw;
+		background: var(--surface);
+		color: var(--fg);
+	}
+	.fj-body {
+		display: grid;
+		gap: 0.9rem;
+		padding: 1.15rem 1.3rem 1.3rem;
+	}
+	.fj-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+	.fj-head h2 {
+		margin: 0;
+		font-size: 1.1rem;
+	}
+	.fj-x {
+		border: none;
+		background: none;
+		font-size: 1.1rem;
+		color: var(--fg-muted);
+		cursor: pointer;
+	}
+	.fj-group {
+		display: grid;
+		gap: 0.5rem;
+		padding: 0.75rem 0.85rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		background: var(--surface-sunken);
+	}
+	.fj-legend {
+		font-size: 0.68rem;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--fg-muted);
+	}
+	/* Fields flow across before they flow down: three short ones on a desktop is
+	   one line, and the whole dialog stays a screenful on a phone. */
+	.fj-row {
+		display: grid;
+		/* `min()` against 100% so a narrow dialog drops to one column instead of
+		   overflowing: without it the track floor wins and the row runs past the
+		   group's edge. */
+		grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+		gap: 0.55rem;
+	}
+	.fj-field {
+		display: grid;
+		gap: 0.25rem;
+		min-width: 0;
+		font-size: 0.74rem;
+		font-weight: 700;
+		color: var(--fg-muted);
+	}
+	/* An <input> carries an intrinsic width from its `size` attribute — about 20
+	   characters — which is wider than these tracks and is what pushed the phone
+	   field out through the side of its group. */
+	.fj-field :global(.field-input) {
+		width: 100%;
+		box-sizing: border-box;
+		min-width: 0;
+	}
+	.fj-field.wide {
+		grid-column: 1 / -1;
+	}
+	.fj-field em {
+		font-style: normal;
+		font-weight: 600;
+		opacity: 0.75;
+	}
+	/* The one thing worth saying about the portal, said where the decision is
+	   actually being made rather than as its own step in a checklist. */
+	.fj-note {
+		margin: 0;
+		font-size: 0.8rem;
+		line-height: 1.5;
+		color: var(--fg-muted);
+	}
+	.fj-error {
+		margin: 0;
+		color: var(--danger);
+		font-size: 0.85rem;
+		font-weight: 600;
+	}
+	.fj-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.6rem;
+		align-items: center;
+	}
+	.fj-cancel,
+	.fj-save {
+		padding: 0.5rem 1rem;
+		border-radius: var(--radius-control);
+		font-family: inherit;
+		font-size: 0.88rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.fj-cancel {
+		border: 1px solid var(--line-strong);
+		background: none;
+		color: var(--fg);
+	}
+	.fj-save {
+		border: none;
+		background: var(--brand-sweep);
+		color: var(--on-brand);
+		box-shadow: 0 0 16px var(--brand-glow);
 	}
 </style>

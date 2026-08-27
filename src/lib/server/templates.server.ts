@@ -2,6 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { db } from './db';
 import { contractorSettings, emailTemplate } from './db/schema';
 import { DEFAULT_SIGNATURE, isFollowUpDays, STARTER_EMAIL_TEMPLATES } from '$lib/crm';
+import type { NavPlacement } from '$lib/crm';
 // Billing gate. Applied to the contractor's own edits only — `ensureStarterTemplates`
 // and `getContractorSettings` below are provisioning, not contractor writes, and
 // must keep working for a lapsed contractor so their surfaces still render.
@@ -132,6 +133,27 @@ export async function saveFollowUpDays(contractorId: string, days: number): Prom
 		.onConflictDoUpdate({
 			target: contractorSettings.contractorId,
 			set: { followUpDays: days }
+		});
+}
+
+/**
+ * Move the phone/tablet navigation between the bar and a bottom tab bar.
+ *
+ * Not billing-guarded, on purpose and for the same reason the Guide's dismiss
+ * isn't: it is a UI preference, not domain data, and a lapsed contractor still
+ * has to be able to get around the app they are reading
+ * (docs/adr/0005-lapsing-never-reaches-customers.md).
+ */
+export async function saveNavPlacement(
+	contractorId: string,
+	placement: NavPlacement
+): Promise<void> {
+	await db
+		.insert(contractorSettings)
+		.values({ contractorId, navPlacement: placement })
+		.onConflictDoUpdate({
+			target: contractorSettings.contractorId,
+			set: { navPlacement: placement }
 		});
 }
 

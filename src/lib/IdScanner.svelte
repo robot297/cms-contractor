@@ -568,7 +568,7 @@
 	.reticle {
 		position: absolute;
 		inset: 18% 8%;
-		border: 2px dashed rgba(255, 204, 0, 0.9);
+		border: 2px dashed var(--brand);
 		border-radius: 10px;
 		pointer-events: none;
 	}
@@ -603,9 +603,9 @@
 		border-color: var(--fg-muted);
 	}
 	.btn.primary {
-		background: var(--yellow);
-		border-color: var(--yellow-deep);
-		color: var(--on-yellow);
+		background: var(--brand);
+		border-color: var(--brand-deep);
+		color: var(--on-brand);
 	}
 	.btn.small {
 		padding: 0.4rem 0.7rem;
@@ -641,8 +641,8 @@
 	}
 	.fields input:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
 
@@ -710,7 +710,7 @@
 		height: 1.4rem;
 		border-radius: 999px;
 		border: 2px solid var(--line-strong);
-		border-top-color: var(--yellow-deep);
+		border-top-color: var(--brand-deep);
 		animation: spin 0.7s linear infinite;
 	}
 	@keyframes spin {

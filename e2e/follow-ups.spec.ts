@@ -33,7 +33,7 @@ function isoDay(offsetDays: number): string {
 
 /** The dashboard's today card for one project, if it has one. */
 function dueCard(page: import('@playwright/test').Page, projectName: string) {
-	return page.locator('.due-card').filter({ hasText: projectName });
+	return page.locator('.order-card').filter({ hasText: projectName });
 }
 
 /** Set this order's follow-up to a given day through the ⏰ popover. */
@@ -116,16 +116,17 @@ test.describe('follow-ups', () => {
 
 		// The card carries who it's about and a way into the job, so the dashboard
 		// is somewhere to work from rather than only a list.
-		const card = page.locator('.due-card').filter({ hasText: order.projectName });
+		const card = page.locator('.order-card').filter({ hasText: order.projectName });
 		await expect(card).toBeVisible();
 		await expect(card).toContainText(customer.name);
-		// The badge names the situation rather than saying only "due". Two days back
-		// is two days back — this also guards the picker's local-calendar parsing,
-		// which used to store the previous evening for anyone west of UTC and made
-		// this read "3 days overdue".
-		await expect(card.locator('.due-flag')).toHaveText('2 days overdue');
+		// The danger edge is what says "late" now — the "2 days overdue" badge is
+		// gone. This still guards the picker's local-calendar parsing, which used
+		// to store the previous evening for anyone west of UTC and so counted a day
+		// too many.
 		await expect(card).toHaveClass(/is-overdue/);
-		await card.getByRole('link', { name: 'View order details' }).click();
+		// The whole card is the link. There is no separate "View order" button any
+		// more — it was a second control for what pressing anywhere already does.
+		await card.locator('a.stretch-link').click();
 		await page.waitForURL(/\/contractor\/orders\/[0-9a-f-]+$/);
 		await expect(page.getByRole('heading', { name: order.projectName })).toBeVisible();
 	});
@@ -171,7 +172,7 @@ test.describe('dashboard notifications', () => {
 		await page.goto('/contractor');
 		// One feed now — the card is found by the job it points at, and it says WHY
 		// it is here rather than living under a separate heading.
-		const row = page.locator('.due-card').filter({ has: page.locator(`a[href$="/${orderId}"]`) });
+		const row = page.locator('.order-card').filter({ has: page.locator(`a[href$="/${orderId}"]`) });
 		await expect(row).toBeVisible();
 		await expect(row).toContainText(DEV_CUSTOMER.name);
 		// How many are unanswered lives on the button that opens them — the card no
@@ -186,8 +187,8 @@ test.describe('dashboard notifications', () => {
 		// two cards for the same customer apart.
 		await expect(row).toContainText(order.projectName);
 
-		// And it goes where it says it goes.
-		await row.getByRole('link', { name: 'View order details' }).click();
+		// And it goes where it says it goes — the card itself is the link.
+		await row.locator('a.stretch-link').click();
 		await expect(page).toHaveURL(new RegExp(`/contractor/orders/${orderId}$`));
 
 		await customer.close();

@@ -16,6 +16,7 @@ import {
 	sendMessage,
 	ThreadForbiddenError
 } from '$lib/server/messaging.server';
+import { completeTaskAsCustomer, TaskNotFoundError } from '$lib/server/tasks.server';
 import type { Actions, PageServerLoad } from './$types';
 
 /** The portal's subject for this request, and whether it is an impersonated view. */
@@ -95,6 +96,38 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 };
 
 export const actions: Actions = {
+	/**
+	 * "Done" on something the contractor asked for.
+	 *
+	 * The only write a customer may make to a Task, and deliberately: a Task is an
+	 * ask FROM the contractor, so a customer who could author or edit one would be
+	 * filing work against somebody else's business. Scoped by the SESSION rather
+	 * than by an order id in the form — `completeTaskAsCustomer` resolves the task
+	 * through this user's own customer record, so a task id belonging to someone
+	 * else is a 404 rather than a write.
+	 *
+	 * Refused under view-as for the same reason a message is: ticking it off would
+	 * record the customer as having done something they have not. See ADR-0008.
+	 */
+	completeTask: async ({ request, locals }) => {
+		const { viewing } = portalSubject(locals);
+		if (viewing) {
+			return fail(403, {
+				message: 'Read-only: you are viewing this portal as the customer, not as them.'
+			});
+		}
+		const form = await request.formData();
+		const taskId = form.get('taskId')?.toString() ?? '';
+		if (!taskId) return fail(400, { message: 'A task is required' });
+		try {
+			await completeTaskAsCustomer(locals.user!.id, taskId);
+		} catch (err) {
+			if (err instanceof TaskNotFoundError) return fail(404, { message: err.message });
+			throw err;
+		}
+		return { success: true };
+	},
+
 	send: async ({ request, locals, params }) => {
 		const { viewing } = portalSubject(locals);
 		// Every write is refused in the impersonated view: a message stored here

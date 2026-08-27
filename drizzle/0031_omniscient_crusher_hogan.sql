@@ -1,0 +1,1 @@
+ALTER TABLE "order" ADD COLUMN "visit_date" timestamp;

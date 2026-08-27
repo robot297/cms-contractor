@@ -31,6 +31,8 @@ describe('contractor writes are billing-guarded', () => {
 	const crm = read('crm.server.ts');
 	const subs = read('subcontractor.server.ts');
 	const templates = read('templates.server.ts');
+	const workers = read('worker.server.ts');
+	const people = read('people.server.ts');
 
 	it.each([
 		'createCustomer',
@@ -39,8 +41,6 @@ describe('contractor writes are billing-guarded', () => {
 		'setCustomerAvatar',
 		'createOrder',
 		'setFollowUp',
-		'setOrderIcon',
-		'setOrderTags',
 		'updateOrderState',
 		'addOrderNote',
 		'recordEmailSent',
@@ -48,7 +48,23 @@ describe('contractor writes are billing-guarded', () => {
 		'createInvite',
 		'resendInvite',
 		'revokeInvite',
-		'deleteInvite'
+		'deleteInvite',
+		// The money surface (ADR-0011). Newer than the list above and the part of
+		// it that matters most: an unguarded write here would let a lapsed
+		// contractor move a balance, and the balance is what the invoice — and the
+		// customer's copy of it — is derived from.
+		'setOrderTotal',
+		'addLineItem',
+		'updateLineItem',
+		'deleteLineItem',
+		'recordPayment',
+		'deletePayment',
+		'completeOrder',
+		'cancelOrder',
+		// The other writes the order workspace offers, so this list is the whole
+		// of what that screen can change rather than a sample of it.
+		'setOrderDetails',
+		'setVisitDate'
 	])('crm.server.ts %s calls a billing guard', (fn) => {
 		expect(guarded(functionBody(crm, fn))).toBe(true);
 	});
@@ -77,6 +93,56 @@ describe('contractor writes are billing-guarded', () => {
 	])('templates.server.ts %s calls a billing guard', (fn) => {
 		expect(guarded(functionBody(templates, fn))).toBe(true);
 	});
+
+	// Crew. A newer module than the three above, and the reason this list is worth
+	// keeping: `worker.server.ts` arrived with its guards already in place and was
+	// nonetheless invisible to this file for as long as nobody added it here.
+	it.each([
+		'createWorker',
+		'updateWorker',
+		'archiveWorker',
+		'setWorkerAvatar',
+		'assignWorker',
+		'unassignWorker'
+	])('worker.server.ts %s calls a billing guard', (fn) => {
+		expect(guarded(functionBody(workers, fn))).toBe(true);
+	});
+
+	// The three bulk imports, which are the one shape that can bypass everything
+	// above while looking guarded: a loop that inserts rows itself pays neither the
+	// write guard nor the trial cap, and does it a hundred times per submit. Each
+	// of these must go through its own per-row create instead.
+	it.each([
+		['crm.server.ts', 'importCustomers', 'createCustomer'],
+		['subcontractor.server.ts', 'importSubcontractors', 'createSubcontractor'],
+		['worker.server.ts', 'importWorkers', 'createWorker']
+	])('%s %s delegates to %s rather than inserting rows itself', (file, fn, creator) => {
+		const body = functionBody(read(file), fn);
+		expect(body).toContain(`await ${creator}(contractorId,`);
+		expect(body).not.toContain('db.insert(');
+	});
+
+	// Guarded by delegation and deliberately not double-checked: a second
+	// `assertCanWrite` would be a second place to get the rule wrong. What has to
+	// hold is that it still goes through the guarded call and writes nothing itself.
+	it('crm.server.ts snoozeFollowUp goes through setFollowUp', () => {
+		const body = functionBody(crm, 'snoozeFollowUp');
+		expect(body).toContain('await setFollowUp(orderId, contractorId,');
+		expect(body).not.toContain('db.update(');
+	});
+
+	// The one directory dispatches by kind to the module that owns the record, so
+	// it must add no write path of its own — a `db.insert` here would be a fourth
+	// way to create a person, guarded by nothing.
+	it.each(['assignPerson', 'unassignPerson'])(
+		'people.server.ts %s dispatches rather than writing directly',
+		(fn) => {
+			const body = functionBody(people, fn);
+			expect(body).not.toContain('db.insert(');
+			expect(body).not.toContain('db.update(');
+			expect(body).not.toContain('db.delete(');
+		}
+	);
 
 	// Creation is the only thing trial limits gate — never editing.
 	it.each([
@@ -170,6 +236,29 @@ describe('portal paths are never billing-guarded', () => {
 	])('subcontractor.server.ts %s stays unguarded', (fn) => {
 		expect(guarded(functionBody(subs, fn))).toBe(false);
 	});
+
+	// Reads in the crew and directory modules, held to the same rule: a lapsed
+	// contractor keeps full read access to everything they built (ADR-0005), and
+	// the dashboard's on-site strip and the people directory are exactly the
+	// screens a guard here would blank out.
+	it.each([
+		'listWorkers',
+		'listOrderWorkers',
+		'listWorkerJobs',
+		'countJobsPerWorker',
+		'onSite',
+		'countWorkers',
+		'recentWorkers'
+	])('worker.server.ts %s stays unguarded', (fn) => {
+		expect(guarded(functionBody(read('worker.server.ts'), fn))).toBe(false);
+	});
+
+	it.each(['listPeople', 'listDirectory', 'listOrderPeople', 'onSite'])(
+		'people.server.ts %s stays unguarded',
+		(fn) => {
+			expect(guarded(functionBody(read('people.server.ts'), fn))).toBe(false);
+		}
+	);
 
 	it('no portal route imports the billing module', () => {
 		for (const dir of ['src/routes/customer', 'src/routes/subcontractor']) {

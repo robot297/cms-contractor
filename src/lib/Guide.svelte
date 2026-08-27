@@ -1,322 +1,187 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
-	import type { Guide, GuideStep } from '$lib/server/guide.server';
-
-	let { guide, onclose }: { guide: Guide; onclose?: () => void } = $props();
-
-	const steps = $derived(
-		guide.state === 'extended' ? [...guide.core, ...guide.extended] : guide.core
-	);
-	const doneCount = $derived(steps.filter((s) => s.done || s.skipped).length);
-	const pct = $derived(steps.length ? Math.round((doneCount / steps.length) * 100) : 0);
+	import type { Guide } from '$lib/server/guide.server';
 
 	/**
-	 * The one step the contractor is actually on: the first that isn't done. Only
-	 * this step shows its description and action — five equally-weighted links gave
-	 * no sense of what to do next, which is the entire job of a getting-started card.
-	 * Steps blocked by an earlier one can't be "current"; the blocker is.
+	 * The getting-started card.
+	 *
+	 * One thing to do at a time, and the thing itself happens here — the primary
+	 * step opens a dialog on this page rather than sending anyone to another
+	 * screen. What this replaced was a numbered list of five links with a progress
+	 * bar over it: it looked like a form to fill in, it read as a list of chores,
+	 * and every item was a redirect somewhere else.
+	 *
+	 * The remaining step is shown; the ones behind it are a row of dots. A
+	 * contractor does not need to read what they have already done, and five
+	 * equally-weighted rows gave no sense of what to do NEXT, which is the entire
+	 * job of a card like this.
 	 */
-	// A skipped step is settled — it must not stay "current" and block the ones after it.
-	const currentId = $derived(steps.find((s) => !s.done && !s.skipped && !s.blockedBy)?.id ?? null);
+	let {
+		guide,
+		onclose,
+		onstart
+	}: {
+		guide: Guide;
+		onclose?: () => void;
+		/** Opens the first-job dialog, which lives on the page that mounts this. */
+		onstart?: () => void;
+	} = $props();
 
-	/**
-	 * `resolve` takes a route id, so a step that carries a query string (`?new`, to
-	 * land with a form already open) has to be split and reassembled around it.
-	 */
-	function stepHref(step: GuideStep) {
-		const [path, query] = (step.href ?? '').split('?');
-		return resolve(path as '/contractor/customers') + (query ? `?${query}` : '');
-	}
+	const settled = (s: Guide['steps'][number]) => s.done || s.skipped === true;
+	/** The one step being asked for: the first unsettled one. */
+	const current = $derived(guide.steps.find((s) => !settled(s)) ?? null);
+	const doneCount = $derived(guide.steps.filter(settled).length);
 </script>
 
-<section class="guide">
-	<header>
-		<span class="title">Getting started</span>
-		<span class="count">{doneCount} of {steps.length}</span>
-		<form method="POST" action="?/guideDismiss" use:enhance={() => () => onclose?.()}>
-			<button type="submit" class="close" aria-label="Hide getting started" title="Hide">×</button>
-		</form>
-	</header>
-
-	<div
-		class="progress"
-		role="progressbar"
-		aria-valuenow={doneCount}
-		aria-valuemin={0}
-		aria-valuemax={steps.length}
-		aria-label="Getting started progress"
-	>
-		<span class="progress-fill" style="width: {pct}%"></span>
-	</div>
-
-	<ol>
-		{#each steps as step, i (step.id)}
-			{@const current = step.id === currentId}
-			<li
-				class:done={step.done}
-				class:skipped={!step.done && step.skipped}
-				class:current
-				class:blocked={!step.done && !step.skipped && !!step.blockedBy}
-			>
-				<span class="marker" aria-hidden="true">{step.done ? '✓' : step.skipped ? '–' : i + 1}</span
+{#if current}
+	<section class="guide">
+		<div class="head">
+			<span class="eyebrow">Getting started</span>
+			<!-- Progress as dots, not a bar with a percentage. There are two steps;
+			     a percentage of two is a statistic nobody asked for. -->
+			<span class="dots" aria-label="Step {doneCount + 1} of {guide.steps.length}">
+				{#each guide.steps as step (step.id)}
+					<span class="dot" class:on={settled(step)} aria-hidden="true"></span>
+				{/each}
+			</span>
+			<form method="POST" action="?/guideDismiss" use:enhance={() => () => onclose?.()}>
+				<button type="submit" class="close" aria-label="Hide getting started" title="Hide">×</button
 				>
-
-				<div class="body">
-					<span class="label">{step.title}</span>
-
-					{#if current}
-						<p class="desc">{step.description}</p>
-						<div class="action">
-							{#if step.href && step.cta}
-								<!-- stepHref does resolve the path; the rule just can't see through
-								     the query string it reassembles around it. -->
-								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-								<a class="go" href={stepHref(step)}>{step.cta} →</a>
-							{/if}
-							{#if step.skippable}
-								<form method="POST" action="?/guideSkipStep" use:enhance>
-									<input type="hidden" name="stepId" value={step.id} />
-									<button type="submit" class="skip">Skip this</button>
-								</form>
-							{/if}
-						</div>
-					{:else if !step.done && step.skipped}
-						<span class="note">Skipped</span>
-					{:else if !step.done && step.blockedBy}
-						<span class="note">{step.blockedBy}</span>
-					{/if}
-				</div>
-			</li>
-		{/each}
-	</ol>
-
-	{#if guide.atFork}
-		<footer>
-			<form method="POST" action="?/guideContinue" use:enhance>
-				<button type="submit" class="more">There’s more to set up →</button>
 			</form>
-		</footer>
-	{/if}
-</section>
+		</div>
+
+		<h2 class="title">{current.title}</h2>
+		<p class="desc">{current.description}</p>
+
+		<div class="actions">
+			{#if current.id === 'job'}
+				<!-- Not a link. The whole point of this rewrite is that the first job is
+				     created without leaving the dashboard. -->
+				<button type="button" class="go" onclick={() => onstart?.()}>Add your first job</button>
+			{:else}
+				<!-- The one step that does leave the page, because sending an invite is
+				     a thing you do TO a customer and the directory is where they are.
+				     It is also the optional one, so the trip is opt-in by definition. -->
+				<a class="go" href={resolve('/contractor/people')}>Invite a customer →</a>
+			{/if}
+			{#if current.skippable}
+				<form method="POST" action="?/guideSkipStep" use:enhance>
+					<input type="hidden" name="stepId" value={current.id} />
+					<button type="submit" class="skip">No thanks</button>
+				</form>
+			{/if}
+		</div>
+	</section>
+{/if}
 
 <style>
 	.guide {
 		display: grid;
-		gap: 0.6rem;
-		padding: 0.85rem 1rem;
-		border: 1px solid var(--line);
-		border-radius: 12px;
-		background: var(--surface-sunken);
+		gap: 0.4rem;
+		padding: 1rem 1.15rem 1.15rem;
+		border: 1px solid var(--line-strong);
+		border-radius: var(--radius-card);
+		background: var(--surface);
+		/* The accent as an edge and a wash, not a filled slab: this is a nudge on a
+		   working page, and a card that shouts is a card people dismiss. */
+		border-left: 3px solid var(--brand);
+		background-image: linear-gradient(
+			110deg,
+			color-mix(in srgb, var(--brand) 9%, transparent),
+			transparent 55%
+		);
 	}
-	header {
+	.head {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.6rem;
 	}
-	.title {
-		font-size: 0.75rem;
+	.eyebrow {
+		font-size: 0.66rem;
 		font-weight: 800;
+		letter-spacing: 0.14em;
 		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: var(--fg-muted);
+		color: var(--brand);
 	}
-	.count {
+	.dots {
+		display: inline-flex;
+		gap: 0.25rem;
 		margin-right: auto;
-		font-size: 0.72rem;
-		font-weight: 700;
-		color: var(--fg-muted);
-		opacity: 0.8;
-		font-variant-numeric: tabular-nums;
+	}
+	.dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 999px;
+		background: var(--line-strong);
+	}
+	.dot.on {
+		background: var(--brand);
+		/* Empty and decorative, so this never renders. Declared anyway because the
+		   fill and its foreground must not be separable — the rule
+		   theme.contrast.test.ts enforces, and the one `.rail-glide` follows. */
+		color: var(--on-brand);
 	}
 	.close {
 		border: none;
 		background: none;
-		padding: 0 0.2rem;
-		font-size: 1.1rem;
-		line-height: 1;
 		color: var(--fg-muted);
+		font-size: 1.2rem;
+		line-height: 1;
+		padding: 0.1rem 0.25rem;
 		cursor: pointer;
 	}
 	.close:hover {
 		color: var(--fg);
 	}
-
-	.progress {
-		height: 4px;
-		border-radius: 999px;
-		background: var(--line);
-		overflow: hidden;
-	}
-	.progress-fill {
-		display: block;
-		height: 100%;
-		background: linear-gradient(90deg, var(--yellow), var(--yellow-deep));
-		transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-	}
-
-	ol {
+	.title {
 		margin: 0;
-		padding: 0;
-		list-style: none;
-		display: grid;
-		gap: 0.15rem;
-	}
-	li {
-		display: flex;
-		gap: 0.6rem;
-		align-items: flex-start;
-		padding: 0.35rem 0.4rem;
-		border-radius: 9px;
-		font-size: 0.85rem;
-	}
-	/* Only the step you're on gets weight — everything else stays a quiet line. */
-	li.current {
-		background: var(--surface);
-		border: 1px solid var(--line);
-		padding: 0.6rem;
-	}
-
-	.marker {
-		flex: none;
-		width: 1.35rem;
-		height: 1.35rem;
-		border-radius: 50%;
-		display: grid;
-		place-items: center;
-		font-size: 0.7rem;
-		font-weight: 800;
-		background: var(--line);
-		color: var(--fg-muted);
-		line-height: 1;
-	}
-	li.done .marker {
-		background: var(--yellow);
-		color: var(--on-yellow);
-	}
-	li.current .marker {
-		background: #14171c;
-		color: #fff;
-	}
-
-	.body {
-		display: grid;
-		gap: 0.3rem;
-		min-width: 0;
-	}
-	.label {
-		color: var(--fg);
-		font-weight: 600;
-		line-height: 1.35;
-	}
-	li.current .label {
+		font-size: 1.05rem;
 		font-weight: 800;
 	}
-	li.done .label {
-		color: var(--fg-muted);
-	}
-	/* Skipped reads as settled-but-not-done: struck through, never ticked. */
-	li.skipped .label {
-		color: var(--fg-muted);
-		text-decoration: line-through;
-		text-decoration-color: var(--line-strong);
-	}
-	li.skipped .marker {
-		background: var(--line);
-		color: var(--fg-muted);
-	}
-	li.blocked .label {
-		color: var(--fg-muted);
-	}
-
 	.desc {
 		margin: 0;
-		font-size: 0.8rem;
+		max-width: 60ch;
+		font-size: 0.88rem;
 		line-height: 1.5;
 		color: var(--fg-muted);
 	}
-	.note {
-		font-size: 0.72rem;
-		color: var(--fg-muted);
-		opacity: 0.85;
-	}
-
-	.action {
+	.actions {
 		display: flex;
-		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.5rem;
-		margin-top: 0.15rem;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+		margin-top: 0.35rem;
 	}
-	/* Quieter than the primary action — an escape hatch, not the suggestion. */
+	.go {
+		padding: 0.5rem 1rem;
+		border: none;
+		border-radius: var(--radius-control);
+		background: var(--brand-sweep);
+		color: var(--on-brand);
+		box-shadow: 0 0 16px var(--brand-glow);
+		font-family: inherit;
+		font-size: 0.88rem;
+		font-weight: 700;
+		text-decoration: none;
+		cursor: pointer;
+	}
+	.go:hover {
+		filter: brightness(1.08);
+	}
 	.skip {
 		border: none;
 		background: none;
-		padding: 0.2rem 0;
+		padding: 0.35rem 0.2rem;
 		color: var(--fg-muted);
 		font-family: inherit;
-		font-size: 0.76rem;
-		font-weight: 700;
+		font-size: 0.82rem;
+		font-weight: 600;
 		text-decoration: underline;
 		text-underline-offset: 3px;
 		cursor: pointer;
 	}
 	.skip:hover {
 		color: var(--fg);
-	}
-	.go {
-		display: inline-block;
-		padding: 0.4rem 0.8rem;
-		border-radius: 999px;
-		border: 1.5px solid #14171c;
-		background: #14171c;
-		color: #fff;
-		text-decoration: none;
-		font-size: 0.78rem;
-		font-weight: 800;
-		font-family: inherit;
-		cursor: pointer;
-	}
-	.go:hover {
-		background: #000;
-	}
-	.go:focus-visible {
-		outline: 2px solid var(--yellow);
-		outline-offset: 2px;
-	}
-
-	footer {
-		display: flex;
-	}
-	.more {
-		border: none;
-		background: none;
-		padding: 0;
-		font-size: 0.75rem;
-		font-weight: 800;
-		color: var(--fg);
-		cursor: pointer;
-		font-family: inherit;
-		text-decoration: underline;
-		text-decoration-color: var(--yellow-deep);
-		text-decoration-thickness: 2px;
-		text-underline-offset: 3px;
-	}
-
-	/* ---- Dark theme ----
-	   The step button is ink-on-white in light; invert it so it doesn't disappear
-	   against the dark card. Scoped to `.go` so it can't outrank other button rules. */
-	:global(:root[data-theme='dark']) .go {
-		background: var(--fg);
-		border-color: var(--fg);
-		color: #14171c;
-	}
-	:global(:root[data-theme='dark']) .go:hover {
-		background: #fff;
-		border-color: #fff;
-	}
-	:global(:root[data-theme='dark']) li.current .marker {
-		background: var(--fg);
-		color: #14171c;
 	}
 </style>

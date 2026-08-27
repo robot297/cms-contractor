@@ -1,6 +1,15 @@
-import { and, desc, eq, gt, isNull, ne } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNull, lt, ne } from 'drizzle-orm';
 import { db } from './db';
-import { customer, customerInvite, notification, order, timelineEntry, user } from './db/schema';
+import {
+	customer,
+	customerInvite,
+	lineItem,
+	notification,
+	order,
+	payment,
+	timelineEntry,
+	user
+} from './db/schema';
 import {
 	defaultFollowUp,
 	customerStateLabel,
@@ -19,14 +28,24 @@ import {
 	type PreferredContact,
 	type SnoozePreset
 } from '$lib/crm';
+import {
+	invoiceSummary,
+	paymentKindLabel,
+	type InvoiceSummary,
+	type LineItem,
+	type PaymentRecord
+} from '$lib/invoice';
 // Billing gate. Every contractor-initiated mutation below calls one of these
 // before touching the database. It is deliberately NOT a single guard on the
 // /contractor layout: a lapsed contractor must still be able to read everything
 // they built. See docs/adr/0005-lapsing-never-reaches-customers.md.
 import { assertCanCreate, assertCanWrite, isBillingError } from './billing.server';
+import { listTasks, openTaskCounts } from './tasks.server';
+import type { CustomerTaskView } from '$lib/tasks';
 // A new order's first follow-up lands at the contractor's own interval, so
 // creating one has to read their settings.
 import { getContractorSettings } from './templates.server';
+// ZIP → coordinates for the day's run. Cached per process; see geo.server.ts.
 
 /** How long a customer invite / magic link stays valid. */
 const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -36,6 +55,8 @@ export type CustomerRow = typeof customer.$inferSelect;
 export type TimelineRow = typeof timelineEntry.$inferSelect;
 export type NotificationRow = typeof notification.$inferSelect;
 export type InviteRow = typeof customerInvite.$inferSelect;
+export type PaymentRow = typeof payment.$inferSelect;
+export type LineItemRow = typeof lineItem.$inferSelect;
 
 export type ContractorOrderView = OrderRow & {
 	customerName: string;
@@ -44,6 +65,8 @@ export type ContractorOrderView = OrderRow & {
 	customerAddress: string | null;
 	customerCity: string | null;
 	customerState: string | null;
+	/** Where the job is, precisely enough to look up a forecast for it. */
+	customerPostalCode: string | null;
 	customerPreferredContact: PreferredContact;
 	customerVisibleState: string;
 	/** Whether a portal reply can reach them — see the note in toContractorView. */
@@ -80,6 +103,7 @@ function toContractorView(row: OrderRow, cust: CustomerRow | null): ContractorOr
 		customerAddress: cust?.address ?? null,
 		customerCity: cust?.city ?? null,
 		customerState: cust?.state ?? null,
+		customerPostalCode: cust?.postalCode ?? null,
 		customerPreferredContact: normalizePreferredContact(cust?.preferredContact),
 		customerVisibleState: getVisibleCustomerState(row.state as ContractorOrderState),
 		// Whether there is a portal to deliver a reply to. A customer with no login
@@ -389,7 +413,6 @@ export type CreateOrderInput = {
 	projectName?: string;
 	projectType?: string;
 	state?: ContractorOrderState;
-	tags?: string[];
 };
 
 export async function createOrder(
@@ -410,7 +433,6 @@ export async function createOrder(
 			projectName: input.projectName ?? null,
 			projectType: input.projectType ?? null,
 			state: input.state ?? 'Inquiry',
-			tags: input.tags ?? [],
 			// New orders get a follow-up at the contractor's default interval.
 			nextFollowUpAt: defaultFollowUp(settings.followUpDays)
 		})
@@ -429,36 +451,6 @@ export async function createOrder(
 	});
 
 	return row;
-}
-
-/** Replace an order's tags. Pass an empty array to clear them. */
-export async function setOrderTags(
-	orderId: string,
-	contractorId: string,
-	tags: string[]
-): Promise<void> {
-	await assertCanWrite(contractorId);
-	const owned = await contractorOrder(orderId, contractorId);
-	if (!owned) throw new Error('Order not found');
-	await db.update(order).set({ tags }).where(eq(order.id, orderId));
-
-	// Log what actually changed rather than the fact that the picker was saved —
-	// closing it without touching anything shouldn't leave a trace in the history.
-	const before = owned.tags ?? [];
-	const added = tags.filter((tag) => !before.includes(tag));
-	const removed = before.filter((tag) => !tags.includes(tag));
-	if (added.length === 0 && removed.length === 0) return;
-	const parts: string[] = [];
-	if (added.length > 0) parts.push(`Added ${added.join(', ')}`);
-	if (removed.length > 0) parts.push(`Removed ${removed.join(', ')}`);
-	await db.insert(timelineEntry).values({
-		orderId,
-		kind: 'note',
-		title: 'Tags updated',
-		detail: parts.join(' · '),
-		authorRole: 'contractor',
-		internal: true
-	});
 }
 
 /** Set (or clear, with null) an order's next follow-up date. */
@@ -504,18 +496,6 @@ export async function bumpFollowUpAfterContact(
 	} catch (err) {
 		console.warn(`[follow-up] could not reschedule order ${orderId}:`, err);
 	}
-}
-
-/** Set or clear (null) an order's construction icon. */
-export async function setOrderIcon(
-	orderId: string,
-	contractorId: string,
-	icon: string | null
-): Promise<void> {
-	await assertCanWrite(contractorId);
-	const existing = await contractorOrder(orderId, contractorId);
-	if (!existing) throw new Error('Order not found');
-	await db.update(order).set({ icon }).where(eq(order.id, orderId));
 }
 
 /** Snooze an order's follow-up forward by a preset, from now. */
@@ -617,6 +597,456 @@ async function notifyLinkedCustomer(
 	if (cust?.userId) await createNotification({ userId: cust.userId, orderId, title, priority });
 }
 
+// ------------------------------------------------------------------ Payments
+//
+// ADR-0010 said the app records money and never processes it. These functions are
+// that rule with the arithmetic finished: a job carries a total, payments are
+// recorded against it, and the balance is derived. Nothing here reaches a payment
+// rail, and nothing here can be triggered by a customer — the contractor is the
+// only one who can say money arrived, because they are the only one who saw it.
+
+/** The charges on one order, in the contractor's order. */
+export async function listLineItems(orderId: string): Promise<LineItem[]> {
+	const rows = await db
+		.select()
+		.from(lineItem)
+		.where(eq(lineItem.orderId, orderId))
+		.orderBy(lineItem.position, lineItem.createdAt);
+	return rows.map((r) => ({ id: r.id, label: r.label, amountCents: r.amountCents }));
+}
+
+/**
+ * Add a charge.
+ *
+ * Appends: the new row's position is one past the current last, so a line lands
+ * where the contractor just typed it rather than at the top. Adding the FIRST
+ * line is what flips an order from a lump total to an itemised one, and the
+ * timeline says so, because the customer's total may change as a result.
+ */
+export async function addLineItem(
+	orderId: string,
+	contractorId: string,
+	input: { label: string; amountCents: number }
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+
+	const current = await listLineItems(orderId);
+	const [last] = await db
+		.select({ position: lineItem.position })
+		.from(lineItem)
+		.where(eq(lineItem.orderId, orderId))
+		.orderBy(desc(lineItem.position))
+		.limit(1);
+
+	const label = input.label.trim();
+	await db.insert(lineItem).values({
+		orderId,
+		label,
+		amountCents: input.amountCents,
+		position: (last?.position ?? 0) + 1
+	});
+
+	await noteLineChange(
+		orderId,
+		current.length === 0 ? 'Invoice itemised' : 'Line added',
+		`${label} — ${formatCents(input.amountCents)}`
+	);
+}
+
+/** Rename or re-price a charge. */
+export async function updateLineItem(
+	itemId: string,
+	orderId: string,
+	contractorId: string,
+	input: { label: string; amountCents: number }
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+
+	// Read the old row first. `.returning()` on an update hands back the NEW
+	// values, and a history entry that cannot say what the figure used to be is
+	// most of the reason to write one at all.
+	const [before] = await db
+		.select()
+		.from(lineItem)
+		.where(and(eq(lineItem.id, itemId), eq(lineItem.orderId, orderId)))
+		.limit(1);
+	if (!before) return;
+
+	const label = input.label.trim();
+	await db
+		.update(lineItem)
+		.set({ label, amountCents: input.amountCents })
+		.where(and(eq(lineItem.id, itemId), eq(lineItem.orderId, orderId)));
+
+	// Say only what actually moved. A renamed line and a re-priced one are
+	// different events, and reporting both every time makes the history unreadable.
+	const parts: string[] = [];
+	if (before.label !== label) parts.push(`${before.label} → ${label}`);
+	if (before.amountCents !== input.amountCents) {
+		parts.push(`${formatCents(before.amountCents)} → ${formatCents(input.amountCents)}`);
+	}
+	if (parts.length === 0) return;
+	await noteLineChange(orderId, 'Line updated', `${label} · ${parts.join(' · ')}`);
+}
+
+/**
+ * Remove a charge.
+ *
+ * Removing the LAST one hands the total back to the stored `finalAmountCents`,
+ * which is whatever was typed before the breakdown existed — possibly nothing.
+ * That is the honest outcome: an order with no lines has no itemised total, and
+ * inventing one from the rows just deleted would be worse.
+ */
+export async function deleteLineItem(
+	itemId: string,
+	orderId: string,
+	contractorId: string
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+	const [removed] = await db
+		.delete(lineItem)
+		.where(and(eq(lineItem.id, itemId), eq(lineItem.orderId, orderId)))
+		.returning();
+	if (!removed) return;
+	await noteLineChange(
+		orderId,
+		'Line removed',
+		`${removed.label} — ${formatCents(removed.amountCents)}`
+	);
+}
+
+/**
+ * Record a change to the invoice, in the customer's history.
+ *
+ * Says WHAT changed and then what it adds up to — "Labour — $4,600.00 · Total
+ * $18,000.00". The first version of this wrote only the total, which meant a
+ * contractor adding six charges produced six identical "Invoice updated" rows
+ * and the history could not answer the one question it was there for: what got
+ * added, and for how much.
+ *
+ * The total is read back AFTER the write rather than computed from the caller's
+ * arguments, so this can never report a figure the invoice does not show.
+ *
+ * Not internal: what a job costs is the customer's business, and a line appearing
+ * on their invoice with no corresponding history entry is how a surprise charge
+ * looks from their side.
+ */
+async function noteLineChange(orderId: string, title: string, what: string): Promise<void> {
+	const [row] = await db
+		.select({ finalAmountCents: order.finalAmountCents })
+		.from(order)
+		.where(eq(order.id, orderId))
+		.limit(1);
+	const summary = invoiceSummary(
+		{ finalAmountCents: row?.finalAmountCents ?? null },
+		[],
+		await listLineItems(orderId)
+	);
+	const total = summary.totalCents == null ? '' : ` · Total ${formatCents(summary.totalCents)}`;
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'invoice',
+		title,
+		detail: `${what}${total}`,
+		authorRole: 'contractor',
+		internal: false
+	});
+}
+
+/**
+ * Put a job on a day's schedule, or take it off.
+ *
+ * Its own action rather than part of `setOrderDetails`, because this is the one
+ * date a contractor changes from the dashboard mid-morning — "we're not getting
+ * to the Alder Street job today" — and making that a trip through the whole
+ * details form would guarantee it never happened.
+ *
+ * Not written to the timeline. Which day the crew turns up is planning, and it
+ * moves; a customer's history filling with "visit moved to Thursday, visit moved
+ * to Friday" would bury the entries that record what actually happened.
+ */
+export async function setVisitDate(
+	orderId: string,
+	contractorId: string,
+	visitDate: Date | null
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+	await db.update(order).set({ visitDate }).where(eq(order.id, orderId));
+}
+
+/** One job on today's run, with enough to place it on a map. */
+export type ScheduledVisit = {
+	id: string;
+	projectName: string | null;
+	customerName: string;
+	icon: string | null;
+	state: string;
+	/** Where the work is, in words. */
+	siteLabel: string;
+};
+
+/**
+ * Everything scheduled for one calendar day, in the order it should be driven.
+ *
+ * This used to resolve each site's coordinates from its ZIP so the dashboard
+ * could say how far away each job was. That feature is gone, and so is the ZIP
+ * lookup that fed it — which also means this no longer makes a network call per
+ * distinct postcode just to render a list of today's jobs.
+ *
+ * A lookup that fails leaves the job on the list with null coordinates rather
+ * than dropping it. A job you cannot estimate the drive to is still a job you are
+ * doing today, and silently omitting it is the worst thing this could do.
+ */
+export async function visitsOn(contractorId: string, day: Date): Promise<ScheduledVisit[]> {
+	const start = new Date(day);
+	start.setHours(0, 0, 0, 0);
+	const end = new Date(start);
+	end.setDate(end.getDate() + 1);
+
+	const rows = await db
+		.select({ order, customer })
+		.from(order)
+		.leftJoin(customer, eq(order.customerId, customer.id))
+		.where(
+			and(
+				eq(order.contractorId, contractorId),
+				isNull(order.deletedAt),
+				gte(order.visitDate, start),
+				lt(order.visitDate, end)
+			)
+		)
+		.orderBy(order.visitDate, order.createdAt);
+
+	return rows.map((r) => {
+		const city = r.order.siteCity ?? r.customer?.city ?? null;
+		const state = r.order.siteState ?? r.customer?.state ?? null;
+		const street = r.order.siteAddress ?? r.customer?.address ?? null;
+
+		return {
+			id: r.order.id,
+			projectName: r.order.projectName,
+			customerName: r.customer?.name ?? 'Unknown customer',
+			icon: r.order.icon,
+			state: r.order.state,
+			siteLabel: [street, [city, state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')
+		};
+	});
+}
+
+/**
+ * The job's own details: what the work is, where it happens, and when.
+ *
+ * One action rather than five, because these are edited together in one panel
+ * and a contractor filling in a job should not generate five timeline entries.
+ * Nothing here is customer-facing news, so nothing is written to the timeline —
+ * the portal reads the current values, and "the description was reworded" is not
+ * an event anyone needs a record of.
+ */
+export async function setOrderDetails(
+	orderId: string,
+	contractorId: string,
+	input: {
+		description: string | null;
+		siteAddress: string | null;
+		siteCity: string | null;
+		siteState: string | null;
+		sitePostalCode: string | null;
+		startDate: Date | null;
+		targetDate: Date | null;
+	}
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+	await db
+		.update(order)
+		.set({
+			description: input.description?.trim() || null,
+			siteAddress: input.siteAddress?.trim() || null,
+			siteCity: input.siteCity?.trim() || null,
+			siteState: input.siteState?.trim() || null,
+			sitePostalCode: input.sitePostalCode?.trim() || null,
+			startDate: input.startDate,
+			targetDate: input.targetDate
+		})
+		.where(eq(order.id, orderId));
+}
+
+/** Payments on one order, oldest-first. Shape shared with the browser via `PaymentRecord`. */
+export async function listPayments(orderId: string): Promise<PaymentRecord[]> {
+	const rows = await db
+		.select()
+		.from(payment)
+		.where(eq(payment.orderId, orderId))
+		.orderBy(payment.receivedAt);
+	return rows.map(toPaymentRecord);
+}
+
+function toPaymentRecord(row: PaymentRow): PaymentRecord {
+	return {
+		id: row.id,
+		kind: row.kind,
+		amountCents: row.amountCents,
+		method: row.method,
+		note: row.note,
+		receivedAt: row.receivedAt
+	};
+}
+
+/**
+ * Set what the job costs.
+ *
+ * Separate from close-out on purpose. `finalAmountCents` was written only when an
+ * order was completed, which made a deposit impossible to reason about — half of
+ * an unknown total is not a number. The total is agreed when the quote is, so it
+ * is settable from the moment there is one, and completing an order still writes
+ * the same column.
+ *
+ * The timeline records it, because a customer who is about to be asked for a
+ * deposit is entitled to see where the figure came from.
+ */
+export async function setOrderTotal(
+	orderId: string,
+	contractorId: string,
+	totalCents: number | null
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+	if (existing.finalAmountCents === totalCents) return;
+
+	await db.update(order).set({ finalAmountCents: totalCents }).where(eq(order.id, orderId));
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'invoice',
+		title: totalCents == null ? 'Project total cleared' : 'Project total set',
+		detail: totalCents == null ? '' : formatCents(totalCents),
+		authorRole: 'contractor',
+		internal: false
+	});
+}
+
+/**
+ * Record money received.
+ *
+ * `receivedAt` is the contractor's to state — Friday's cheque banked on Monday
+ * belongs on Friday's line of the invoice — and defaults to now when they don't
+ * say. The timeline entry is customer-visible: being told their deposit landed is
+ * the whole point, and a payment the customer can't see is a payment they will
+ * email to ask about.
+ */
+export async function recordPayment(
+	orderId: string,
+	contractorId: string,
+	input: {
+		kind: string;
+		amountCents: number;
+		method: string | null;
+		note: string | null;
+		receivedAt?: Date | null;
+	}
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+
+	const [row] = await db
+		.insert(payment)
+		.values({
+			orderId,
+			kind: input.kind,
+			amountCents: input.amountCents,
+			method: input.method,
+			note: input.note?.trim() || null,
+			receivedAt: input.receivedAt ?? new Date()
+		})
+		.returning();
+
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'invoice',
+		title: `${paymentKindLabel(row.kind)} received`,
+		detail: `${formatCents(row.amountCents)}${
+			paymentMethodLabel(row.method) ? ` · ${paymentMethodLabel(row.method)}` : ''
+		}${row.note ? ` — ${row.note}` : ''}`,
+		authorRole: 'contractor',
+		internal: false
+	});
+
+	// What they owe changed, so tell them what it changed TO rather than making
+	// them open the portal to find out.
+	const summary = await orderInvoice(orderId, existing.finalAmountCents);
+	const standing =
+		summary.status === 'settled'
+			? 'paid in full'
+			: summary.status === 'open'
+				? `${formatCents(summary.balanceCents)} remaining`
+				: summary.status === 'overpaid'
+					? `${formatCents(-(summary.balanceCents ?? 0))} overpaid`
+					: `${formatCents(summary.paidCents)} received`;
+	await notifyLinkedCustomer(
+		existing.customerId,
+		orderId,
+		`${paymentKindLabel(row.kind)} received — ${standing}`,
+		'standard'
+	);
+	// Money arriving is contact. It should quiet the follow-up reminder exactly as
+	// a status change does.
+	await bumpFollowUpAfterContact(orderId, contractorId);
+}
+
+/**
+ * Remove a recorded payment.
+ *
+ * A correction, not an erasure: the timeline keeps the original "received" entry
+ * and gains a reversal beside it, because a customer who was told their deposit
+ * landed must not find that line quietly gone. Only the arithmetic is undone.
+ */
+export async function deletePayment(
+	paymentId: string,
+	orderId: string,
+	contractorId: string
+): Promise<void> {
+	await assertCanWrite(contractorId);
+	const existing = await contractorOrder(orderId, contractorId);
+	if (!existing) throw new Error('Order not found');
+
+	const [row] = await db
+		.delete(payment)
+		.where(and(eq(payment.id, paymentId), eq(payment.orderId, orderId)))
+		.returning();
+	if (!row) return;
+
+	await db.insert(timelineEntry).values({
+		orderId,
+		kind: 'invoice',
+		title: `${paymentKindLabel(row.kind)} removed`,
+		detail: `${formatCents(row.amountCents)} — recorded in error`,
+		authorRole: 'contractor',
+		internal: false
+	});
+}
+
+/** The invoice for one order: its total, its payments, and what is left. */
+export async function orderInvoice(
+	orderId: string,
+	finalAmountCents: number | null
+): Promise<InvoiceSummary> {
+	return invoiceSummary(
+		{ finalAmountCents },
+		await listPayments(orderId),
+		await listLineItems(orderId)
+	);
+}
+
 /**
  * Close an order out as complete, recording the final invoice and payment.
  *
@@ -624,6 +1054,13 @@ async function notifyLinkedCustomer(
  * keys in the invoice total and how the customer paid. The figures land on the
  * order (customer-visible on the portal) and on the timeline, and the customer is
  * notified. Cents in, whole cents stored.
+ *
+ * What changed when payments became rows: `markPaid` now means "the REMAINING
+ * balance was received", not "the whole total was". On a job with a deposit
+ * already recorded it writes a final payment for what was actually outstanding,
+ * which is the number the contractor was handed. Stamping the full total here —
+ * what the single-payment version did — would have counted the deposit twice the
+ * moment deposits existed.
  */
 export async function completeOrder(
 	orderId: string,
@@ -642,13 +1079,7 @@ export async function completeOrder(
 	const notes = opts.notes?.trim() || null;
 	await db
 		.update(order)
-		.set({
-			state: 'Work Complete',
-			finalAmountCents: opts.amountCents,
-			finalNotes: notes,
-			paymentMethod: opts.markPaid ? opts.paymentMethod : null,
-			paidAt: opts.markPaid ? new Date() : null
-		})
+		.set({ state: 'Work Complete', finalAmountCents: opts.amountCents, finalNotes: notes })
 		.where(eq(order.id, orderId));
 
 	await db.insert(timelineEntry).values({
@@ -662,8 +1093,8 @@ export async function completeOrder(
 		authorRole: 'contractor',
 		internal: false
 	});
-	// The invoice figure and the payment record each get their own `invoice`-kind
-	// entry so the history shows the numbers rather than burying them in a note.
+	// The invoice figure gets its own `invoice`-kind entry so the history shows the
+	// number rather than burying it in a note.
 	if (opts.amountCents != null) {
 		await db.insert(timelineEntry).values({
 			orderId,
@@ -674,18 +1105,24 @@ export async function completeOrder(
 			internal: false
 		});
 	}
+
 	if (opts.markPaid) {
-		const amount = opts.amountCents != null ? formatCents(opts.amountCents) : 'Final payment';
-		const via = opts.paymentMethod ? ` · ${paymentMethodLabel(opts.paymentMethod)}` : '';
-		await db.insert(timelineEntry).values({
-			orderId,
-			kind: 'invoice',
-			title: 'Payment received',
-			detail: `${amount}${via}`,
-			authorRole: 'contractor',
-			internal: false
-		});
+		// What is actually still owed, given anything already recorded. Null total
+		// means nobody agreed a figure, so the best available reading of "they paid
+		// the rest" is that the job is settled at what has come in — record nothing
+		// rather than invent an amount.
+		const before = await orderInvoice(orderId, opts.amountCents);
+		const outstanding = before.balanceCents;
+		if (outstanding != null && outstanding > 0) {
+			await recordPayment(orderId, contractorId, {
+				kind: 'final',
+				amountCents: outstanding,
+				method: opts.paymentMethod,
+				note: null
+			});
+		}
 	}
+
 	await notifyLinkedCustomer(existing.customerId, orderId, 'Order update: Work Complete', 'high');
 	await bumpFollowUpAfterContact(orderId, contractorId);
 }
@@ -763,6 +1200,8 @@ export type OrderDetail = {
 	order: ContractorOrderView;
 	customer: CustomerRow | null;
 	timeline: TimelineRow[];
+	/** Total, payments and balance — computed, never stored. See `invoice.ts`. */
+	invoice: InvoiceSummary;
 };
 
 /** Full detail for a single order the contractor owns, or null if not theirs. */
@@ -787,7 +1226,8 @@ export async function getOrderDetail(
 	return {
 		order: toContractorView(row.order, row.customer),
 		customer: row.customer,
-		timeline
+		timeline,
+		invoice: invoiceSummary(row.order, await listPayments(orderId), await listLineItems(orderId))
 	};
 }
 
@@ -894,6 +1334,17 @@ export type PortalOrderSummary = {
 	contractorId: string;
 	updatedAt: Date;
 	active: boolean;
+	/**
+	 * Outstanding Tasks on this order.
+	 *
+	 * Carried on the SUMMARY, not just the detail, because the portal's project
+	 * list is where a customer with three jobs finds out that one of them is
+	 * waiting on them — and a customer who has to open each project to discover
+	 * that has been told nothing.
+	 */
+	openTasks: number;
+	/** Whether the State itself is one of the two that mean "pay me". */
+	paymentDue: boolean;
 };
 
 /** Every order this subject may see, newest first. Drives the portal's order rail. */
@@ -905,6 +1356,10 @@ export async function listPortalOrders(subject: PortalSubject): Promise<PortalOr
 		.where(and(portalScope(subject), isNull(order.deletedAt)))
 		.orderBy(desc(order.updatedAt));
 
+	// One grouped query for the whole list rather than one per row — the rail
+	// renders on every portal page, so this is the query that would have been N+1.
+	const counts = await openTaskCounts(rows.map((r) => r.order.id));
+
 	return rows.map((r) => ({
 		id: r.order.id,
 		projectName: r.order.projectName,
@@ -913,7 +1368,9 @@ export async function listPortalOrders(subject: PortalSubject): Promise<PortalOr
 		customerStateLabel: customerStateLabel(r.order.state as ContractorOrderState),
 		contractorId: r.order.contractorId,
 		updatedAt: r.order.updatedAt,
-		active: isActiveState(r.order.state as ContractorOrderState)
+		active: isActiveState(r.order.state as ContractorOrderState),
+		openTasks: counts.get(r.order.id) ?? 0,
+		paymentDue: isCustomerActionState(r.order.state as ContractorOrderState)
 	}));
 }
 
@@ -923,12 +1380,34 @@ export type PortalOrderDetail = OrderRow & {
 	customerVisibleState: string;
 	/** What the customer is waiting on, in words. See `customerStateLabel`. */
 	customerStateLabel: string;
-	/** True when the ball is in the CUSTOMER's court — drives the headline's emphasis. */
+	/**
+	 * True when the ball is in the CUSTOMER's court — drives the headline's
+	 * emphasis. Now BOTH halves of that: the two "pay me" states, and any
+	 * outstanding Task the contractor has asked for. It used to be the states
+	 * alone, which meant the only thing this product could ask a customer for was
+	 * money.
+	 */
 	customerMustAct: boolean;
+	/**
+	 * Just the State half of it — whether the order sits in one of the two "pay
+	 * me" states. Carried separately from `customerMustAct` because the portal
+	 * composes the two halves itself, in `customerActionSummary`, and a composed
+	 * boolean cannot be taken apart again.
+	 */
+	paymentDue: boolean;
+	/** Outstanding first. See `customerActionSummary` for what to say about them. */
+	tasks: CustomerTaskView[];
 	contractorName: string;
 	/** Null while the customer has not accepted an invite. */
 	customerUserId: string | null;
 	timeline: TimelineRow[];
+	/**
+	 * The same invoice the contractor sees and the same one the emailed copy
+	 * carries — one `invoiceSummary` call, three surfaces. The customer is shown
+	 * their own money unconditionally: a balance is not a contractor-only fact,
+	 * and hiding it is what made customers email to ask what they owed.
+	 */
+	invoice: InvoiceSummary;
 };
 
 /**
@@ -962,6 +1441,8 @@ export async function getPortalOrder(
 		.where(and(eq(timelineEntry.orderId, orderId), eq(timelineEntry.internal, false)))
 		.orderBy(desc(timelineEntry.createdAt));
 
+	const tasks = await listTasks(orderId);
+
 	return {
 		...row.order,
 		customerName: row.customerName,
@@ -969,8 +1450,13 @@ export async function getPortalOrder(
 		contractorName: row.contractorName,
 		customerVisibleState: getVisibleCustomerState(row.order.state as ContractorOrderState),
 		customerStateLabel: customerStateLabel(row.order.state as ContractorOrderState),
-		customerMustAct: isCustomerActionState(row.order.state as ContractorOrderState),
-		timeline
+		customerMustAct:
+			isCustomerActionState(row.order.state as ContractorOrderState) ||
+			tasks.some((t) => t.completedAt == null),
+		paymentDue: isCustomerActionState(row.order.state as ContractorOrderState),
+		tasks,
+		timeline,
+		invoice: invoiceSummary(row.order, await listPayments(orderId), await listLineItems(orderId))
 	};
 }
 

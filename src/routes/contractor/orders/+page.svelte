@@ -4,8 +4,8 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { customerLocation, portalInfoFor, PROJECT_TYPES, type PortalInfo } from '$lib/crm';
-	import TagPicker from '$lib/TagPicker.svelte';
 	import ContactPanel from '$lib/ContactPanel.svelte';
+	import OrderCard from '$lib/OrderCard.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -122,91 +122,81 @@
 		if (name && name.toLowerCase().includes(type.toLowerCase())) return null;
 		return type;
 	}
-
-	// Which tone the shared `.status-pill` (app.css) wears for a given state:
-	// on track, waiting on somebody, or stopped. This used to be three literal
-	// colour triples built into an inline style here — the colours now live with
-	// every other status pill in the app, and this function is only the mapping.
-	function statusTone(state: string): 'ok' | 'wait' | 'stop' {
-		switch (state) {
-			case 'In Progress':
-			case 'Work Scheduled':
-			case 'Parts Ordered':
-			case 'Work Complete':
-				return 'ok';
-			case 'Work Cancelled':
-				return 'stop';
-			default:
-				// Inquiry, Quote Sent, Deposit/Final Payment Pending, On Hold / Archived
-				return 'wait';
-		}
-	}
-
-	// Sizing shared with the dashboard cards, so the action buttons match across
-	// both surfaces. The gold look comes from the shared `.icon-btn` class.
-	const iconBtn = 'width: 2.3rem; height: 2.3rem; font-size: 1.55rem;';
 </script>
 
 <svelte:head>
 	<title>Orders</title>
 </svelte:head>
 
-<div class="orders-page">
-	<header style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+<div class="orders-page page-shell">
+	<header>
 		<h1 class="page-title" style="margin: 0;">Orders</h1>
-		<button
-			type="button"
-			onclick={openNewOrder}
-			style="padding: 0.45rem 0.95rem; border-radius: 999px; border: 1px solid #0969da; background: #0969da; color: #fff; cursor: pointer; font-weight: 600;"
-			>＋ New Order</button
-		>
 	</header>
 
-	<div class="view-filter">
-		<button
-			type="button"
-			class="view-trigger"
-			aria-expanded={viewMenuOpen}
-			onclick={() => (viewMenuOpen = !viewMenuOpen)}
-		>
-			{VIEW_LABELS[view]}
-			<span class="view-count">{buckets[view].length}</span>
-			<span class="view-caret" aria-hidden="true">▾</span>
-		</button>
-		{#if viewMenuOpen}
-			<!-- click-away backdrop -->
+	<!-- Filter and action on ONE row, across from each other.
+	
+	     "New order" used to ride up in the header beside the title, which left it
+	     stacked directly above the filter chip — two controls on two lines with an
+	     empty half-row beside each. On a phone that is the worst version of it: the
+	     title is hidden entirely under the bottom bar, so the header collapsed and
+	     the button was left floating above the filter for no reason a reader could
+	     see. They are the two controls of this page and they belong on its one
+	     toolbar. -->
+	<div class="orders-toolbar">
+		<div class="view-filter">
 			<button
 				type="button"
-				aria-label="Close filter menu"
-				onclick={() => (viewMenuOpen = false)}
-				class="menu-scrim"
-			></button>
-			<div class="view-menu">
-				{#each VIEWS as key (key)}
-					<button
-						type="button"
-						class="view-option"
-						class:selected={view === key}
-						aria-current={view === key}
-						onclick={() => {
-							view = key;
-							viewMenuOpen = false;
-						}}
-					>
-						<span>{VIEW_LABELS[key]}</span>
-						<span class="view-count">{buckets[key].length}</span>
-					</button>
-				{/each}
-			</div>
-		{/if}
+				class="view-trigger"
+				aria-expanded={viewMenuOpen}
+				onclick={() => (viewMenuOpen = !viewMenuOpen)}
+			>
+				{VIEW_LABELS[view]}
+				<span class="view-count">{buckets[view].length}</span>
+				<span class="view-caret" aria-hidden="true">▾</span>
+			</button>
+			{#if viewMenuOpen}
+				<!-- click-away backdrop -->
+				<button
+					type="button"
+					aria-label="Close filter menu"
+					onclick={() => (viewMenuOpen = false)}
+					class="menu-scrim"
+				></button>
+				<div class="view-menu">
+					{#each VIEWS as key (key)}
+						<button
+							type="button"
+							class="view-option"
+							class:selected={view === key}
+							aria-current={view === key}
+							onclick={() => {
+								view = key;
+								viewMenuOpen = false;
+							}}
+						>
+							<span>{VIEW_LABELS[key]}</span>
+							<span class="view-count">{buckets[key].length}</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
+
+		<button type="button" class="new-order" onclick={openNewOrder}>＋ New Order</button>
 	</div>
 
-	<section style="display: grid; gap: 0.75rem;">
+	<!-- Order cards flow into as many columns as the viewport can hold: one on a
+	     phone, two on a tablet, three or four on a desktop. The card itself is
+	     unchanged — the list simply stops being a single column on screens where
+	     that meant two thirds of the width was empty paper. -->
+	<section class="order-list card-grid">
 		{#if visibleOrders.length === 0}
 			<!-- Just states the fact, centred. The instruction to use New Order is gone:
 			     the button is right there, and with no orders the create form opens on
 			     arrival anyway. -->
-			<p class="empty-orders">
+			<!-- Spans the whole grid: an empty state parked in column one with two
+			     empty columns beside it reads as a rendering fault. -->
+			<p class="empty-orders span-all">
 				{view === 'active'
 					? 'No active orders found.'
 					: view === 'completed'
@@ -216,74 +206,61 @@
 		{/if}
 
 		{#each visibleOrders as order (order.id)}
-			{@const tone = statusTone(order.state)}
 			{@const where = customerLocation({
 				city: order.customerCity,
 				state: order.customerState,
 				address: order.customerAddress
 			})}
-			<article class="card">
-				<!-- Header: project name leads, customer + city underneath; status on the right -->
-				<div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start;">
-					<div style="display: grid; gap: 0.15rem; min-width: 0;">
-						<a href={resolve(`/contractor/orders/${order.id}`)} class="card-title">
-							{order.projectName ??
-								'Untitled project'}{#if typeSuffix(order.projectName, order.projectType)}<span
-									class="card-type"
-								>
-									· {typeSuffix(order.projectName, order.projectType)}</span
-								>{/if}
-						</a>
-						<div class="card-sub">
-							{order.customerName}{#if where}
-								· {where}{/if}
-						</div>
-						<!-- Tags are deliberately NOT here. They are working notes a
-						     contractor writes for one job ("awaiting deposit", "cedar"), and
-						     a list is for finding the job — a run of chips under every row
-						     made the list longer and told you nothing that helped you pick.
-						     They live on the order itself, where the job is the subject. -->
-					</div>
+			<!-- The card is the shared one — the same component the dashboard's
+			     "response needed" feed renders. It used to be a second copy that had
+			     drifted: a bigger title here, a message button hung from the top edge
+			     here and centred there, a hover sheen and status rim on the dashboard
+			     only. Two cards showing the same job, doing the same two things.
 
-					<div style="display: flex; gap: 0.4rem; align-items: center; flex-shrink: 0;">
-						<!-- A waiting conversation is signalled by the count on the 💬 button in
-						     the action row, the same as the dashboard — not a second badge here. -->
-						<span class="status-pill {tone}">{order.state}</span>
-					</div>
-				</div>
+			     The state pill that used to sit opposite the title is gone. Which of
+			     ten states a job is in is a fact you act on from the order itself, and
+			     the list is already filtered by the coarse version of it (Active /
+			     Completed / Cancelled) — so on a phone it was a second column of
+			     chrome squeezing the project name, restating the tab you were already
+			     looking at.
 
-				<!-- Follow-up dates are deliberately absent here: due ones surface on the
-				     dashboard, which is where a contractor acts on them. Internal notes,
-				     snooze and delete live on the order detail page — this list stays a
-				     list, and its two actions (message, open) match the dashboard cards. -->
+			     No swipe here: snoozing answers "not this week", which is a thing you
+			     say while triaging what is due. This list is not that list.
 
-				<!-- Action bar: the same two icon buttons as the dashboard, right-aligned —
-				     message the customer, and open the order. Invite, delete and notes are
-				     all on the order detail page now. -->
-				<div class="action-bar">
-					<a
-						href={resolve(`/contractor/orders/${order.id}`)}
-						title="View order details"
-						aria-label="View order details"
-						class="icon-btn"
-						style="{iconBtn} flex-shrink: 0; text-decoration: none;">📋</a
-					>
+			     Follow-up dates are deliberately absent too — due ones surface on the
+			     dashboard, and notes, snooze and delete live on the order page. -->
+			<OrderCard
+				orderId={order.id}
+				projectName={order.projectName}
+				typeSuffix={typeSuffix(order.projectName, order.projectType)}
+				customerName={order.customerName}
+				location={where}
+			>
+				{#snippet actions()}
 					{#if order.customerId}
-						<button
-							type="button"
-							title="Message {order.customerName}"
-							aria-label="Message {order.customerName}"
-							onclick={() =>
-								openContact(order.customerId, order.projectName, order.id, order.customerLinked)}
-							class="icon-btn"
-							style={iconBtn}
-							>💬{#if (data.unread[order.id] ?? 0) > 0}<span class="btn-count" aria-hidden="true"
-									>{data.unread[order.id]}</span
-								>{/if}</button
-						>
+						<div class="above-stretch">
+							<button
+								type="button"
+								title="Message {order.customerName}"
+								aria-label="Message {order.customerName}"
+								onclick={() =>
+									openContact(order.customerId, order.projectName, order.id, order.customerLinked)}
+								class="card-btn"
+							>
+								<span aria-hidden="true">💬</span>
+								<!-- Always "Message", never "Reply (2)". The count is the badge's
+								     job, and a label that changes with it stops being a prefix of
+								     the accessible name — which is what keeps the visible words and
+								     the announced ones in step (WCAG 2.5.3). -->
+								<span class="card-btn-label">Message</span>
+								{#if (data.unread[order.id] ?? 0) > 0}
+									<span class="btn-count" aria-hidden="true">{data.unread[order.id]}</span>
+								{/if}
+							</button>
+						</div>
 					{/if}
-				</div>
-			</article>
+				{/snippet}
+			</OrderCard>
 		{/each}
 	</section>
 </div>
@@ -343,9 +320,8 @@
 						<div style="margin-top: 0.3rem; color: #57606a; white-space: pre-wrap;">{c.notes}</div>
 					{/if}
 					<a
-						href={resolve('/contractor/customers')}
-						style="justify-self: start; font-size: 0.85rem; color: #0969da;"
-						>Manage in customers →</a
+						href={resolve('/contractor/people')}
+						style="justify-self: start; font-size: 0.85rem; color: #0969da;">Manage in people →</a
 					>
 				</div>
 			{/if}
@@ -394,9 +370,8 @@
 
 		{#if data.customers.length === 0}
 			<p style="margin: 0; color: #57606a;">
-				You have no customers yet. <a
-					href={resolve('/contractor/customers')}
-					style="color: #0969da;">Add a customer</a
+				You have no customers yet. <a href={resolve('/contractor/people')} style="color: #0969da;"
+					>Add a customer</a
 				> first.
 			</p>
 		{:else}
@@ -451,8 +426,6 @@
 					/>
 				{/if}
 
-				<TagPicker />
-
 				{#if form?.action === 'create' && form?.message}
 					<p style="margin: 0; color: #cf222e; font-size: 0.85rem;">{form.message}</p>
 				{/if}
@@ -473,16 +446,53 @@
 	   Trigger + menu are token-driven (no inline color literals) so light and
 	   dark both come out right instead of relying on the global interception
 	   rules, which left the selected row a bright light-blue on dark. */
+	/* The page's one toolbar: what you are looking at, and the way to add to it.
+	   Wraps rather than squeezing — at 320px the chip and the button would each be
+	   too narrow to read on one line. */
+	.orders-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+	}
 	.view-filter {
 		position: relative;
-		align-self: start;
+	}
+	/* Was an inline style carrying a hardcoded #0969da — the page's last literal
+	   blue, from before the palettes existed. As a class it follows the theme, and
+	   it shares `--radius-pill` with the filter chip beside it so the two controls
+	   on this row agree on their own shape. */
+	.new-order {
+		flex: none;
+		padding: 0.45rem 0.95rem;
+		border: 1px solid var(--brand);
+		border-radius: var(--radius-pill);
+		background: var(--brand);
+		color: var(--on-brand);
+		font-family: inherit;
+		font-size: 0.85rem;
+		font-weight: 700;
+		cursor: pointer;
+		box-shadow: var(--pop-shadow-sm);
+		transition:
+			background 0.14s ease,
+			border-color 0.14s ease;
+	}
+	.new-order:hover {
+		background: var(--brand-deep);
+		border-color: var(--brand-deep);
+	}
+	.new-order:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
 	}
 	.view-trigger {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.45rem;
 		padding: 0.4rem 0.8rem;
-		border-radius: 999px;
+		border-radius: var(--radius-pill);
 		border: 1px solid var(--line-strong);
 		background: var(--surface);
 		color: var(--fg);
@@ -552,48 +562,14 @@
 	/* Selected row uses the app's safety-yellow accent — legible in both themes,
 	   unlike the old light-blue wash. */
 	.view-option.selected {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-weight: 800;
 	}
 	.view-option.selected .view-count {
 		background: rgba(20, 23, 28, 0.12);
 		border-color: rgba(20, 23, 28, 0.25);
 		color: #14171c;
-	}
-
-	/* Action row: the two icon buttons pinned right, matching the dashboard cards. */
-	.action-bar {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 0.85rem;
-	}
-	/* The shared .icon-btn is not positioned, so the unread count needs an anchor.
-	   Scoped to the action bar — the same treatment the dashboard gives its 💬. */
-	.action-bar .icon-btn {
-		position: relative;
-		overflow: visible;
-	}
-	/* How many messages are waiting, on the button that opens the conversation —
-	   the same badge the dashboard's 💬 carries, so the two surfaces read alike. */
-	.btn-count {
-		position: absolute;
-		top: -0.2rem;
-		right: -0.2rem;
-		min-width: 1.1rem;
-		height: 1.1rem;
-		padding: 0 0.22rem;
-		box-sizing: border-box;
-		display: grid;
-		place-items: center;
-		border-radius: 999px;
-		border: 2px solid var(--surface);
-		background: var(--danger);
-		color: #fff;
-		font-size: 0.66rem;
-		font-weight: 800;
-		line-height: 1;
 	}
 
 	@media (max-width: 560px) {
@@ -604,6 +580,9 @@
 		   filled a phone. */
 		.orders-page {
 			padding: 0.75rem 0.6rem 2rem;
+			gap: 0.6rem;
+		}
+		.order-list {
 			gap: 0.6rem;
 		}
 		.orders-page :global(.card) {
@@ -640,12 +619,12 @@
 	}
 	.info-btn.on,
 	.info-btn.on:hover {
-		background: var(--yellow);
-		border-color: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
 	}
 	.info-btn:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 2px;
 	}
 	.contact-info {
@@ -663,8 +642,8 @@
 		margin: 0;
 		padding: 0.6rem 0.75rem;
 		border-radius: 8px;
-		border: 1.5px solid var(--yellow-deep);
-		background: color-mix(in srgb, var(--yellow) 18%, var(--surface));
+		border: 1.5px solid var(--brand-deep);
+		background: color-mix(in srgb, var(--brand) 18%, var(--surface));
 		color: var(--fg);
 		font-size: 0.83rem;
 		line-height: 1.5;
@@ -748,24 +727,33 @@
 	   inline-style interception in app.css.) */
 	.no-submit {
 		border: none;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-weight: 700;
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.no-submit:hover {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.neworder-actions button:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 2px;
 	}
+	/* Width, gutters and gap all come from `.page-shell` (app.css) now, so this
+	   only carries what is specific to the orders page. The class stays because
+	   the phone tightening below keys on it — and because a scoped selector is
+	   (0,2,0) against `.page-shell`'s (0,1,0), which is what lets that override
+	   land without an !important. */
 	.orders-page {
-		max-width: 860px;
-		margin: 0 auto;
-		padding: 1rem;
 		display: grid;
-		gap: 1rem;
+	}
+	/* A little tighter than the page gap: these are rows of one list, not
+	   unrelated panels. */
+	.order-list {
+		gap: 0.75rem;
+		/* Wide enough for a project name, a customer and a city on the lines they
+		   were designed for; below it the list stays single-column. */
+		--card-min: 21rem;
 	}
 
 	@media (max-width: 420px) {
@@ -779,37 +767,6 @@
 			flex: 0 0 auto;
 			margin: 0.1rem auto 0;
 		}
-	}
-
-	/* ---------------------------------------------------------- Order card head
-	   Project leads, customer + city underneath. Unread customer messages ride as a
-	   count on the 💬 button in the action row (see .btn-count above), the same as
-	   the dashboard cards. */
-
-	.card-title {
-		font-size: 1.25rem;
-		font-weight: 800;
-		line-height: 1.2;
-		color: inherit;
-		text-decoration: none;
-		overflow-wrap: anywhere;
-	}
-	.card-title:hover {
-		text-decoration: underline;
-		text-decoration-color: var(--yellow-deep);
-		text-decoration-thickness: 2px;
-		text-underline-offset: 3px;
-	}
-	/* The type rides the title but shouldn't compete with it. */
-	.card-type {
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: var(--fg-muted);
-	}
-	.card-sub {
-		font-size: 0.9rem;
-		color: var(--fg-muted);
-		overflow-wrap: anywhere;
 	}
 
 	/* --------------------------------------------------- New order modal fields
@@ -845,8 +802,8 @@
 	}
 	.field:focus-visible {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
 	/* Native select, restyled: keeps the OS picker on mobile (the right control on

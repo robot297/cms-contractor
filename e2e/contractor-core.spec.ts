@@ -8,6 +8,7 @@ import {
 	newCustomerFields,
 	newOrderFields,
 	newSubcontractorFields,
+	seedWorkspace,
 	signUpContractor
 } from './fixtures/app';
 
@@ -35,9 +36,9 @@ test.describe('contractor core records', () => {
 
 	test('the ZIP fills in city and state on the customer form', async ({ page }) => {
 		await signUpContractor(page);
-		await page.goto('/contractor/customers');
+		await page.goto('/contractor/people');
 
-		const dialog = page.getByRole('dialog').filter({ hasText: 'Add a customer' });
+		const dialog = page.getByRole('dialog').filter({ hasText: 'Add someone' });
 		await expect(dialog).toBeVisible(); // opens itself on an empty directory
 
 		// Before the ZIP, the strip states what is about to happen rather than
@@ -61,16 +62,16 @@ test.describe('contractor core records', () => {
 		// And it stuck. Adding the first customer hands the contractor back to the
 		// dashboard, so the directory has to be revisited — and the location lives
 		// in the card's profile pane, which opens on click.
-		await page.goto('/contractor/customers');
+		await page.goto('/contractor/people');
 		const row = page.getByText(fields.name).first();
 		await clickUntil(row, page.getByText('Austin, TX').first());
 	});
 
 	test('a customer can be added and an order created for them in one pass', async ({ page }) => {
 		await signUpContractor(page);
-		await page.goto('/contractor/customers');
+		await page.goto('/contractor/people');
 
-		const dialog = page.getByRole('dialog').filter({ hasText: 'Add a customer' });
+		const dialog = page.getByRole('dialog').filter({ hasText: 'Add someone' });
 		await expect(dialog).toBeVisible();
 
 		const fields = newCustomerFields();
@@ -85,6 +86,25 @@ test.describe('contractor core records', () => {
 		const orderDialog = page.locator('dialog.neworder');
 		await expect(orderDialog).toBeVisible();
 		await expect(orderDialog.locator('select[name="customerId"]')).not.toHaveValue('');
+	});
+
+	test('an order card is the link, with Message as its only button', async ({ page }) => {
+		// The same treatment the dashboard's due cards carry — these are the same
+		// experience and were two. The "View order" icon button that used to sit
+		// beside Message is gone: the card itself opens the order, so it was a
+		// second control for what pressing anywhere already does.
+		const { order } = await seedWorkspace(page);
+		await page.goto('/contractor/orders');
+
+		const card = page.locator('article.card').filter({ hasText: order.projectName });
+		await expect(card.locator('a.stretch-link')).toHaveCount(1);
+		await expect(card.getByRole('link', { name: /View order/ })).toHaveCount(0);
+
+		// Message opens the composer and does NOT navigate — it sits above the
+		// card's stretched link precisely so this press lands on the button.
+		const url = page.url();
+		await clickUntil(card.getByRole('button', { name: /^Message / }), page.locator('dialog[open]'));
+		expect(page.url()).toBe(url);
 	});
 
 	test('a customer is required before an order can be created', async ({ page }) => {

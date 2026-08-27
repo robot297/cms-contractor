@@ -103,15 +103,46 @@ export function renderEmail(
 		 * product-authored copy only, never user input.
 		 */
 		footerNote?: string | null;
+		/**
+		 * A rendered HTML block dropped in under the message, before the signature —
+		 * the invoice table is the only thing that uses it today. Inserted as HTML,
+		 * so the same rule as `footerNote` applies and is stricter here because this
+		 * one carries figures: PRODUCT-AUTHORED markup only, built by a renderer
+		 * that escapes its own inputs (see `renderInvoiceBlockHtml`). A template
+		 * body must never reach this slot — that is what `body` is for, and it is
+		 * escaped on the way through.
+		 *
+		 * The text part gets no such slot: whatever this block says has to be said
+		 * in `body` too, or the plain-text alternative would be missing figures the
+		 * HTML shows. `sendFinalInvoiceEmail` does exactly that.
+		 */
+		blockHtml?: string;
+		/**
+		 * The same block as plain text, dropped into the text part in the same place.
+		 * Passed alongside `blockHtml` rather than derived from it, because turning a
+		 * layout table back into readable lines is a worse job than rendering both
+		 * from the figures — which is what `invoice.ts` does.
+		 *
+		 * NOT run through placeholder resolution: it is already-rendered output, and
+		 * a contractor's payment note that happens to contain `{{project}}` should
+		 * reach the customer as they typed it.
+		 */
+		blockText?: string;
 	}
 ): RenderedEmail {
-	const { subject, body: text } = composeEmail(template, vars, branding.signature);
+	const { subject } = composeEmail(template, vars, branding.signature);
 
 	// Re-render the two halves separately for the HTML part. Composing again rather
-	// than parsing `text` back apart: a signature that happens to appear in the body
-	// would make that split guess wrong.
+	// than parsing the text back apart: a signature that happens to appear in the
+	// body would make that split guess wrong.
 	const message = composeEmail({ subject: '', body: template.body }, vars, null).body;
 	const signature = composeEmail({ subject: '', body: '' }, vars, branding.signature).body;
+	// The text part is assembled from the same three pieces the HTML uses, in the
+	// same order, so the block lands between the message and the signature in both
+	// — rather than after the signature, which is where appending it to the
+	// template body would have put it. With no block this is exactly what
+	// `composeEmail(template, vars, signature)` returns.
+	const text = [message, opts?.blockText?.trim(), signature].filter(Boolean).join('\n\n');
 	const businessName = branding.businessName.trim();
 	const footerNote =
 		opts?.footerNote === undefined
@@ -164,6 +195,15 @@ export function renderEmail(
 								${paragraphs(message, bodyStyle) || `<p style="${bodyStyle}">&nbsp;</p>`}
 							</td>
 						</tr>
+						${
+							opts?.blockHtml
+								? `<tr>
+							<td style="padding: 0 28px;">
+								${opts.blockHtml}
+							</td>
+						</tr>`
+								: ''
+						}
 						${
 							signature
 								? `<tr>

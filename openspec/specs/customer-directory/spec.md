@@ -32,11 +32,11 @@ The system SHALL represent a customer as a first-class record that exists indepe
 
 ### Requirement: Customer contact details
 
-A customer record SHALL support optional contact and organization details in addition to name and email: phone, address, free-form notes (project details), and tags. Contact fields SHALL be validated by a shared schema used on both client and server; when a phone number is provided it SHALL contain ten digits and be stored in a normalized display format, and tags SHALL be a de-duplicated list.
+A customer record SHALL support optional contact and organization details in addition to name and email: phone, address, and free-form notes (project details). Contact fields SHALL be validated by a shared schema used on both client and server; when a phone number is provided it SHALL contain ten digits and be stored in a normalized display format.
 
 #### Scenario: Optional details are saved
 
-- **WHEN** a contractor provides phone, address, notes, or tags for a customer
+- **WHEN** a contractor provides phone, address, or notes for a customer
 - **THEN** the system saves those details with the customer record
 
 #### Scenario: Invalid phone is rejected
@@ -47,11 +47,18 @@ A customer record SHALL support optional contact and organization details in add
 #### Scenario: Details are optional
 
 - **WHEN** a contractor provides only a valid name and email
-- **THEN** the system creates the customer with no phone, address, or notes and an empty tag list
+- **THEN** the system creates the customer with no phone, address, or notes
 
-### Requirement: Contractor views their customer directory
+### Requirement: Contractor views one directory of people
 
-The system SHALL provide a contractor-only route that lists all non-archived customer records belonging to the signed-in contractor, regardless of whether any order references them and regardless of order state. The directory SHALL be reachable from the contractor's main navigation. The directory's only source is customers the contractor created — it SHALL NOT surface customers of other contractors or self-registered accounts.
+The system SHALL provide a single contractor-only route (`/contractor/people`) that lists everyone the signed-in contractor knows — customers, crew and subcontractors — regardless of whether any order references them and regardless of order state. The directory SHALL be reachable from the contractor's main navigation, as its only people entry. Its only source is records the contractor created — it SHALL NOT surface other contractors' records or self-registered accounts.
+
+A person's records SHALL be matched by email within one contractor, so that somebody who is both a customer and crew appears once, carrying every role they hold; a record with no email SHALL be its own person. Each role SHALL remain its own record: adding a role creates that record from the details on file, and removing one archives that record only.
+
+#### Scenario: One person, several roles
+
+- **WHEN** a contractor holds a customer record and a crew record with the same email
+- **THEN** the directory lists that person once, showing both roles, and each role's record is reachable from that row
 
 #### Scenario: Directory lists all customers regardless of order state
 

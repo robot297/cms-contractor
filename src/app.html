@@ -5,16 +5,54 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
 		<script>
-			// Apply the saved (or system) theme before first paint to avoid a flash.
+			// Apply the saved theme AND palette before first paint, to avoid a flash of
+			// the wrong one. Both are plain attributes on <html>; app.css keys every
+			// token off the pair. See the specificity note at the top of that file.
+			//
+			// The contractor's app and the customer's portal keep SEPARATE
+			// preferences — one browser profile, two people, and the contractor
+			// previews the portal from their own session. The portal's keys carry a
+			// ':portal' suffix; the contractor side keeps the bare names it already
+			// had, so an existing saved choice survives. `scopeForPath` in
+			// $lib/theme.svelte is the same rule — change both together.
 			(function () {
+				var root = document.documentElement;
+				var path = location.pathname;
+				var portal = path === '/customer' || path.indexOf('/customer/') === 0;
+				var suffix = portal ? ':portal' : '';
 				try {
-					var t = localStorage.getItem('theme');
+					// 'system' — and an absent value, which has always behaved as system —
+					// both land on the OS here. Only an explicit 'light'/'dark' overrides
+					// it. `data-theme` is always the RESOLVED value: no stylesheet in the
+					// app knows the word "system", which is what keeps app.css a table of
+					// two themes rather than three.
+					var t = localStorage.getItem('theme' + suffix);
 					if (t !== 'light' && t !== 'dark') {
 						t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 					}
-					document.documentElement.dataset.theme = t;
+					root.dataset.theme = t;
+					var known = [
+						'voltage',
+						'outrun',
+						'circuit',
+						'overdrive',
+						'abyss',
+						'vapor',
+						'halogen',
+						'blueprint',
+						'ember',
+						'timber',
+						'highvis',
+						'ledger',
+						'nocturne'
+					];
+					var p = localStorage.getItem('palette' + suffix);
+					root.dataset.palette = known.indexOf(p) === -1 ? 'voltage' : p;
 				} catch (e) {
-					document.documentElement.dataset.theme = 'light';
+					// Private mode, or storage otherwise unavailable. The defaults still
+					// render a complete theme rather than an unstyled page.
+					root.dataset.theme = 'light';
+					root.dataset.palette = 'voltage';
 				}
 			})();
 		</script>

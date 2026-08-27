@@ -64,9 +64,9 @@
 
 <style>
 	.trial-notice {
-		border: 2px solid var(--yellow-deep);
+		border: 2px solid var(--brand-deep);
 		border-radius: 12px;
-		background: color-mix(in srgb, var(--yellow) 14%, var(--surface));
+		background: color-mix(in srgb, var(--brand) 14%, var(--surface));
 		padding: 0.7rem 0.9rem;
 		color: var(--fg);
 	}
@@ -103,7 +103,7 @@
 	}
 	.toggle:focus-visible,
 	.dismiss:focus-visible {
-		outline: 2px solid var(--yellow-deep);
+		outline: 2px solid var(--brand-deep);
 		outline-offset: 2px;
 	}
 	/* A worded button, not a bare ×: dismissing this hides it permanently, and an
@@ -128,7 +128,7 @@
 	.details {
 		margin-top: 0.6rem;
 		padding-top: 0.6rem;
-		border-top: 1px solid color-mix(in srgb, var(--yellow-deep) 45%, transparent);
+		border-top: 1px solid color-mix(in srgb, var(--brand-deep) 45%, transparent);
 		display: grid;
 		gap: 0.45rem;
 	}
@@ -181,7 +181,7 @@
 		white-space: nowrap;
 		font-weight: 700;
 		color: var(--fg);
-		text-decoration-color: var(--yellow-deep);
+		text-decoration-color: var(--brand-deep);
 		text-decoration-thickness: 2px;
 		text-underline-offset: 2px;
 	}

@@ -11,8 +11,11 @@ test.describe('authentication', () => {
 		await expect(page).toHaveURL(/\/contractor$/);
 		// The nav is the proof they are in as a contractor, not merely signed in.
 		await expect(page.getByRole('link', { name: 'Orders' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Customers' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Subcontractors' })).toBeVisible();
+		// ONE entry for everyone they know — the people they work for and the people
+		// they work with. It was three lists (Customers, Crew, Subcontractors), which
+		// meant deciding what somebody was to you before you could look them up.
+		await expect(page.getByRole('link', { name: 'People' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Customers' })).toHaveCount(0);
 		expect(who.email).toContain('@example.test');
 	});
 

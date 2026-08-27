@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { parseTags, validateOrderSetup } from '$lib/crm';
+import { validateOrderSetup } from '$lib/crm';
 import {
 	createOrder,
 	listContractorOrders,
@@ -94,10 +94,7 @@ export const actions: Actions = withBillingErrors({
 		});
 		if (!setup.ok)
 			return fail(400, { action: 'create', field: setup.field, message: setup.message });
-		await createOrder(user.id, {
-			...setup.value,
-			tags: parseTags(form.get('tags')?.toString() ?? '')
-		});
+		await createOrder(user.id, setup.value);
 		return { success: true };
 	},
 

@@ -1,7 +1,9 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
 	boolean,
 	customType,
+	date,
+	doublePrecision,
 	index,
 	integer,
 	pgTable,
@@ -50,8 +52,6 @@ export const customer = pgTable(
 		postalCode: text('postal_code'),
 		// Project details and any other free-form context about this customer.
 		notes: text('notes'),
-		// No tags here: a customer is identified by who they are, not by labels.
-		// Only orders and subcontractors carry tags (see tags.server.ts).
 		// A downscaled photo of the customer, stored as a bounded data URL.
 		avatar: text('avatar'),
 		// Set when an invited customer accepts and binds their login (by token).
@@ -103,7 +103,6 @@ export const subcontractor = pgTable(
 		insuranceCarrier: text('insurance_carrier'),
 		insuranceExpiresAt: timestamp('insurance_expires_at'),
 		notes: text('notes'),
-		tags: text('tags').array().notNull().default([]),
 		avatar: text('avatar'),
 		// Set when an invited sub accepts and binds their login (by token).
 		userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
@@ -120,6 +119,118 @@ export const subcontractor = pgTable(
 		uniqueIndex('subcontractor_contractor_email_idx').on(table.contractorId, table.email),
 		index('subcontractor_contractorId_idx').on(table.contractorId),
 		index('subcontractor_userId_idx').on(table.userId)
+	]
+);
+
+// ---------------------------------------------------------------- Workers
+//
+// The people who turn up and do the work alongside the contractor — a crew hand,
+// a labourer, the two peers who ride out with them on most jobs.
+//
+// A SEPARATE TABLE from `subcontractor`, deliberately, and the difference is not
+// cosmetic. A subcontractor is a business the contractor engages: it has a tier
+// governing what it may see, a licence and insurance held on file, an invite
+// that grants a portal login, and its own liability. A worker has none of that
+// and must never accidentally acquire it. Modelling this as a `kind` column on
+// `subcontractor` would have meant every existing query needing `where kind =
+// 'subcontractor'`, and the first one anybody forgot would put a crew hand in the
+// roster wearing an access tier and an "Invite to portal" button.
+//
+// What is ABSENT here is the feature:
+//   - no `tier`      — a worker is never granted portal access, so there is
+//                      nothing to scope
+//   - no licence/insurance — that is a compliance record for an engaged business
+//   - no `userId`    — no login binds to a worker; nothing to bind
+//   - no invite table — see above
+//
+// `email` is nullable, which `subcontractor.email` is not. A subcontractor needs
+// one because the invite is delivered there; a crew hand may only ever be a name
+// and a mobile number, and demanding an address for them would mean inventing
+// fake ones.
+export const worker = pgTable(
+	'worker',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		contractorId: text('contractor_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		// Optional, unlike a subcontractor's — see the note above.
+		email: text('email'),
+		phone: text('phone'),
+		// What they do on site: "Framer", "Helper", "Operator". Free-form, because
+		// a fixed list of trades is a different product's idea of a crew.
+		role: text('role'),
+		// Who they trade under, if anyone. The same column `subcontractor` carries,
+		// and it is here because the individual/business split is not a real one: a
+		// crew hand can perfectly well be an Acme employee while Acme is separately
+		// engaged as a subcontractor. Company is a fact about a person, not a
+		// different species of person.
+		company: text('company'),
+		notes: text('notes'),
+		avatar: text('avatar'),
+		// Soft-archive: an archived worker drops out of the crew picker but stays
+		// on every job they were ever assigned to, so the history of who worked
+		// where survives somebody leaving.
+		archivedAt: timestamp('archived_at'),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+		updatedAt: timestamp('updated_at')
+			.defaultNow()
+			.$onUpdate(() => new Date())
+			.notNull()
+	},
+	(table) => [
+		index('worker_contractorId_idx').on(table.contractorId),
+		// Only where an email was actually given. A plain unique index would treat
+		// every worker without one as colliding in Postgres... except it wouldn't,
+		// because NULLs are distinct — which is worse, since it silently permits
+		// duplicates and looks like it doesn't. The partial index says what it
+		// means: two workers may share nothing, but not an address.
+		uniqueIndex('worker_contractor_email_idx')
+			.on(table.contractorId, table.email)
+			.where(sql`${table.email} is not null`)
+	]
+);
+
+// Who is on a job, and when.
+//
+// A DATE RANGE rather than one row per day. "Dave is on the Miller job Monday to
+// Friday" is one row here and five in a per-day model, and the per-day model
+// buys nothing back: a single day is expressed by setting both ends to the same
+// date, so the range subsumes it. Both ends are nullable, which means "on this
+// job, no dates pinned yet" — the common case when a job is still being planned.
+//
+// One row per (order, worker): assigning somebody already on the job edits their
+// dates rather than stacking a second entry. A worker who leaves and returns is
+// two stints in real life, but showing the same name twice in a crew list reads
+// as a bug far more often than it reads as history, and the timeline records
+// both changes either way.
+export const orderWorker = pgTable(
+	'order_worker',
+	{
+		orderId: text('order_id')
+			.notNull()
+			.references(() => order.id, { onDelete: 'cascade' }),
+		workerId: text('worker_id')
+			.notNull()
+			.references(() => worker.id, { onDelete: 'cascade' }),
+		// `date`, not `timestamp`: a shift is a calendar day where the JOB is, and
+		// a timestamp would drag a timezone into a question that has none. Stored
+		// and returned as `YYYY-MM-DD` strings for the same reason.
+		startsOn: date('starts_on'),
+		endsOn: date('ends_on'),
+		// What they are doing on THIS job, when it differs from their usual role.
+		role: text('role'),
+		notes: text('notes'),
+		assignedAt: timestamp('assigned_at').defaultNow().notNull()
+	},
+	(table) => [
+		primaryKey({ columns: [table.orderId, table.workerId] }),
+		index('order_worker_workerId_idx').on(table.workerId),
+		// "Who is on site today" scans by date across every job.
+		index('order_worker_startsOn_idx').on(table.startsOn)
 	]
 );
 
@@ -141,22 +252,59 @@ export const order = pgTable(
 		// chosen by the contractor to convey status / build type at a glance.
 		icon: text('icon'),
 		state: text('state').notNull().default('Inquiry'),
-		// Free-form labels the contractor applies to an order, shown on the order card
-		// so the list carries quick context ("urgent", "warranty", "awaiting permit")
-		// without opening anything. Same shape as customer/subcontractor tags.
-		tags: text('tags').array().notNull().default([]),
+		// What the job actually IS, in the contractor's own words. The order carried
+		// a name and a type and nowhere to say "tear out the old cedar, re-frame the
+		// two rotten joists, 16x20 with a railing" — so that lived in someone's head
+		// or in a timeline note nobody could find again.
+		description: text('description'),
+		// Where the work happens, when that is NOT the customer's own address. Null
+		// means "the customer's address", which is the common case and stays the
+		// single source of truth for it — a second property, a rental or a
+		// commercial site is what these are for. Stored as loose parts rather than
+		// a formatted string so the same address helpers work on them.
+		siteAddress: text('site_address'),
+		siteCity: text('site_city'),
+		siteState: text('site_state'),
+		sitePostalCode: text('site_postal_code'),
+		// The schedule, as two dates the contractor keeps by hand. Deliberately NOT
+		// derived from the order state: "Work Scheduled" says what stage the job is
+		// at, these say when it is meant to happen, and a job can sit in that state
+		// for a fortnight before anyone books a crew.
+		startDate: timestamp('start_date'),
+		targetDate: timestamp('target_date'),
+		// The day the contractor is actually ON SITE for this job.
+		//
+		// Distinct from all three of its neighbours, and the distinction is the
+		// point: `state` says a job is Work Scheduled without saying when, the
+		// follow-up is a reminder to make contact rather than to turn up, and
+		// start/target bracket the whole job — a three-week build would otherwise
+		// claim all twenty-one days as site visits. This is one day, and it is what
+		// "today's jobs" is a query over.
+		//
+		// One date rather than a visits table: a job revisited weekly needs
+		// re-setting each time, which is the accepted cost of not modelling
+		// recurrence yet.
+		visitDate: timestamp('visit_date'),
 		// Contractor-set date for the next follow-up. On create it lands at their
 		// `contractorSettings.followUpDays` interval — a fortnight unless changed.
 		nextFollowUpAt: timestamp('next_follow_up_at'),
-		// Close-out record, written when an order is completed (see ADR-0010). The app
-		// RECORDS money here but never processes it — the contractor keys in the final
-		// invoice total and marks how the customer paid. Amount is in whole cents.
+		// What the job COSTS, in whole cents (see ADR-0010: the app records money and
+		// never processes it). Written at close-out and, since deposits existed,
+		// settable from the moment a quote is agreed — half of an unknown total is
+		// not a number, so a deposit needs this filled in first. What has been PAID
+		// against it lives in the `payment` table; the balance is the subtraction and
+		// is never stored.
 		finalAmountCents: integer('final_amount_cents'),
 		// Free-form invoice details / completion notes, customer-visible on the portal.
 		finalNotes: text('final_notes'),
-		// How the recorded final payment was taken: 'cash' | 'check' | 'card' | 'other'.
+		// SUPERSEDED by the `payment` table, and no longer read or written. These two
+		// were the whole of the money record when an order could only be unpaid or
+		// paid-in-full; a job with a deposit has no single "how they paid" and no
+		// single "when". Migration 0029 copied every row that had `paid_at` into a
+		// `final` payment, so nothing was lost. Kept rather than dropped, matching
+		// `expectedAt` above: the columns still hold what old rows said, and dropping
+		// them is a separate decision from stopping using them.
 		paymentMethod: text('payment_method'),
-		// Set when the contractor marks the final payment received. Null = unpaid.
 		paidAt: timestamp('paid_at'),
 		// Soft-delete: "Delete order" sets this timestamp; rows with it set are
 		// treated as gone everywhere in the app and never shown.
@@ -207,6 +355,58 @@ export const timelineEntry = pgTable(
 // "unread" is asymmetric — the same row is read by its author the instant it is
 // written and unread by the other side. A message is stamped for its own author
 // on insert, so it is never unread to the person who sent it.
+// Something the CONTRACTOR needs from the CUSTOMER before the job can go on.
+//
+// The gap this fills: every "waiting on you" the portal could say was DERIVED
+// from the order's state, and only two of the ten states meant it — Deposit
+// Pending and Final Payment Pending. So a contractor who needed a colour picked,
+// a permit signed, a gate code, or somebody home on Thursday had nowhere to put
+// it except a Message, where it read as conversation and scrolled away. A job
+// could sit still for a week with the portal reporting "In progress".
+//
+// A Task is NOT a Message and NOT a Timeline entry, and the difference is the
+// same one the rest of this schema keeps: a Message records what someone SAID, a
+// Timeline entry records what HAPPENED, and a Task records what is OUTSTANDING.
+// Only a Task has a state that the customer can change by doing something, which
+// is why it is the only one of the three with a `completed_at`.
+export const customerTask = pgTable(
+	'customer_task',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		orderId: text('order_id')
+			.notNull()
+			.references(() => order.id, { onDelete: 'cascade' }),
+		// What is needed, in the contractor's words but addressed to the customer:
+		// "Pick your tile", "Sign the permit", "Pay the deposit".
+		title: text('title').notNull(),
+		// The optional half — where to send it, which of the three quotes, why it
+		// is holding things up.
+		detail: text('detail').notNull().default(''),
+		// `date`, not `timestamp`, for the same reason a crew stint is: "by Friday"
+		// is a calendar day and has no timezone. Null means "no date on it", which
+		// is a real and common answer.
+		dueOn: date('due_on'),
+		// Whether the job cannot proceed until this is done. Drives nothing
+		// automatic — it is a claim the contractor is making TO the customer, and
+		// the portal says it in those words rather than silently reordering things.
+		blocking: boolean('blocking').notNull().default(false),
+		// Null while it is outstanding. The pair (completedAt, completedBy) is what
+		// makes "done" a fact with an author: a contractor ticking it off on the
+		// customer's behalf ("Dave paid me in cash") and the customer ticking it
+		// themselves are both legitimate and are not the same event.
+		completedAt: timestamp('completed_at'),
+		// contractor | customer, and only meaningful alongside completedAt.
+		completedBy: text('completed_by'),
+		createdAt: timestamp('created_at').defaultNow().notNull()
+	},
+	(table) => [
+		// Every read is "the tasks on this order, outstanding first".
+		index('customer_task_orderId_idx').on(table.orderId, table.completedAt)
+	]
+);
+
 export const orderMessage = pgTable(
 	'order_message',
 	{
@@ -232,6 +432,85 @@ export const orderMessage = pgTable(
 		createdAt: timestamp('created_at').defaultNow().notNull()
 	},
 	(table) => [index('order_message_orderId_createdAt_idx').on(table.orderId, table.createdAt)]
+);
+
+// What the job is being charged FOR, one row per line.
+//
+// `order.final_amount_cents` was a single lump figure, which is fine on a
+// handshake job and useless on anything a customer might query — "why is it
+// $4,800?" had no answer in the app. These rows are that answer.
+//
+// The relationship to the total is a rule rather than a sync: when an order has
+// ANY line items, the total IS their sum and the stored column is ignored (see
+// `invoiceSummary`). Nothing writes a total back here, so the breakdown can never
+// disagree with the figure printed above it — which is the failure mode of every
+// invoice that keeps both and tries to keep them equal.
+export const lineItem = pgTable(
+	'line_item',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		orderId: text('order_id')
+			.notNull()
+			.references(() => order.id, { onDelete: 'cascade' }),
+		// What it is: "Cedar decking", "Permit", "Change order — extra step".
+		label: text('label').notNull(),
+		// Whole cents, matching every other money column. Negative is allowed and
+		// meaningful: a discount is a line, not a special case.
+		amountCents: integer('amount_cents').notNull(),
+		// Contractor-ordered. A float rather than an int so a row can be dropped
+		// between two others without renumbering the rest.
+		position: doublePrecision('position').notNull().default(0),
+		createdAt: timestamp('created_at').defaultNow().notNull()
+	},
+	(table) => [index('line_item_orderId_position_idx').on(table.orderId, table.position)]
+);
+
+// Money the customer has actually handed over on one order, one row per payment.
+//
+// ADR-0010 established that the app RECORDS money and never processes it. This
+// table is the same rule with the arithmetic finished: `order.finalAmountCents`
+// is what the job COSTS, and these rows are what has been PAID against it, so the
+// balance is a subtraction rather than a second thing to keep in sync. Before
+// this existed a job could only be all-unpaid or all-paid, which is not how a
+// contractor gets paid — a deposit up front and the rest on completion is the
+// normal case, and it had nowhere to live.
+//
+// Rows rather than two columns on `order` deliberately: "deposit and balance" is
+// the common shape, not the only one. A job paid in three instalments, a refund
+// of an overpayment, a deposit taken in two goes — all of those are more rows,
+// none of them is a migration.
+export const payment = pgTable(
+	'payment',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		orderId: text('order_id')
+			.notNull()
+			.references(() => order.id, { onDelete: 'cascade' }),
+		// deposit | progress | final. What this payment WAS, in the contractor's
+		// terms — it drives the invoice's line labels and nothing else. The
+		// arithmetic never reads it: three payments of any kind still sum the same,
+		// which is what keeps a mislabelled row from changing what someone owes.
+		kind: text('kind').notNull().default('progress'),
+		// Whole cents, matching `order.final_amount_cents`. Positive for money in;
+		// a refund is a negative amount rather than a separate concept, so the
+		// balance stays one sum.
+		amountCents: integer('amount_cents').notNull(),
+		// cash | check | card | other — the same set as the close-out record.
+		method: text('method'),
+		// What the contractor wants to remember about it ("check #1041").
+		// Customer-visible: it appears on the invoice they are sent.
+		note: text('note'),
+		// When the money changed hands, which is NOT when the row was written — a
+		// contractor records Friday's cheque on Monday, and the invoice should say
+		// Friday. Defaults to now so the common case needs no thought.
+		receivedAt: timestamp('received_at').defaultNow().notNull(),
+		createdAt: timestamp('created_at').defaultNow().notNull()
+	},
+	(table) => [index('payment_orderId_receivedAt_idx').on(table.orderId, table.receivedAt)]
 );
 
 export const notification = pgTable(
@@ -318,11 +597,23 @@ export const orderSubcontractor = pgTable(
 		subcontractorId: text('subcontractor_id')
 			.notNull()
 			.references(() => subcontractor.id, { onDelete: 'cascade' }),
+		// The same stint the crew assignment carries, and for the same reason:
+		// "Acme is here Monday to Friday" is exactly as useful a fact as it is for
+		// a crew hand, and the order page shows both in one list. Nullable, so
+		// every assignment written before this existed still reads as "on the job,
+		// no dates pinned" rather than as a range starting at the epoch.
+		startsOn: date('starts_on'),
+		endsOn: date('ends_on'),
+		// What they are doing on THIS job, when it differs from their usual trade.
+		role: text('role'),
+		notes: text('notes'),
 		assignedAt: timestamp('assigned_at').defaultNow().notNull()
 	},
 	(table) => [
 		primaryKey({ columns: [table.orderId, table.subcontractorId] }),
-		index('order_subcontractor_subId_idx').on(table.subcontractorId)
+		index('order_subcontractor_subId_idx').on(table.subcontractorId),
+		// "Who is on site today" scans by date across every job and both kinds.
+		index('order_subcontractor_startsOn_idx').on(table.startsOn)
 	]
 );
 
@@ -368,8 +659,6 @@ export const document = pgTable(
 		// What this document is, in the uploader's words — "receipt for the tile",
 		// "permit as approved". A filename rarely carries that on its own.
 		note: text('note'),
-		// Free-form labels, same shape as the tags on orders and subcontractors.
-		tags: text('tags').array().notNull().default([]),
 		createdAt: timestamp('created_at').defaultNow().notNull()
 	},
 	(table) => [index('document_orderId_idx').on(table.orderId)]
@@ -414,6 +703,12 @@ export const contractorSettings = pgTable('contractor_settings', {
 	// remodeller chasing a quote weekly and a roofer working a month out both
 	// need the dashboard to stay believable. See DEFAULT_FOLLOWUP_DAYS.
 	followUpDays: integer('follow_up_days').notNull().default(14),
+	// Where the contractor app's navigation sits on a phone/tablet: 'top' keeps the
+	// links behind the bar's hamburger, 'bottom' moves them to a fixed tab bar like
+	// the customer portal's. A preference, not a capability — the same links either
+	// way, and above the desktop breakpoint the rail in the bar is the nav
+	// regardless. See NAV_PLACEMENTS.
+	navPlacement: text('nav_placement').notNull().default('top'),
 	// Getting-started Guide. Only the contractor's own choice is stored — whether a
 	// step is done is always derived from their real Customers / Orders / Invites /
 	// Assignments. See docs/adr/0004-derive-guide-progress-from-domain-data.md.
@@ -501,7 +796,8 @@ export const orderRelations = relations(order, ({ one, many }) => ({
 	messages: many(orderMessage),
 	invites: many(customerInvite),
 	documents: many(document),
-	assignments: many(orderSubcontractor)
+	assignments: many(orderSubcontractor),
+	tasks: many(customerTask)
 }));
 
 export const orderMessageRelations = relations(orderMessage, ({ one }) => ({
@@ -533,6 +829,18 @@ export const orderSubcontractorRelations = relations(orderSubcontractor, ({ one 
 
 export const documentRelations = relations(document, ({ one }) => ({
 	order: one(order, { fields: [document.orderId], references: [order.id] })
+}));
+
+export const lineItemRelations = relations(lineItem, ({ one }) => ({
+	order: one(order, { fields: [lineItem.orderId], references: [order.id] })
+}));
+
+export const paymentRelations = relations(payment, ({ one }) => ({
+	order: one(order, { fields: [payment.orderId], references: [order.id] })
+}));
+
+export const customerTaskRelations = relations(customerTask, ({ one }) => ({
+	order: one(order, { fields: [customerTask.orderId], references: [order.id] })
 }));
 
 export const timelineEntryRelations = relations(timelineEntry, ({ one }) => ({

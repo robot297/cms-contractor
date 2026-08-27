@@ -26,7 +26,6 @@
 		createdAt: Date | string;
 		uploadedByRole?: string;
 		note?: string | null;
-		tags?: string[];
 		/** Null until the contractor has opened this order's documents. */
 		readByContractorAt?: Date | string | null;
 	};
@@ -81,13 +80,6 @@
 					</div>
 					{#if d.note}
 						<p class="note">{d.note}</p>
-					{/if}
-					{#if d.tags && d.tags.length > 0}
-						<div class="tags">
-							{#each d.tags as tag (tag)}
-								<span class="tag">{tag}</span>
-							{/each}
-						</div>
 					{/if}
 					{#if badge}{@render badge(d)}{/if}
 				</div>
@@ -198,20 +190,6 @@
 		font-size: 0.8rem;
 		color: var(--fg-muted);
 		overflow-wrap: anywhere;
-	}
-	.tags {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.25rem;
-		margin-top: 0.25rem;
-	}
-	.tag {
-		padding: 0.05rem 0.4rem;
-		border-radius: 999px;
-		background: var(--surface-sunken);
-		border: 1px solid var(--line);
-		font-size: 0.7rem;
-		color: var(--fg-muted);
 	}
 	.trailing {
 		flex-shrink: 0;

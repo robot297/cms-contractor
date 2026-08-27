@@ -23,7 +23,7 @@
  * @typedef {{
  *   cust: string, project: string, type: string, state: string,
  *   followUpDays: number | null, notes?: string[], icon?: string | null,
- *   tags?: string[]
+ *   visitDays?: number | null
  * }} DemoOrder
  */
 
@@ -38,10 +38,10 @@ export const DEMO_CUSTOMERS = [
 		name: 'Mina Patel',
 		email: 'mina.patel@example.com',
 		phone: '(555) 201-4477',
-		address: '88 Cedar Ln',
-		city: 'Springfield',
-		state: 'IL',
-		postalCode: '62704',
+		address: '88 Cedar Lane',
+		city: 'Minneapolis',
+		state: 'MN',
+		postalCode: '55408',
 		notes: 'Prefers cedar. Repeat client — third project.',
 		avatar: '/img/maya.png',
 		preferredContact: 'call'
@@ -51,10 +51,10 @@ export const DEMO_CUSTOMERS = [
 		name: 'Luis Ortega',
 		email: 'luis.ortega@example.com',
 		phone: '(555) 332-9080',
-		address: '14 Elm St',
-		city: 'Springfield',
-		state: 'IL',
-		postalCode: '62704',
+		address: '14 Elm Street',
+		city: 'Minneapolis',
+		state: 'MN',
+		postalCode: '55408',
 		notes: 'Referred by Mina.',
 		avatar: '/img/alex.png',
 		preferredContact: 'email'
@@ -64,10 +64,10 @@ export const DEMO_CUSTOMERS = [
 		name: 'Nina Brooks',
 		email: 'nina.brooks@example.com',
 		phone: '(555) 776-1220',
-		address: '901 Oak Ave',
-		city: 'Riverton',
-		state: 'TX',
-		postalCode: '75002',
+		address: '901 Oak Avenue',
+		city: 'Saint Paul',
+		state: 'MN',
+		postalCode: '55104',
 		notes: 'HOA board contact — needs itemized quotes.',
 		avatar: '/img/mia.png',
 		preferredContact: 'call'
@@ -92,10 +92,10 @@ export const DEMO_CUSTOMERS = [
 		name: 'Aisha Khan',
 		email: 'aisha.khan@example.com',
 		phone: '(555) 118-2043',
-		address: '27 Birch Rd',
-		city: 'Riverton',
-		state: 'TX',
-		postalCode: '75002',
+		address: '27 Birch Road',
+		city: 'Saint Paul',
+		state: 'MN',
+		postalCode: '55104',
 		notes: 'Wants a shaded patio before summer.',
 		avatar: null,
 		preferredContact: 'call'
@@ -105,10 +105,10 @@ export const DEMO_CUSTOMERS = [
 		name: 'Bianca Rossi',
 		email: 'bianca.rossi@example.com',
 		phone: '(555) 204-8891',
-		address: '3 Willow Ct',
-		city: 'Springfield',
-		state: 'IL',
-		postalCode: '62704',
+		address: '3 Willow Court',
+		city: 'Minneapolis',
+		state: 'MN',
+		postalCode: '55408',
 		notes: null,
 		avatar: null,
 		preferredContact: 'email'
@@ -118,10 +118,10 @@ export const DEMO_CUSTOMERS = [
 		name: 'Caleb Nguyen',
 		email: 'caleb.nguyen@example.com',
 		phone: '(555) 660-1177',
-		address: '410 Sunset Blvd',
-		city: 'Fair Oaks',
-		state: 'CA',
-		postalCode: '95628',
+		address: '410 Lakeview Avenue',
+		city: 'Edina',
+		state: 'MN',
+		postalCode: '55424',
 		notes: 'Referred by Bianca.',
 		avatar: null,
 		preferredContact: 'call'
@@ -132,9 +132,9 @@ export const DEMO_CUSTOMERS = [
 		email: 'divya.rao@example.com',
 		phone: null,
 		address: '88 Maple Way',
-		city: 'Riverton',
-		state: 'TX',
-		postalCode: '75002',
+		city: 'Saint Paul',
+		state: 'MN',
+		postalCode: '55104',
 		notes: 'HOA approval needed before scheduling.',
 		avatar: null,
 		preferredContact: 'email'
@@ -145,9 +145,9 @@ export const DEMO_CUSTOMERS = [
 		email: 'elena.popov@example.com',
 		phone: '(555) 771-3320',
 		address: '15 Harbor St',
-		city: 'Springfield',
-		state: 'IL',
-		postalCode: '62704',
+		city: 'Minneapolis',
+		state: 'MN',
+		postalCode: '55408',
 		notes: null,
 		avatar: null,
 		preferredContact: 'call'
@@ -158,8 +158,8 @@ export const DEMO_CUSTOMERS = [
 		email: 'grace.owusu@example.com',
 		phone: '(555) 902-4415',
 		address: '502 Ridgeline Dr',
-		city: 'Fair Oaks',
-		state: 'CA',
+		city: 'Edina',
+		state: 'MN',
 		postalCode: '95628',
 		notes: 'Prefers weekend site visits.',
 		avatar: null,
@@ -171,9 +171,9 @@ export const DEMO_CUSTOMERS = [
 		email: 'hank.miller@example.com',
 		phone: '(555) 335-7788',
 		address: '9 Foundry Ln',
-		city: 'Riverton',
-		state: 'TX',
-		postalCode: '75002',
+		city: 'Saint Paul',
+		state: 'MN',
+		postalCode: '55104',
 		notes: null,
 		avatar: null,
 		preferredContact: 'call'
@@ -184,9 +184,9 @@ export const DEMO_CUSTOMERS = [
 		email: 'priya.shah@example.com',
 		phone: '(555) 447-9012',
 		address: '221 Orchard Ave',
-		city: 'Springfield',
-		state: 'IL',
-		postalCode: '62704',
+		city: 'Minneapolis',
+		state: 'MN',
+		postalCode: '55408',
 		notes: 'Repeat client — pole barn next.',
 		avatar: null,
 		preferredContact: 'email'
@@ -197,8 +197,8 @@ export const DEMO_CUSTOMERS = [
 		email: 'quentin.blake@example.com',
 		phone: null,
 		address: '64 Cannery Row',
-		city: 'Fair Oaks',
-		state: 'CA',
+		city: 'Edina',
+		state: 'MN',
 		postalCode: '95628',
 		notes: null,
 		avatar: null,
@@ -210,9 +210,9 @@ export const DEMO_CUSTOMERS = [
 		email: 'tomas.vega@example.com',
 		phone: '(555) 613-5540',
 		address: '7 Kiln St',
-		city: 'Riverton',
-		state: 'TX',
-		postalCode: '75002',
+		city: 'Saint Paul',
+		state: 'MN',
+		postalCode: '55104',
 		notes: 'Bilingual — Spanish preferred.',
 		avatar: null,
 		preferredContact: 'call'
@@ -223,31 +223,41 @@ export const DEMO_CUSTOMERS = [
 		email: 'wendy.zhao@example.com',
 		phone: '(555) 288-6603',
 		address: '133 Lakeview Ter',
-		city: 'Springfield',
-		state: 'IL',
-		postalCode: '62704',
+		city: 'Minneapolis',
+		state: 'MN',
+		postalCode: '55408',
 		notes: 'Detailed itemized quotes, please.',
 		avatar: null,
 		preferredContact: 'email'
 	}
 ];
 
-/** @type {DemoOrder[]} */
+/**
+ * @type {DemoOrder[]}
+ *
+ * `visitDays` is the day the crew is on site, as an offset from seed time — the
+ * same trick `followUpDays` uses, and for the same reason: a date seeded once is
+ * only right on the day it was written.
+ *
+ * TWO of them sit on 0, because that is what a real day looks like: a contractor
+ * is on one site, sometimes two. A fixture showing five stops would be
+ * demonstrating a route planner this product is not. The other two sit just
+ * ahead, so "on site today" reads as a filter rather than as the whole list.
+ */
 export const DEMO_ORDERS = [
 	{
 		cust: 'mina',
 		project: 'Backyard Deck Rebuild',
-		tags: ['deposit paid', 'cedar'],
 		type: 'Deck',
 		state: 'In Progress',
 		followUpDays: -1, // overdue → shows as "due"
+		visitDays: 0, // stop 1 — Minneapolis
 		notes: ['Cedar posts confirmed. Deposit paid by check.'],
 		icon: '🪵'
 	},
 	{
 		cust: 'mina',
 		project: 'Poolside Pergola',
-		tags: ['awaiting permit'],
 		type: 'Pergola',
 		state: 'Quote Sent',
 		followUpDays: 3,
@@ -259,6 +269,7 @@ export const DEMO_ORDERS = [
 		type: 'Carport',
 		state: 'Deposit Pending',
 		followUpDays: -4, // overdue
+		visitDays: 0, // the second site today — Saint Paul, ~9 miles from the first
 		notes: ['Left a voicemail about the deposit.'],
 		icon: '🏗️'
 	},
@@ -268,6 +279,7 @@ export const DEMO_ORDERS = [
 		type: 'Pavilion',
 		state: 'Work Scheduled',
 		followUpDays: 6,
+		visitDays: 2, // later in the week, not today
 		icon: '🚧'
 	},
 	{
@@ -278,7 +290,15 @@ export const DEMO_ORDERS = [
 		followUpDays: null,
 		icon: '✅'
 	},
-	{ cust: 'sam', project: 'Tool Shed', type: 'Shed', state: 'Inquiry', followUpDays: 0, icon: '🏠' } // due today
+	{
+		cust: 'sam',
+		project: 'Tool Shed',
+		type: 'Shed',
+		state: 'Inquiry',
+		followUpDays: 0, // due today
+		visitDays: 1, // tomorrow — so "on site today" is visibly a filter, not a list of everything
+		icon: '🏠'
+	}
 ];
 
 /**
@@ -286,7 +306,7 @@ export const DEMO_ORDERS = [
  *   key: string, name: string, email: string, phone: string | null,
  *   company: string | null, trade: string | null, tier: 'trusted' | 'guest',
  *   licenseNumber: string | null, insuranceCarrier: string | null,
- *   insuranceDays: number | null, notes: string | null, tags: string[],
+ *   insuranceDays: number | null, notes: string | null,
  *   avatar: string | null, invited?: boolean
  * }} DemoSubcontractor
  */
@@ -305,7 +325,6 @@ export const DEMO_SUBCONTRACTORS = [
 		insuranceCarrier: 'Statewide Mutual',
 		insuranceDays: 120, // valid, expires in ~4 months
 		notes: 'Go-to electrician. Fast, fully licensed and insured.',
-		tags: ['licensed', 'insured'],
 		avatar: '/img/ben.png'
 	},
 	{
@@ -320,7 +339,6 @@ export const DEMO_SUBCONTRACTORS = [
 		insuranceCarrier: 'Ironclad Insurance',
 		insuranceDays: -20, // expired — stored for reference, never enforced
 		notes: 'Concrete crew for footings. Insurance lapsed; kept for records only.',
-		tags: ['concrete'],
 		avatar: '/img/liam.png',
 		invited: true // shows the "Invited" status in the roster
 	}

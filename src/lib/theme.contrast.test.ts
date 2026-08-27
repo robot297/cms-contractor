@@ -1,39 +1,46 @@
 /**
- * Guard against the app's most-repeated dark-mode bug: dark text tokens rendered
- * on the brand fill.
+ * Guard the brand-fill invariant — which CHANGED when the theme did, so this
+ * file's job changed with it.
  *
- * The brand yellow is light in BOTH themes. Every other surface token in the app
- * flips between themes — `--ink`, `--fg`, `--muted` and friends are dark on light
- * and near-white on dark. So a rule that fills with yellow and takes its
- * foreground from one of those tokens looks fine while you're building it in
- * light mode and turns into white-on-yellow the moment someone flips the theme.
+ * The old rule: safety yellow was light in both themes, so anything sitting on
+ * it had to stay dark in both, and `--on-yellow` was pinned outside the dark
+ * block. Every palette that replaced it flips — a bright accent on the dark
+ * ground, a deep one on the light — so `--on-brand` flips too, and pinning a
+ * literal on the brand fill is now the bug rather than the fix.
  *
- * That has now shipped four separate times (the dashboard's waiting badge, the
- * orders list's unread badge, an order's document button, the dev role switcher),
- * which is three times too many for a code review to be the control. So the rule
- * is mechanical instead: on a fill that does not flip, the foreground must not
- * flip either. Use `var(--on-yellow)`, or pin the literal.
+ * The new rule, and what this file enforces: **a rule that fills with the brand
+ * must take its foreground from `--on-brand`.** Not from a literal (which can
+ * only be right in one theme), and not from `--fg` / `--ink` / any other surface
+ * token (which flips the wrong way — those track the PAGE, and the brand fill is
+ * not the page).
  *
- * The same trap exists in reverse — a pinned dark foreground on a fill that flips
- * — but that one is only reachable inside a `[data-theme]` block, where the fill
- * is effectively pinned too, so it is not worth chasing here.
+ * The trap this replaces shipped four times under the old theme. The equivalent
+ * under the new one is a hardcoded `#14171c` left behind by the migration, which
+ * renders as near-black on a dark-mode azure button. Same failure, new colour.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Fills that stay light in both themes. A foreground on these must stay dark. */
-const NON_FLIPPING_FILLS = [
-	'var(--yellow)',
-	'var(--yellow-deep)',
+/** The brand fill, however a rule names it. */
+const BRAND_FILLS = [
+	'var(--brand)',
+	'var(--brand-deep)',
 	'var(--who-contractor)',
-	'#ffcc00',
-	'#ffd633',
-	'#e6b800'
+	// The accent as a gradient, which is what the primary button, the h1 slab and
+	// the active nav pill wear now. Same rule applies: whatever sits on it takes
+	// its colour from --on-brand.
+	'var(--brand-sweep)'
 ];
 
-/** Tokens whose value differs between light and dark. Illegal on the fills above. */
-const FLIPPING_FOREGROUNDS = [
+/**
+ * Foregrounds that are wrong ON the brand fill.
+ *
+ * The surface tokens track the PAGE — they go near-white in dark mode, which is
+ * correct on a dark card and unreadable on a bright accent. `--on-brand` is the
+ * only token that tracks the fill itself.
+ */
+const ILLEGAL_FOREGROUNDS = [
 	'var(--ink)',
 	'var(--fg)',
 	'var(--muted)',
@@ -43,6 +50,9 @@ const FLIPPING_FOREGROUNDS = [
 	'var(--surface-sunken)',
 	'var(--surface-inset)'
 ];
+
+/** A literal is wrong on a fill that flips: it can only be right in one theme. */
+const LITERAL = /^(#[0-9a-fA-F]{3,8}|rgb|rgba|hsl|hsla)/;
 
 /**
  * Modifier selectors restate only what changes; their foreground is inherited
@@ -123,7 +133,7 @@ const brandFilled = files.flatMap((path) => {
 			path,
 			fill: declaration(rule.body, 'background') ?? declaration(rule.body, 'background-color')
 		}))
-		.filter((rule) => rule.fill !== undefined && NON_FLIPPING_FILLS.includes(rule.fill));
+		.filter((rule) => rule.fill !== undefined && BRAND_FILLS.includes(rule.fill));
 });
 
 describe('foregrounds on the brand fill', () => {
@@ -133,44 +143,91 @@ describe('foregrounds on the brand fill', () => {
 		expect(brandFilled.length).toBeGreaterThan(20);
 	});
 
-	it('never takes its colour from a token that flips between themes', () => {
+	it('never takes its colour from a token that tracks the page', () => {
 		const offenders = brandFilled
 			.filter((rule) => {
 				const fg = declaration(rule.body, 'color');
-				return fg !== undefined && FLIPPING_FOREGROUNDS.includes(fg);
+				return fg !== undefined && ILLEGAL_FOREGROUNDS.includes(fg);
 			})
 			.map((r) => `${r.path}:${r.line} — ${r.selector} { background: ${r.fill}; color: ... }`);
 
 		expect(
 			offenders,
-			'use var(--on-yellow): these render near-white on yellow in dark mode'
+			'use var(--on-brand): a surface token goes near-white on a bright accent'
 		).toEqual([]);
+	});
+
+	it('never pins a literal on a fill that flips', () => {
+		// The migration hazard. A hardcoded #14171c was correct while the brand was
+		// yellow in both themes; on an accent that flips it is near-black on a
+		// bright button in one theme and near-black on a deep one in the other.
+		const offenders = brandFilled
+			.filter((rule) => {
+				const fg = declaration(rule.body, 'color');
+				return fg !== undefined && LITERAL.test(fg.replace('!important', '').trim());
+			})
+			.map(
+				(r) => `${r.path}:${r.line} — ${r.selector} { background: ${r.fill}; color: <literal> }`
+			);
+
+		expect(offenders, 'use var(--on-brand): a literal can only be right in one theme').toEqual([]);
 	});
 
 	it('states its colour rather than inheriting one', () => {
 		// Inheriting is the same bug wearing a disguise: the shell's text colour
-		// flips, so an unstated foreground on yellow goes white in dark mode too.
+		// tracks the page, so an unstated foreground on the accent flips with it.
 		const offenders = brandFilled
 			.filter((rule) => !MODIFIER.test(rule.selector))
 			.filter((rule) => declaration(rule.body, 'color') === undefined)
 			.map((r) => `${r.path}:${r.line} — ${r.selector} { background: ${r.fill}; /* no color */ }`);
 
-		expect(offenders, 'add color: var(--on-yellow) — an inherited colour flips').toEqual([]);
+		expect(offenders, 'add color: var(--on-brand) — an inherited colour flips').toEqual([]);
 	});
 });
 
-describe('the --on-yellow token', () => {
-	const appCss = readFileSync('src/app.css', 'utf8');
+describe('the palette blocks', () => {
+	// Comments blanked before anything is scanned. The header of app.css documents
+	// the selector shape using a stand-in palette name, and without this the sweep
+	// below reads that prose as a real palette and demands blocks for it — a test
+	// that fails because the file explains itself is a test nobody keeps.
+	const appCss = blankComments(readFileSync('src/app.css', 'utf8'));
 
-	it('is defined once, at the root', () => {
-		expect([...appCss.matchAll(/--on-yellow\s*:/g)]).toHaveLength(1);
+	/** Every `:root…{ … }` block in app.css. None of them nest, so this is enough. */
+	const rootBlocks = appCss.match(/:root[^{]*\{[^}]*\}/g) ?? [];
+
+	it('finds the blocks it is meant to be guarding', () => {
+		expect(rootBlocks.length).toBeGreaterThan(4);
 	});
 
-	it('is not redefined under a dark theme', () => {
-		// The whole point of the token is that it is the one colour that does NOT
-		// move when the theme does. Overriding it in the dark block would reopen
-		// every bug this file exists to close.
-		const darkBlocks = appCss.match(/\[data-theme=['"]dark['"]\][^{]*\{[^}]*\}/g) ?? [];
-		expect(darkBlocks.filter((block) => block.includes('--on-yellow:'))).toEqual([]);
+	it('always ships --on-brand alongside --brand', () => {
+		// The inverse of the rule this file used to enforce. `--on-brand` no longer
+		// sits outside the theme — it moves WITH the accent, because a bright accent
+		// wants a dark label and a deep one wants white. So the invariant is that
+		// the two are always defined together: a palette that sets an accent and
+		// forgets its label inherits the previous palette's, which is the one
+		// combination guaranteed to be wrong.
+		const orphans = rootBlocks
+			.filter((block) => /--brand\s*:/.test(block) && !/--on-brand\s*:/.test(block))
+			.map((block) => block.slice(0, block.indexOf('{')).trim());
+
+		expect(orphans, 'a block setting --brand must also set --on-brand').toEqual([]);
+	});
+
+	it('gives every palette both themes', () => {
+		// A palette with only a light block renders the previous palette's dark
+		// values the moment someone flips the theme — a half-applied brand, which
+		// looks like a rendering fault rather than a missing definition.
+		const named = [...appCss.matchAll(/\[data-palette='([a-z]+)'\]/g)].map((m) => m[1]);
+		const palettes = [...new Set(named)];
+		expect(palettes.length).toBeGreaterThan(0);
+
+		const missing = palettes.filter((name) => {
+			const blocks = rootBlocks.filter((b) => b.includes(`[data-palette='${name}']`));
+			const hasDark = blocks.some((b) => b.includes("[data-theme='dark']"));
+			const hasLight = blocks.some((b) => !b.includes("[data-theme='dark']"));
+			return !hasDark || !hasLight;
+		});
+
+		expect(missing, 'each palette needs a light block and a dark one').toEqual([]);
 	});
 });

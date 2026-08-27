@@ -163,10 +163,10 @@
 		font-size: 0.72rem;
 		font-weight: 800;
 		text-transform: uppercase;
-		background: var(--yellow);
+		background: var(--brand);
 		/* Stated, not inherited: the pill's fill is light in both themes, so it must
 		   not pick up the shell's text colour, which flips to near-white in dark. */
-		color: var(--on-yellow);
+		color: var(--on-brand);
 		border: none;
 		border-radius: 999px;
 		padding: 0.12rem 0.55rem;

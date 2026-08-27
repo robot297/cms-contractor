@@ -117,14 +117,21 @@ handles both; don't assume either.
 
 ## Files
 
-| File                         | Covers                                                             |
-| ---------------------------- | ------------------------------------------------------------------ |
-| `auth.spec.ts`               | Sign up, sign in, sign out, refusal, route guarding                |
-| `contractor-core.spec.ts`    | Adding a customer, subcontractor and order; ZIP autofill           |
-| `order-workspace.spec.ts`    | Assigning crew, status, notes, history, email/text/call            |
-| `customer-portal.spec.ts`    | What the customer sees, internal notes staying internal, close-out |
-| `documents-and-scan.spec.ts` | Upload, content-type refusal, ID scan prefill                      |
-| `follow-ups.spec.ts`         | Follow-up due/snooze/clear, and customers awaiting a reply         |
-| `fixtures/app.ts`            | Sign-in, record creation, the ZIP stub, `seedWorkspace`            |
-| `fixtures/order.ts`          | Driving one order's workspace                                      |
-| `../scripts/e2e-db.mjs`      | Creates (or resets) the test database before the server starts     |
+| File                         | Covers                                                               |
+| ---------------------------- | -------------------------------------------------------------------- |
+| `auth.spec.ts`               | Sign up, sign in, sign out, refusal, route guarding                  |
+| `contractor-core.spec.ts`    | Adding a customer, subcontractor and order; ZIP autofill             |
+| `order-workspace.spec.ts`    | Assigning crew, status, notes, history, email/text/call              |
+| `customer-portal.spec.ts`    | What the customer sees, internal notes staying internal, close-out   |
+| `documents-and-scan.spec.ts` | Upload, content-type refusal, ID scan prefill                        |
+| `follow-ups.spec.ts`         | Follow-up due/snooze/clear, and customers awaiting a reply           |
+| `order-lifecycle.spec.ts`    | Import → order → statuses → deposit + balance → invoice, both sides  |
+| `crew.spec.ts`               | Crew vs subcontractor, stints and on-site today, the one directory   |
+| `getting-started.spec.ts`    | The guide card, and the first job made in one submit                 |
+| `navigation.spec.ts`         | The nav's destinations, and where the folded routes redirect         |
+| `dev-fixtures.spec.ts`       | The seeded dev workspace, and the dashboard states it exists to show |
+| `palette-shots.spec.ts`      | Not a test — screenshots of each candidate theme, `SHOTS=1` only     |
+| `fixtures/app.ts`            | Sign-in, record creation, the ZIP stub, `seedWorkspace`              |
+| `fixtures/order.ts`          | Driving one order's workspace                                        |
+| `fixtures/portal.ts`         | Driving the customer's side of the same order                        |
+| `../scripts/e2e-db.mjs`      | Creates (or resets) the test database before the server starts       |

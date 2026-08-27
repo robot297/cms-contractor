@@ -1,6 +1,6 @@
 import { fail, redirect, type RequestEvent } from '@sveltejs/kit';
-import { renderEmail } from '$lib/email';
-import { formatCents } from '$lib/crm';
+import { renderEmail, type RenderedEmail } from '$lib/email';
+import { composeInvoiceEmail, type InvoiceEmailOrder, type InvoiceSummary } from '$lib/invoice';
 import { assertCanWrite } from './billing.server';
 import { recordEmailSent } from './crm.server';
 import {
@@ -184,53 +184,84 @@ export async function sendEmailAction(event: RequestEvent) {
 }
 
 /**
- * Email a customer their final invoice at close-out. Reuses the same render/send/
- * record chain as a composed message, so it carries the contractor's branding and
- * lands on the order timeline. Returns 'skipped' when there is nowhere or no way to
- * send (no address, unconfigured, dev-tools/simulation mode, or a provider refusal)
- * — completing the order must not fail just because the courtesy email couldn't go.
+ * Email a customer their final invoice at close-out.
+ *
+ * The message itself is composed by `composeInvoiceEmail` — the same pure
+ * function the `/contractor/orders/[id]/invoice` preview renders — so what a
+ * contractor inspects before sending is byte-identical to what lands in the
+ * customer's inbox. This function's job is only the decision about whether to
+ * send, and the record afterwards.
+ *
+ * Three outcomes rather than two:
+ *   'sent'      — the provider accepted it.
+ *   'simulated' — dev tools are on, so nothing left the building, but the
+ *                 timeline was written anyway. That matches what the composer's
+ *                 own simulate path does (see `sendEmailAction` above): on a
+ *                 server in simulation mode the record is what makes the flow
+ *                 observable, and no real customer is being misled because no
+ *                 real customer is on that server.
+ *   'skipped'   — nowhere to send (no address) or no way to (unconfigured, or the
+ *                 provider refused). Completing the order must never fail because
+ *                 the courtesy email could not go.
  */
 export async function sendFinalInvoiceEmail(
 	user: { id: string; name: string; email: string },
-	order: { id: string; projectName: string | null; customerName: string; customerEmail: string },
-	invoice: { amountCents: number | null; notes: string | null }
-): Promise<'sent' | 'skipped'> {
+	order: {
+		id: string;
+		projectName: string | null;
+		customerName: string;
+		customerEmail: string;
+		finalNotes: string | null;
+	},
+	summary: InvoiceSummary
+): Promise<'sent' | 'simulated' | 'skipped'> {
 	const to = order.customerEmail.trim();
-	// Same guards as a real send: no address, no provider, or a server in simulation
-	// mode all mean "don't actually send".
-	if (!to || !isEmailConfigured() || isEmailDevToolsEnabled()) return 'skipped';
+	if (!to) return 'skipped';
+
+	const simulate = isEmailDevToolsEnabled();
+	if (!simulate && !isEmailConfigured()) return 'skipped';
+
 	await assertCanWrite(user.id);
 	const settings = await getContractorSettings(user.id);
 	const businessName = settings.businessName || user.name;
 
-	const lines: string[] = [
-		'Hi {{customer}},',
-		'',
-		'Here is the final invoice for your {{project}} project.'
-	];
-	if (invoice.amountCents != null) lines.push('', `Total: ${formatCents(invoice.amountCents)}`);
-	const notes = invoice.notes?.trim();
-	if (notes) lines.push('', notes);
-	lines.push('', 'Thank you for your business.');
-
-	const rendered = renderEmail(
-		{ subject: 'Final invoice for {{project}}', body: lines.join('\n') },
-		{ customer: order.customerName, contractor: businessName, project: order.projectName ?? '' },
-		{ businessName, signature: settings.signature }
-	);
-
-	const result = await sendEmail({
-		to,
-		replyTo: user.email,
-		fromName: businessName,
-		subject: rendered.subject,
-		html: rendered.html,
-		text: rendered.text
+	const rendered = composeInvoiceEmail(order, summary, {
+		businessName,
+		signature: settings.signature
 	});
-	if (!result.ok) return 'skipped';
+
+	if (!simulate) {
+		const result = await sendEmail({
+			to,
+			replyTo: user.email,
+			fromName: businessName,
+			subject: rendered.subject,
+			html: rendered.html,
+			text: rendered.text
+		});
+		if (!result.ok) return 'skipped';
+	}
+
 	await recordEmailSent(order.id, user.id, {
 		customerName: order.customerName,
 		subject: rendered.subject
 	});
-	return 'sent';
+	return simulate ? 'simulated' : 'sent';
+}
+
+/**
+ * The invoice email for one order, composed and not sent — what the preview route
+ * serves. Kept beside the send path so the two cannot be given different branding
+ * or a different renderer by accident.
+ */
+export async function previewInvoiceEmail(
+	user: { id: string; name: string },
+	order: InvoiceEmailOrder,
+	summary: InvoiceSummary
+): Promise<RenderedEmail> {
+	const settings = await getContractorSettings(user.id);
+	return composeInvoiceEmail(order, summary, {
+		businessName: settings.businessName || user.name,
+		signature: settings.signature
+	});
 }

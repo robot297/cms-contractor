@@ -32,7 +32,7 @@ A Contractor SHALL be able to create, list, search, and archive Subcontractor re
 
 ### Requirement: Maintain a Subcontractor Profile
 
-A Contractor SHALL be able to record and edit an administered profile for each Subcontractor: trade/specialty, contact (email/phone), company, license number, insurance carrier and expiry, avatar, and notes/tags. License and insurance are stored for reference; the system SHALL NOT raise compliance alerts in this version.
+A Contractor SHALL be able to record and edit an administered profile for each Subcontractor: trade/specialty, contact (email/phone), company, license number, insurance carrier and expiry, avatar, and notes. License and insurance are stored for reference; the system SHALL NOT raise compliance alerts in this version.
 
 #### Scenario: Contractor edits profile fields
 

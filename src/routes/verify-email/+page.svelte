@@ -64,10 +64,10 @@
 		width: 3rem;
 		height: 3rem;
 		border-radius: 14px;
-		background: linear-gradient(180deg, var(--yellow), var(--yellow-deep));
+		background: linear-gradient(180deg, var(--brand), var(--brand-deep));
 		box-shadow:
 			inset 0 1px 0 rgba(255, 255, 255, 0.5),
-			0 2px 8px rgba(230, 184, 0, 0.35);
+			0 2px 8px var(--brand-glow);
 		font-size: 1.4rem;
 	}
 	/* Opt out of the global yellow-chip h1 treatment. */
@@ -113,8 +113,8 @@
 		padding: 0.6rem 1.1rem;
 		border: none;
 		border-radius: 10px;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font: inherit;
 		font-size: 0.88rem;
 		font-weight: 700;
@@ -122,7 +122,7 @@
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.primary:hover {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.quiet {
 		border: none;

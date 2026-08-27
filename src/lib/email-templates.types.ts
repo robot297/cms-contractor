@@ -19,8 +19,6 @@ export type EmailTemplatesData = {
 	signature: string;
 	businessName: string;
 	followUpDays: number;
-	/** Loaded by the contractor layout, so it arrives on page data for free. */
-	contractorTags: string[];
 };
 
 /**

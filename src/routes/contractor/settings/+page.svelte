@@ -1,4 +1,7 @@
 <script lang="ts">
+	import PaletteSwitcher from '$lib/PaletteSwitcher.svelte';
+	import ThemeModeButton from '$lib/ThemeModeButton.svelte';
+	import SupportForm from '$lib/SupportForm.svelte';
 	import { onMount, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
@@ -16,7 +19,10 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
-	const { profile, account, limits, integrations } = $derived(data);
+	// `data.integrations` is loaded but read nowhere on this page — the panel that
+	// showed it is gone. Left in the loader rather than ripped out here, since
+	// EmailTemplatesPanel takes the whole `data`.
+	const { profile, account, limits } = $derived(data);
 
 	// Tabs are URL-driven (?tab=email) rather than component state: each label is a
 	// plain link, so tabs deep-link, survive reloads, respect back/forward, and still
@@ -25,7 +31,12 @@
 	const TABS = [
 		{ id: 'account', label: 'Account' },
 		{ id: 'email', label: 'Email' },
-		{ id: 'workspace', label: 'Workspace' }
+		{ id: 'workspace', label: 'Workspace' },
+		// Support was a top-level nav entry. It is configuration-adjacent rather
+		// than somewhere you work, and it was spending one of five slots in a bar
+		// whose other four are the job itself — so it joins the tabs and the nav
+		// gets the slot back.
+		{ id: 'support', label: 'Support' }
 	] as const;
 	type TabId = (typeof TABS)[number]['id'];
 	const tab: TabId = $derived(
@@ -82,11 +93,17 @@
 		async ({ update }: { update: (o?: object) => Promise<void> }) =>
 			await update({ reset: false });
 
+	// Where the phone/tablet nav sits. Saved on the click rather than behind a Save
+	// button: it is a two-way switch whose result is visible the moment it lands,
+	// so a confirm step would be a step for nothing.
+	let navPlacement = $state(untrack(() => data.navPlacement));
+	const NAV_CHOICES = [
+		{ id: 'top', label: 'Top bar', note: 'Links behind the menu button, top right.' },
+		{ id: 'bottom', label: 'Bottom bar', note: 'A fixed tab bar at the foot of the screen.' }
+	] as const;
+
 	let followUpDays = $state(untrack(() => data.followUpDays));
 	const followUpDirty = $derived(followUpDays !== data.followUpDays);
-
-	// Which tag is awaiting delete confirmation.
-	let confirmingTag = $state<string | null>(null);
 </script>
 
 <svelte:head><title>Settings</title></svelte:head>
@@ -242,135 +259,114 @@
 			     own cards; it shares this route's form actions. -->
 			<EmailTemplatesPanel {data} {form} />
 		</div>
-	{:else}
+	{:else if tab === 'workspace'}
 		<div class="tab-panel">
-			<!-- Default follow-up interval. Applies to orders created from here on: the
-			     follow-ups already on the dashboard may have been moved by hand. -->
+			<!-- Appearance. Light/dark AND the palette, on ONE row: they are two
+			     answers to "how should this look", and stacking them put a heading
+			     over a lone control twice. The theme control is a single button that
+			     names the mode it is in rather than a pair of radios — see
+			     ThemeModeButton for why that is not the usual toggle mistake.
+
+			     Light/dark lives here as well as on the bar. It HAS to: with the
+			     navigation at the foot of the screen the bar's toggle and the menu
+			     that used to hold a second copy are both gone, and a preference you
+			     can only change in a layout you are not using is not a preference.
+			     Same shared store either way, so the two never disagree.
+
+			     The palette half is TEMPORARY, like every other palette control:
+			     goes when a palette is picked. Grep `data-palette`. -->
 			<section class="card">
-				<h2>Follow-up reminders</h2>
+				<h2>Appearance</h2>
+				<p class="hint">Light or dark, and the colour scheme that rides on top of it.</p>
+				<div class="appearance-row">
+					<ThemeModeButton />
+					<PaletteSwitcher />
+				</div>
+			</section>
+
+			<!-- Where the nav sits on a phone. Chrome rather than configuration, so it
+			     keeps company with Appearance — and it changes nothing above the
+			     desktop breakpoint, where the bar's rail navigates either way. -->
+			<section class="card">
+				<h2>Navigation</h2>
 				<p class="hint">
-					Your follow-up cadence. A new order schedules a reminder this far out, and
-					<strong>getting in touch resets it</strong> — send an update, an email or a reply and that job
-					drops off your list for another interval. When one comes due it appears at the top of your dashboard,
-					and you can always snooze or re-date a single order from the order itself.
+					Where the links sit on a phone. Above 1024px the bar carries them either way.
 				</p>
-				<form method="POST" action="?/saveFollowUpDays" use:enhance={keepFields} class="grid">
+				<form method="POST" action="?/saveNav" use:enhance={keepFields} class="nav-choices">
+					{#each NAV_CHOICES as choice (choice.id)}
+						<label class="nav-choice" class:on={navPlacement === choice.id}>
+							<input
+								class="sr-only"
+								type="radio"
+								name="navPlacement"
+								value={choice.id}
+								checked={navPlacement === choice.id}
+								onchange={(e) => {
+									navPlacement = choice.id;
+									e.currentTarget.form?.requestSubmit();
+								}}
+							/>
+							<!-- A phone with its bar drawn where the choice puts it. Two words can
+							     describe this, but only the picture answers it at a glance. -->
+							<span class="nav-shot {choice.id}" aria-hidden="true">
+								<span class="nav-shot-bar"></span>
+								<span class="nav-shot-body"></span>
+							</span>
+							<span class="nav-choice-text">
+								<strong>{choice.label}</strong>
+								<span class="fine-print">{choice.note}</span>
+							</span>
+						</label>
+					{/each}
+				</form>
+				<!-- Errors only. There was a "Saved ✓" here, and it was the one
+				     confirmation in this card that had nothing to confirm: the choice
+				     saves on change, the pill you just pressed is already lit, and the
+				     nav itself moves. A receipt for something you can see happen is
+				     just a line that appears and then sits there. -->
+				{#if form?.action === 'nav' && form?.message}
+					<p class="err">{form.message}</p>
+				{/if}
+			</section>
+
+			<!-- How long "follow up" means. One number, so it saves on change like the
+			     nav switch rather than behind a button of its own. -->
+			<section class="card">
+				<h2>Follow-ups</h2>
+				<p class="hint">
+					How far ahead a new follow-up is set when you snooze one without picking a date.
+				</p>
+				<form method="POST" action="?/saveFollowUp" use:enhance={keepFields} class="followup">
 					<label class="field">
-						<span>Remind me after</span>
-						<select name="followUpDays" bind:value={followUpDays}>
+						<span>Default follow-up</span>
+						<select
+							name="followUpDays"
+							bind:value={followUpDays}
+							onchange={(e) => e.currentTarget.form?.requestSubmit()}
+						>
 							{#each FOLLOWUP_DAY_CHOICES as days (days)}
 								<option value={days}>{followUpDaysLabel(days)}</option>
 							{/each}
 						</select>
 					</label>
-					<div class="actions tight">
-						<button
-							type="submit"
-							class="btn primary"
-							disabled={!followUpDirty}
-							title={followUpDirty ? 'Save interval' : 'No changes to save'}>Save interval</button
-						>
-						{#if form?.saved === 'followUp' && !followUpDirty}<span class="ok">Saved ✓</span>{/if}
-					</div>
-					<p class="fine-print">
-						Changing this leaves follow-ups already scheduled where they are — only new orders use
-						the new interval.
-					</p>
+					{#if form?.saved === 'followUp' && !followUpDirty}<span class="ok">Saved ✓</span>{/if}
 				</form>
 			</section>
-
-			<!-- Tags. The vocabulary is derived from what's actually in use, so retiring
-			     one means stripping it off every record that carries it — which is why
-			     it asks. -->
+		</div>
+	{:else if tab === 'support'}
+		<div class="tab-panel">
 			<section class="card">
-				<h2>Tags</h2>
-				{#if data.contractorTags.length === 0}
-					<p class="hint">
-						No tags yet. Add them on an order or subcontractor and they'll collect here.
-					</p>
-				{:else}
-					<p class="hint">
-						Used across your orders and subcontractors. Deleting one removes it from every record
-						that uses it.
-					</p>
-					<ul class="tag-list">
-						{#each data.contractorTags as tag (tag)}
-							<li>
-								<span class="tag-name">{tag}</span>
-								{#if confirmingTag === tag}
-									<form
-										method="POST"
-										action="?/deleteTag"
-										use:enhance={() =>
-											async ({ update }) => {
-												confirmingTag = null;
-												await update();
-											}}
-									>
-										<input type="hidden" name="tag" value={tag} />
-										<button type="submit" class="tag-yes">Delete everywhere</button>
-									</form>
-									<button type="button" class="tag-no" onclick={() => (confirmingTag = null)}
-										>Cancel</button
-									>
-								{:else}
-									<button
-										type="button"
-										class="tag-del"
-										aria-label={`Delete tag ${tag}`}
-										onclick={() => (confirmingTag = tag)}>Delete</button
-									>
-								{/if}
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</section>
-
-			<!-- What this deployment can actually do. Answers "why is there no send
-			     button" without anyone having to read the server config. -->
-			<section class="card">
-				<h2>This installation</h2>
-				<dl class="facts">
-					<div class="fact">
-						<dt>Email sending</dt>
-						<dd>
-							{#if integrations.emailDevTools}
-								<span class="pill warn">Simulation</span>
-								<span class="muted">No real email leaves this server.</span>
-							{:else if integrations.emailSending}
-								<span class="pill good">On</span>
-								<span class="muted">Messages are sent by the app.</span>
-							{:else}
-								<span class="pill">Off</span>
-								<span class="muted">Messages open in your own mail client instead.</span>
-							{/if}
-						</dd>
-					</div>
-					<div class="fact">
-						<dt>Online payments</dt>
-						<dd>
-							{#if integrations.billing}
-								<span class="pill good">On</span>
-							{:else}
-								<span class="pill">Off</span>
-								<span class="muted">Checkout is unavailable on this install.</span>
-							{/if}
-						</dd>
-					</div>
-					{#if integrations.emailDevTools}
-						<div class="fact">
-							<dt>Email dev tools</dt>
-							<dd>
-								<span class="pill warn">On</span>
-								<span class="muted">
-									The composer simulates sends and real sending is disabled. Unset
-									<code>EMAIL_DEV_TOOLS</code> and restart to send for real.
-								</span>
-							</dd>
-						</div>
-					{/if}
-				</dl>
+				<h2>Report an issue</h2>
+				<p class="hint">
+					Something broken, or something missing? This files it with us directly — add a screenshot
+					if it helps.
+				</p>
+				<SupportForm
+					configured={data.support.configured}
+					captchaSiteKey={data.support.captchaSiteKey}
+					form={form?.action === 'support' ? form : null}
+					action="?/submitSupport"
+				/>
 			</section>
 		</div>
 	{/if}
@@ -430,12 +426,12 @@
 	/* Yellow stays light in both themes, so the active label is pinned dark. */
 	.tab.on,
 	.tab.on:hover {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 	}
 	.tab:focus-visible {
-		outline: 2px solid var(--yellow);
+		outline: 2px solid var(--brand);
 		outline-offset: 2px;
 	}
 
@@ -616,66 +612,107 @@
 	}
 	.field select:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
+	/* Both answers to "how should this look" on one row: the light/dark button and
+	   the palette picker. They were stacked, which put a heading over a lone
+	   control twice and made the palette read as an afterthought under the theme.
+	   Wraps rather than shrinks — at a phone width two pills do not fit a line. */
+	.appearance-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	/* The radio itself: present for the keyboard and the screen reader, invisible
+	   to the eye — the card around it is what shows the choice. Not `display:none`,
+	   which would take it out of the tab order and out of the a11y tree. */
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		margin: -1px;
+		padding: 0;
+		border: 0;
+		clip-path: inset(50%);
+		overflow: hidden;
+		white-space: nowrap;
+	}
+
+	/* The two nav placements, as picture-and-label cards. Radios underneath, so
+	   keyboard and screen readers get a real radio group and the card is only the
+	   paint on top of it. */
+	.nav-choices {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+	}
+	.nav-choice {
+		flex: 1 1 9rem;
+		display: flex;
+		align-items: center;
+		gap: 0.7rem;
+		padding: 0.6rem 0.7rem;
+		border: 1.5px solid var(--line);
+		border-radius: 12px;
+		background: var(--surface-sunken);
+		cursor: pointer;
+	}
+	.nav-choice:hover {
+		border-color: var(--line-strong);
+	}
+	.nav-choice.on {
+		border-color: var(--brand);
+		background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+	}
+	.nav-choice:focus-within {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
+	}
+	.nav-choice-text {
+		display: grid;
+		gap: 0.1rem;
+		min-width: 0;
+		font-size: 0.85rem;
+	}
+	/* A phone in miniature: a filled bar at one end, the page at the other. */
+	.nav-shot {
+		flex: none;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		width: 1.7rem;
+		height: 2.6rem;
+		padding: 2px;
+		border: 1px solid var(--line-strong);
+		border-radius: 5px;
+		background: var(--surface);
+	}
+	.nav-shot.bottom {
+		flex-direction: column-reverse;
+	}
+	.nav-shot-bar {
+		flex: none;
+		height: 0.42rem;
+		border-radius: 2px;
+		background: var(--brand);
+		/* Empty and decorative, but the fill and a foreground are never allowed to
+		   be separated — the invariant theme.contrast.test.ts enforces. */
+		color: var(--on-brand);
+	}
+	.nav-shot-body {
+		flex: 1;
+		border-radius: 2px;
+		background: var(--surface-sunken);
+	}
+
 	.ok {
 		color: #1a7f37;
 		font-size: 0.85rem;
 		font-weight: 600;
-	}
-
-	.tag-list {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: grid;
-		gap: 0.3rem;
-	}
-	.tag-list li {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.4rem 0.6rem;
-		border: 1px solid var(--line);
-		border-radius: 10px;
-		background: var(--surface-sunken);
-	}
-	.tag-name {
-		flex: 1;
-		min-width: 0;
-		font-size: 0.85rem;
-		font-weight: 700;
-		overflow-wrap: anywhere;
-	}
-	.tag-del,
-	.tag-no {
-		border: none;
-		background: none;
-		padding: 0.2rem 0.4rem;
-		color: var(--fg-muted);
-		font-family: inherit;
-		font-size: 0.78rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-	.tag-del:hover {
-		color: var(--danger);
-	}
-	.tag-no:hover {
-		color: var(--fg);
-	}
-	.tag-yes {
-		border: 1px solid var(--danger);
-		background: var(--danger);
-		color: #fff;
-		border-radius: 999px;
-		padding: 0.25rem 0.7rem;
-		font-family: inherit;
-		font-size: 0.75rem;
-		font-weight: 700;
-		cursor: pointer;
 	}
 
 	.actions {
@@ -707,12 +744,12 @@
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.btn.primary {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		border-color: transparent;
 	}
 	.btn.primary:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.btn.danger {
 		border-color: #cf222e;

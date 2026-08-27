@@ -15,9 +15,55 @@
 		type CustomerVisibleState,
 		type DocumentRef
 	} from '$lib/crm';
+	import { invoiceDate, paymentLineLabel } from '$lib/invoice';
+	import { formatCents } from '$lib/crm';
+	import { customerActionSummary, taskDueLabel, taskUrgency } from '$lib/tasks';
+	import { todayIso } from '$lib/worker';
+	import { onMount } from 'svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	/**
+	 * Today where the CUSTOMER is, not where the server is.
+	 *
+	 * Seeded during render so the server has something to send, then re-read on
+	 * mount — the same pattern the contractor's surfaces use. It decides whether a
+	 * task reads as "Due today" or "Overdue", and getting that wrong by a timezone
+	 * tells somebody they are late when they are not.
+	 */
+	let now = $state(new Date());
+	onMount(() => {
+		now = new Date();
+	});
+	const today = $derived(todayIso(now));
+
+	/**
+	 * What is waiting on the customer, and the one sentence that says so.
+	 *
+	 * Computed by the shared `customerActionSummary` rather than here, because the
+	 * contractor's workspace shows the same sentence as a preview of what their
+	 * customer is being told — and a preview that can drift from the thing it
+	 * previews is worse than none.
+	 */
+	const action = $derived(
+		customerActionSummary({
+			paymentDue: data.order.paymentDue,
+			contractorName: data.order.contractorName,
+			tasks: data.order.tasks,
+			today
+		})
+	);
+
+	/**
+	 * The money, computed server-side by the same `invoiceSummary` the contractor's
+	 * workspace and the emailed invoice use. The portal only chooses how to draw
+	 * it — no arithmetic happens on this page, because a balance that disagrees
+	 * with the one in the customer's inbox is the failure this whole arrangement
+	 * exists to rule out.
+	 */
+	const invoice = $derived(data.order.invoice);
+	const showInvoice = $derived(invoice.totalCents != null || invoice.payments.length > 0);
 
 	// The draft, its send state and the ⌘↵ handling all live in MessageComposer.
 
@@ -25,8 +71,6 @@
 	let confirmingRemoveId = $state<string | null>(null);
 
 	let historyOpen = $state(false);
-	/** Documents live behind a header control; this is whether that panel is open. */
-	let docsOpen = $state(false);
 	let uploading = $state(false);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	/**
@@ -122,14 +166,12 @@
 		if (page.url.hash === '#history') historyOpen = true;
 	});
 
-	/**
-	 * Never report into a collapsed panel. A batch staged for sending, or an
-	 * outcome to read, opens the documents panel — otherwise "2 sent · x was too
-	 * large" is written somewhere the customer cannot see.
+	/*
+	 * The effect that used to force the documents panel open on a staged batch or
+	 * an upload outcome is gone with the panel: the section is always rendered, so
+	 * there is no longer anywhere for "2 sent · x was too large" to be written
+	 * that the customer cannot see.
 	 */
-	$effect(() => {
-		if (picked.length > 0 || pickError || form?.upload) docsOpen = true;
-	});
 </script>
 
 <svelte:head><title>{heading}</title></svelte:head>
@@ -140,44 +182,14 @@
 		{#if order.projectType}<p class="kicker">{order.projectType}</p>{/if}
 	</div>
 
-	<!-- Unread messages now surface as the badge on the bottom bar's Messages tab, so
-	     the old mailbox jump-to-messages here is gone — on the phone it pointed at a
-	     section that lives in its own tab now. -->
+	<!-- The documents control that used to live here is gone.
 
-	<!-- Documents behind a control rather than as a permanent card. Most projects
-	     exchange a handful of files and then none for weeks, so a card that says
-	     "Nothing sent yet" was pushing the conversation down the page to report
-	     an absence. No badge on it: the count is not something waiting on anyone,
-	     and badging every control is how a badge stops meaning anything. -->
-	<button
-		type="button"
-		class="msg-jump as-docs"
-		class:on={docsOpen}
-		aria-expanded={docsOpen}
-		aria-controls="documents"
-		title={docsOpen ? 'Hide documents' : 'Documents'}
-		aria-label={docsOpen
-			? 'Hide documents'
-			: `Documents${data.documents.length > 0 ? ` (${data.documents.length})` : ''}`}
-		onclick={() => (docsOpen = !docsOpen)}
-	>
-		<svg
-			class="msg-jump-icon"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="1.9"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			aria-hidden="true"
-		>
-			<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" />
-			<path d="M14 3.5v5h5" />
-		</svg>
-		{#if data.documents.length > 0}
-			<span class="doc-count" aria-hidden="true">{data.documents.length}</span>
-		{/if}
-	</button>
+	     It toggled a panel that was `{#if docsOpen}` — so while it was closed the
+	     `#documents` section was not in the DOM at all, and the rail's own
+	     Documents link jumped to nothing. A nav entry that silently does nothing
+	     is worse than no nav entry. Documents are now always rendered, reached
+	     from the rail on a desktop and sitting in the Project tab on a phone,
+	     which is where every other section of this page already lives. -->
 </header>
 
 <!-- Where the job is, as a shape. This is the question the portal exists to
@@ -196,9 +208,61 @@
 		     contractor is busy with. -->
 		<span class="hero-state" class:act={order.customerMustAct}>{order.customerStateLabel}</span>
 	</div>
-	{#if order.customerMustAct}
-		<!-- The one case where the portal is asking rather than reporting. -->
-		<p class="hero-act">This one’s with you — {order.contractorName} is waiting on payment.</p>
+	<!-- ------------------------------------------------------------ Over to you
+	     The one place the portal ASKS rather than reports, and the reason it is
+	     directly under the status line rather than further down the page: a
+	     customer who has to scroll to find out that the job is waiting on them has
+	     been told nothing.
+
+	     It used to be a single sentence about payment, because payment was the
+	     only thing the product could ask for — the two "pay me" states were the
+	     whole vocabulary. Anything else the contractor needed went in a message
+	     and scrolled away. Now the sentence covers both halves and the asks are
+	     listed under it with a control on each, because "you owe us three things"
+	     with no way to say which are done is a nag rather than a to-do list. -->
+	{#if action.waiting}
+		<div class="todo" class:urgent={action.overdue > 0 || action.blocking}>
+			<p class="todo-lede">{action.headline}</p>
+
+			{#if action.paymentDue}
+				<!-- Payment stays a SENTENCE, not a row with a Done button. The app
+				     records money and never processes it (ADR-0010), and a customer
+				     ticking "paid" would be writing a payment the contractor never
+				     confirmed. It clears when they mark the money received. -->
+				<p class="todo-pay">
+					<span aria-hidden="true">💵</span>
+					{order.customerStateLabel} — {order.contractorName} will mark this off once it lands.
+				</p>
+			{/if}
+
+			{#if action.open.length > 0}
+				<ul class="todo-list">
+					{#each action.open as task (task.id)}
+						{@const urgency = taskUrgency(task.dueOn, today)}
+						<li class="todo-item" class:late={urgency === 'overdue'}>
+							<span class="todo-text">
+								<span class="todo-title">{task.title}</span>
+								{#if task.detail}<span class="todo-detail">{task.detail}</span>{/if}
+								<span class="todo-meta">
+									{#if task.blocking}<span class="todo-hold">Holding up the job</span>{/if}
+									{#if task.dueOn}<span class="todo-due" class:late={urgency !== 'upcoming'}
+											>{taskDueLabel(task.dueOn, today)}</span
+										>{/if}
+								</span>
+							</span>
+							{#if !data.viewing}
+								<form method="POST" action="?/completeTask" use:enhance class="todo-done-form">
+									<input type="hidden" name="taskId" value={task.id} />
+									<button type="submit" class="todo-done">
+										<span aria-hidden="true">✓</span> Done
+									</button>
+								</form>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
 	{/if}
 
 	{#if progress.onPath}
@@ -274,172 +338,246 @@
 	{/if}
 </section>
 
-{#if docsOpen}
-	<section class="card" id="documents">
+<!-- What this job costs and what is left on it.
+     The portal used to show no money at all: the contractor recorded a final
+     total at close-out and the customer never saw it, so "Deposit due" in the
+     status line was a demand with no number attached and every job produced the
+     same email asking how much. Shown for the whole life of the order rather than
+     only at the end, because a deposit is the FIRST thing that happens. -->
+{#if showInvoice}
+	<section class="card invoice" id="invoice">
 		<div class="card-head">
-			<h2>Documents</h2>
-			{#if !data.viewing}
-				<button
-					type="button"
-					class="add"
-					aria-label="Add document"
-					title="Add document"
-					onclick={() => fileInput?.click()}
-				>
-					+
-				</button>
+			<h2>Invoice</h2>
+			{#if invoice.status === 'settled'}
+				<span class="inv-badge paid">Paid in full</span>
+			{:else if invoice.status === 'open'}
+				<span class="inv-badge due">Balance due</span>
 			{/if}
 		</div>
 
-		<DocumentList
-			documents={data.documents}
-			empty="Nothing sent yet."
-			onopen={(d) => (preview = d)}
-		>
-			{#snippet trailing(d)}
-				{#if !data.viewing}
-					{#if d.readByContractorAt}
-						<!-- Said rather than hidden. A control that silently disappears leaves
-					     someone hunting for it; this explains why it is gone. -->
-						<span class="seen" title="Your contractor has seen this — it can’t be removed now">
-							Seen
-						</span>
-					{:else if confirmingRemoveId === d.id}
-						<form
-							method="POST"
-							action="?/withdraw"
-							use:enhance={() => {
-								return async ({ update }) => {
-									confirmingRemoveId = null;
-									await update();
-								};
-							}}
-						>
-							<input type="hidden" name="documentId" value={d.id} />
-							<button type="submit" class="withdraw danger">Remove</button>
-							<button type="button" class="withdraw" onclick={() => (confirmingRemoveId = null)}>
-								Keep
-							</button>
-						</form>
-					{:else}
-						<button
-							type="button"
-							class="withdraw"
-							aria-label="Remove {d.filename}"
-							onclick={() => (confirmingRemoveId = d.id)}
-						>
-							Remove
-						</button>
-					{/if}
-				{/if}
-			{/snippet}
-		</DocumentList>
+		<dl class="inv-rows">
+			<!-- The breakdown, when there is one. Same rows the emailed invoice
+			     carries — a customer comparing the two must not find them different. -->
+			{#each invoice.lineItems as item (item.id)}
+				<div class="inv-row">
+					<dt>{item.label}</dt>
+					<dd>{formatCents(item.amountCents)}</dd>
+				</div>
+			{/each}
+			{#if invoice.totalCents != null}
+				<div class="inv-row" class:inv-sum={invoice.itemised}>
+					<dt>{invoice.itemised ? 'Total' : 'Project total'}</dt>
+					<dd>{formatCents(invoice.totalCents)}</dd>
+				</div>
+			{/if}
+			{#each invoice.payments as p (p.id)}
+				<div class="inv-row paid-line">
+					<dt>
+						{paymentLineLabel(p)}
+						<span class="inv-when">{invoiceDate(p.receivedAt)}</span>
+					</dt>
+					<dd>−{formatCents(p.amountCents)}</dd>
+				</div>
+			{/each}
+		</dl>
 
-		{#if data.viewing}
-			<span class="pick disabled">Read-only while viewing as this customer</span>
-		{:else}
-			<!-- One form, one file input, always mounted. The confirm block renders
+		<div class="inv-balance" class:settled={invoice.status === 'settled'}>
+			{#if invoice.status === 'settled'}
+				<span>Paid in full</span>
+				<strong>{formatCents(invoice.paidCents)}</strong>
+			{:else if invoice.status === 'overpaid'}
+				<!-- Told, not hidden. Money owed BACK is the customer's business at
+				     least as much as money owed. -->
+				<span>Refund due to you</span>
+				<strong>{formatCents(-(invoice.balanceCents ?? 0))}</strong>
+			{:else if invoice.status === 'open'}
+				<span>Balance due</span>
+				<strong>{formatCents(invoice.balanceCents)}</strong>
+			{:else}
+				<span>Paid to date</span>
+				<strong>{formatCents(invoice.paidCents)}</strong>
+			{/if}
+		</div>
+
+		{#if data.order.finalNotes}
+			<p class="inv-notes">{data.order.finalNotes}</p>
+		{/if}
+
+		<!-- ADR-0010: the app records money, it never moves any. There is deliberately
+		     no "pay now" control here — the portal used to carry a quick action that
+		     looked like one and was really a message, and this card must not become
+		     the same mistake with a bigger number on it. -->
+		<p class="inv-foot">
+			Payments are arranged with {data.order.contractorName} directly. This page is a record of what has
+			been paid.
+		</p>
+	</section>
+{/if}
+
+<!-- Always rendered, never behind a toggle. It is a jump target for the rail,
+     and a section that comes and goes cannot be one. When there is nothing in it
+     the card stays slim — a heading, the add control and one line — which was the
+     real worry behind hiding it in the first place. -->
+<section class="card" id="documents">
+	<div class="card-head">
+		<h2>Documents</h2>
+		{#if !data.viewing}
+			<button
+				type="button"
+				class="add"
+				aria-label="Add document"
+				title="Add document"
+				onclick={() => fileInput?.click()}
+			>
+				+
+			</button>
+		{/if}
+	</div>
+
+	<DocumentList documents={data.documents} empty="Nothing sent yet." onopen={(d) => (preview = d)}>
+		{#snippet trailing(d)}
+			{#if !data.viewing}
+				{#if d.readByContractorAt}
+					<!-- Said rather than hidden. A control that silently disappears leaves
+					     someone hunting for it; this explains why it is gone. -->
+					<span class="seen" title="Your contractor has seen this — it can’t be removed now">
+						Seen
+					</span>
+				{:else if confirmingRemoveId === d.id}
+					<form
+						method="POST"
+						action="?/withdraw"
+						use:enhance={() => {
+							return async ({ update }) => {
+								confirmingRemoveId = null;
+								await update();
+							};
+						}}
+					>
+						<input type="hidden" name="documentId" value={d.id} />
+						<button type="submit" class="withdraw danger">Remove</button>
+						<button type="button" class="withdraw" onclick={() => (confirmingRemoveId = null)}>
+							Keep
+						</button>
+					</form>
+				{:else}
+					<button
+						type="button"
+						class="withdraw"
+						aria-label="Remove {d.filename}"
+						onclick={() => (confirmingRemoveId = d.id)}
+					>
+						Remove
+					</button>
+				{/if}
+			{/if}
+		{/snippet}
+	</DocumentList>
+
+	{#if data.viewing}
+		<span class="pick disabled">Read-only while viewing as this customer</span>
+	{:else}
+		<!-- One form, one file input, always mounted. The confirm block renders
 		     inside it, so moving between "pick" and "confirm" never swaps out the
 		     input and loses the selection. The files and names are appended by hand
 		     on submit, index-aligned, so removing one on the confirm step actually
 		     removes it — an <input type="file"> keeps everything it was given. -->
-			<form
-				method="POST"
-				action="?/upload"
-				enctype="multipart/form-data"
-				class="uploader"
-				use:enhance={({ formData }) => {
-					formData.delete('file');
-					formData.delete('filename');
-					for (const p of picked) {
-						formData.append('file', p.file);
-						formData.append('filename', p.stem);
-					}
-					uploading = true;
-					return async ({ result, update }) => {
-						await update();
-						uploading = false;
-						if (result.type === 'success') clearPick();
-					};
-				}}
-			>
-				<!-- The trigger is the + in the card header; this input is only ever
+		<form
+			method="POST"
+			action="?/upload"
+			enctype="multipart/form-data"
+			class="uploader"
+			use:enhance={({ formData }) => {
+				formData.delete('file');
+				formData.delete('filename');
+				for (const p of picked) {
+					formData.append('file', p.file);
+					formData.append('filename', p.stem);
+				}
+				uploading = true;
+				return async ({ result, update }) => {
+					await update();
+					uploading = false;
+					if (result.type === 'success') clearPick();
+				};
+			}}
+		>
+			<!-- The trigger is the + in the card header; this input is only ever
 			     opened programmatically, so it carries no visible chrome of its own. -->
-				<input
-					bind:this={fileInput}
-					type="file"
-					name="file"
-					multiple
-					accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
-					onchange={onPick}
-					class="sr-only"
-				/>
+			<input
+				bind:this={fileInput}
+				type="file"
+				name="file"
+				multiple
+				accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+				onchange={onPick}
+				class="sr-only"
+			/>
 
-				{#if picked.length > 0}
-					<!-- Confirm step: see what you picked, name each one, drop any of them,
+			{#if picked.length > 0}
+				<!-- Confirm step: see what you picked, name each one, drop any of them,
 				     then send once. Sending on pick meant a camera roll's "IMG_4821.jpg"
 				     landed on the contractor with no chance to say what it was. -->
-					<div class="confirm">
-						{#each picked as p, i (p.file.name + i)}
-							<div class="confirm-row">
-								<div class="confirm-top">
-									{#if p.previewUrl}
-										<img class="confirm-thumb" src={p.previewUrl} alt="" />
-									{:else}
-										<span class="confirm-thumb as-ext" aria-hidden="true"
-											>{p.ext.replace('.', '').toUpperCase() || 'FILE'}</span
-										>
-									{/if}
-									<div class="confirm-meta">
-										<span class="confirm-orig">{p.file.name}</span>
-										<span class="confirm-size">{formatBytes(p.file.size)}</span>
-									</div>
-									<button
-										type="button"
-										class="confirm-x"
-										aria-label="Remove {p.file.name}"
-										onclick={() => removePick(i)}
+				<div class="confirm">
+					{#each picked as p, i (p.file.name + i)}
+						<div class="confirm-row">
+							<div class="confirm-top">
+								{#if p.previewUrl}
+									<img class="confirm-thumb" src={p.previewUrl} alt="" />
+								{:else}
+									<span class="confirm-thumb as-ext" aria-hidden="true"
+										>{p.ext.replace('.', '').toUpperCase() || 'FILE'}</span
 									>
-										✕
-									</button>
+								{/if}
+								<div class="confirm-meta">
+									<span class="confirm-orig">{p.file.name}</span>
+									<span class="confirm-size">{formatBytes(p.file.size)}</span>
 								</div>
-
-								<label class="confirm-field">
-									<span>Name this document</span>
-									<span class="confirm-input">
-										<input bind:value={p.stem} maxlength="80" disabled={uploading} />
-										<span class="confirm-ext" aria-hidden="true">{p.ext}</span>
-									</span>
-								</label>
+								<button
+									type="button"
+									class="confirm-x"
+									aria-label="Remove {p.file.name}"
+									onclick={() => removePick(i)}
+								>
+									✕
+								</button>
 							</div>
-						{/each}
 
-						<div class="confirm-actions">
-							<button type="button" class="btn ghost" onclick={clearPick} disabled={uploading}>
-								Cancel
-							</button>
-							<button type="submit" class="btn primary" disabled={uploading}>
-								{uploading
-									? 'Sending…'
-									: picked.length === 1
-										? 'Send'
-										: `Send ${picked.length} files`}
-							</button>
+							<label class="confirm-field">
+								<span>Name this document</span>
+								<span class="confirm-input">
+									<input bind:value={p.stem} maxlength="80" disabled={uploading} />
+									<span class="confirm-ext" aria-hidden="true">{p.ext}</span>
+								</span>
+							</label>
 						</div>
-					</div>
-				{/if}
-			</form>
-		{/if}
+					{/each}
 
-		<!-- Both halves of a partial batch are said out loud: what went and what did
+					<div class="confirm-actions">
+						<button type="button" class="btn ghost" onclick={clearPick} disabled={uploading}>
+							Cancel
+						</button>
+						<button type="submit" class="btn primary" disabled={uploading}>
+							{uploading
+								? 'Sending…'
+								: picked.length === 1
+									? 'Send'
+									: `Send ${picked.length} files`}
+						</button>
+					</div>
+				</div>
+			{/if}
+		</form>
+	{/if}
+
+	<!-- Both halves of a partial batch are said out loud: what went and what did
 	     not, by name. Silently dropping a file lets someone believe they sent it. -->
-		{#if pickError}
-			<p class="note error">{pickError}</p>
-		{:else if form?.upload && form?.message}
-			<p class="note" class:error={form.refused}>{form.message}</p>
-		{/if}
-	</section>
-{/if}
+	{#if pickError}
+		<p class="note error">{pickError}</p>
+	{:else if form?.upload && form?.message}
+		<p class="note" class:error={form.refused}>{form.message}</p>
+	{/if}
+</section>
 
 <!-- Read and write in one place. The thread used to be a card here and the
      composer a floating button, which meant one conversation was two different
@@ -503,65 +641,6 @@
 		--send-fg: var(--accent-fg);
 	}
 
-	/* The message signal: a proper notification control opposite the project title,
-	   on the page's own surface rather than on the hero's teal slab.
-
-	   Explicit background and colour because it is an <a> — an unstyled one falls
-	   back to the browser's blue, which is how an earlier attempt ended up as a
-	   blue hyperlink sitting on the hero. */
-	.msg-jump {
-		position: relative;
-		flex-shrink: 0;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		/* 44px: this is the one control on the page and it is on a phone. */
-		width: 2.75rem;
-		height: 2.75rem;
-		border-radius: 14px;
-		border: 1px solid var(--line-strong);
-		background: var(--surface);
-		color: var(--fg-muted);
-		text-decoration: none;
-		box-shadow: var(--card-shadow);
-	}
-	.msg-jump:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.msg-jump-icon {
-		width: 1.35rem;
-		height: 1.35rem;
-		display: block;
-	}
-	/* The documents twin of the message control. Same size and shape — they sit
-	   next to each other and must not read as two different kinds of thing. */
-	.msg-jump.as-docs {
-		font-family: inherit;
-		cursor: pointer;
-	}
-	.msg-jump.as-docs.on {
-		border-color: var(--accent);
-		color: var(--accent);
-		background: var(--accent-soft);
-	}
-	:global(:root[data-theme='dark']) .msg-jump.as-docs.on {
-		background: color-mix(in srgb, var(--accent) 18%, transparent);
-	}
-	/* A plain count, NOT a badge: nothing here is waiting on anyone, and the
-	   research is unanimous that badging everything is how a badge stops meaning
-	   anything. It sits inline under the icon rather than overlapping a corner. */
-	.doc-count {
-		position: absolute;
-		bottom: 0.15rem;
-		right: 0.35rem;
-		font-size: 0.62rem;
-		font-weight: 800;
-		line-height: 1;
-		color: inherit;
-		opacity: 0.75;
-	}
-
 	h1 {
 		margin: 0;
 		font-size: 1.45rem;
@@ -573,7 +652,7 @@
 	.kicker {
 		margin: 0;
 		font-size: 0.78rem;
-		font-weight: 700;
+		font-weight: 400;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--fg-muted);
@@ -602,7 +681,7 @@
 	}
 	.hero-label {
 		font-size: 0.64rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.12em;
 		color: var(--hero-dim);
@@ -616,16 +695,141 @@
 		text-underline-offset: 0.28em;
 		text-decoration-color: var(--hero-rule);
 	}
-	.hero-act {
-		margin: -0.35rem 0 0;
-		font-size: 0.82rem;
-		font-weight: 600;
-		color: var(--hero-dim);
-	}
 	.hero-state {
 		font-size: 1.1rem;
-		font-weight: 800;
+		font-weight: 700;
 		letter-spacing: -0.01em;
+	}
+
+	/* ---------------------------------------------------------- Over to you
+	   A panel INSIDE the hero rather than a card under it. Everything below the
+	   hero on this page is reporting — where the job is, what was sent, what was
+	   said — and an ask parked among those reads as one more thing to catch up on
+	   rather than as the one thing the customer has to do.
+
+	   It takes the hero's inset well and a bright rim off the hero's own rule, so
+	   it reads as raised out of the slab in both themes without either one having
+	   a colour of its own. */
+	.todo {
+		display: grid;
+		gap: 0.5rem;
+		margin: 0.1rem 0 0;
+		padding: 0.7rem 0.8rem;
+		border-radius: var(--radius-card);
+		border: 1px solid var(--hero-rule);
+		border-left: 3px solid var(--hero-fg);
+		background: var(--hero-inset);
+	}
+	/* Overdue, or the contractor has said the job is held up. The rim goes to full
+	   strength rather than changing hue: on a saturated slab a second colour does
+	   not read, and this is emphasis on something already visible, not a new
+	   status. */
+	.todo.urgent {
+		box-shadow: 0 0 0 1px var(--hero-fg);
+	}
+	.todo-lede {
+		margin: 0;
+		font-size: 0.92rem;
+		font-weight: 700;
+		color: var(--hero-fg);
+		line-height: 1.4;
+	}
+	.todo-pay {
+		margin: 0;
+		display: flex;
+		align-items: baseline;
+		gap: 0.35rem;
+		font-size: 0.82rem;
+		color: var(--hero-dim);
+	}
+	.todo-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.4rem;
+	}
+	.todo-item {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.5rem 0.55rem;
+		border-radius: var(--radius-control);
+		border: 1px solid var(--hero-rule);
+		background: color-mix(in srgb, var(--hero-fg) 8%, transparent);
+	}
+	.todo-text {
+		flex: 1;
+		min-width: 0;
+		display: grid;
+		gap: 0.15rem;
+	}
+	.todo-title {
+		font-size: 0.9rem;
+		font-weight: 700;
+		color: var(--hero-fg);
+		overflow-wrap: anywhere;
+	}
+	.todo-detail {
+		font-size: 0.82rem;
+		line-height: 1.5;
+		color: var(--hero-dim);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.todo-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.35rem;
+	}
+	/* Two small facts about one ask, so they wear the same chip and differ only in
+	   weight — a date and a warning in two different shapes made a one-line task
+	   look like three things. */
+	.todo-hold,
+	.todo-due {
+		padding: 0.1rem 0.4rem;
+		border-radius: var(--radius-pill);
+		border: 1px solid var(--hero-rule);
+		font-size: 0.68rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--hero-dim);
+	}
+	.todo-hold,
+	.todo-due.late {
+		border-color: var(--hero-fg);
+		color: var(--hero-fg);
+	}
+	.todo-done-form {
+		flex: none;
+		display: flex;
+	}
+	/* The only button on the hero, and the only one the customer needs: what the
+	   panel is FOR is being able to say a thing is done. Filled with the hero's
+	   own foreground so it is unmistakably the action here — everything else on
+	   this slab is text. */
+	.todo-done {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.4rem 0.75rem;
+		border: none;
+		border-radius: var(--radius-pill);
+		background: var(--hero-fg);
+		color: var(--hero-tick);
+		font-family: inherit;
+		font-size: 0.8rem;
+		font-weight: 800;
+		cursor: pointer;
+	}
+	.todo-done:hover {
+		opacity: 0.88;
+	}
+	.todo-done:focus-visible {
+		outline: 2px solid var(--hero-fg);
+		outline-offset: 2px;
 	}
 
 	/* ------------------------------------------------------------- Progress
@@ -679,7 +883,7 @@
 		border: 2px solid var(--hero-rule);
 		background: transparent;
 		font-size: 0.62rem;
-		font-weight: 900;
+		font-weight: 500;
 		line-height: 1;
 		color: transparent;
 	}
@@ -696,7 +900,7 @@
 	}
 	.step-label {
 		font-size: 0.66rem;
-		font-weight: 700;
+		font-weight: 400;
 		text-align: center;
 		color: var(--hero-dim);
 		overflow-wrap: anywhere;
@@ -735,7 +939,7 @@
 	}
 	.hero-when {
 		font-size: 0.68rem;
-		font-weight: 700;
+		font-weight: 400;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--hero-dim);
@@ -771,6 +975,120 @@
 	.history {
 		scroll-margin-top: 5rem;
 	}
+	/* ------------------------------------------------------------------ Invoice
+	   The customer's copy of the money. Same figures as the contractor's card and
+	   the emailed invoice — all three read one server-computed summary — drawn in
+	   the portal's own accent rather than the contractor's yellow, because this is
+	   the customer's surface. */
+	.invoice .inv-rows {
+		margin: 0;
+		display: grid;
+		gap: 0.1rem;
+	}
+	.inv-row {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.45rem 0;
+		border-bottom: 1px solid var(--line);
+		font-size: 0.92rem;
+	}
+	.inv-row dt {
+		color: var(--fg);
+		min-width: 0;
+	}
+	.inv-row dd {
+		margin: 0;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	/* A payment is a credit — muted, so the eye runs past it to the balance. */
+	.inv-row.paid-line dt,
+	.inv-row.paid-line dd {
+		color: var(--fg-muted);
+	}
+	.inv-when {
+		display: block;
+		font-size: 0.76rem;
+		color: var(--fg-muted);
+	}
+	/* The line the breakdown adds up to, ruled off from the rows above it so a
+	   customer counting them can see where the sum starts. */
+	.inv-row.inv-sum {
+		border-top: 2px solid var(--line-strong);
+		font-weight: 500;
+	}
+	/* The one figure this card exists to report, set as a headline rather than as
+	   another row of the table above it — matching the contractor's own invoice
+	   card, so the two sides of one invoice look like one invoice. */
+	.invoice .inv-balance {
+		display: grid;
+		gap: 0.15rem;
+		margin-top: 0.35rem;
+		padding: 0.7rem 0.85rem;
+		border-radius: 12px;
+		border: 1px solid var(--accent);
+		background: var(--accent-soft);
+	}
+	.invoice .inv-balance span {
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.07em;
+		color: var(--accent-deep);
+	}
+	.invoice .inv-balance strong {
+		font-size: 1.9rem;
+		font-weight: 700;
+		line-height: 1.05;
+		letter-spacing: -0.02em;
+		font-variant-numeric: tabular-nums;
+		color: var(--fg);
+	}
+	/* Settled is the good outcome and says so in green rather than in the accent
+	   the portal uses for "you still owe us something". */
+	.invoice .inv-balance.settled {
+		border-color: var(--ok-line);
+		background: var(--ok-bg);
+	}
+	.invoice .inv-balance.settled span,
+	.invoice .inv-balance.settled strong {
+		color: var(--ok-fg);
+	}
+	.inv-badge {
+		font-size: 0.68rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		padding: 0.15rem 0.55rem;
+		border-radius: 999px;
+		white-space: nowrap;
+	}
+	.inv-badge.paid {
+		background: var(--ok-bg);
+		color: var(--ok-fg);
+		border: 1px solid var(--ok-line);
+	}
+	.inv-badge.due {
+		background: var(--accent-soft);
+		color: var(--accent-deep);
+		border: 1px solid var(--accent);
+	}
+	.inv-notes {
+		margin: 0;
+		font-size: 0.88rem;
+		line-height: 1.5;
+		color: var(--fg-muted);
+		white-space: pre-wrap;
+	}
+	.inv-foot {
+		margin: 0;
+		font-size: 0.78rem;
+		line-height: 1.45;
+		color: var(--fg-muted);
+	}
+
 	.card-head {
 		display: flex;
 		align-items: center;
@@ -780,14 +1098,14 @@
 	h2 {
 		margin: 0;
 		font-size: 0.72rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.07em;
 		color: var(--fg-muted);
 	}
 	.pill {
 		font-size: 0.68rem;
-		font-weight: 700;
+		font-weight: 500;
 		padding: 0.15rem 0.5rem;
 		border-radius: 999px;
 		background: var(--accent-soft);
@@ -814,7 +1132,7 @@
 		color: var(--fg-muted);
 		font-family: inherit;
 		font-size: 0.72rem;
-		font-weight: 700;
+		font-weight: 500;
 		cursor: pointer;
 		white-space: nowrap;
 	}
@@ -912,7 +1230,7 @@
 		background: var(--accent-soft);
 		color: var(--accent-deep);
 		font-size: 0.6rem;
-		font-weight: 900;
+		font-weight: 600;
 	}
 	:global(:root[data-theme='dark']) .confirm-thumb.as-ext {
 		background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -953,7 +1271,7 @@
 		display: grid;
 		gap: 0.3rem;
 		font-size: 0.72rem;
-		font-weight: 800;
+		font-weight: 400;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--fg-muted);
@@ -991,7 +1309,7 @@
 	.confirm-ext {
 		padding-right: 0.65rem;
 		font-size: 0.85rem;
-		font-weight: 700;
+		font-weight: 400;
 		text-transform: none;
 		letter-spacing: normal;
 		color: var(--fg-muted);
@@ -1008,7 +1326,7 @@
 		border-radius: 10px;
 		font-family: inherit;
 		font-size: 0.88rem;
-		font-weight: 700;
+		font-weight: 600;
 		cursor: pointer;
 	}
 	.btn.ghost {
@@ -1052,7 +1370,7 @@
 		color: var(--hero-dim);
 		font-family: inherit;
 		font-size: 0.75rem;
-		font-weight: 800;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		cursor: pointer;
@@ -1127,7 +1445,7 @@
 		border: 2px solid var(--hero-rule);
 		color: var(--hero-fg);
 		font-size: 0.65rem;
-		font-weight: 900;
+		font-weight: 500;
 		/* Sits on top of the rail rather than beside it. */
 		z-index: 1;
 	}
@@ -1162,7 +1480,7 @@
 	}
 	.t-when {
 		font-size: 0.66rem;
-		font-weight: 800;
+		font-weight: 400;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		color: var(--hero-dim);
@@ -1213,14 +1531,11 @@
 			text-underline-offset: 0.28em;
 			text-decoration-color: var(--hero-rule);
 		}
-		.hero-act {
-			margin: -0.35rem 0 0;
-			font-size: 0.82rem;
-			font-weight: 600;
-			color: var(--hero-dim);
-		}
 		.hero-state {
 			font-size: 1.2rem;
+		}
+		.todo-lede {
+			font-size: 0.98rem;
 		}
 		.card {
 			padding: 1rem 1.15rem;

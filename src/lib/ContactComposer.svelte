@@ -499,8 +499,8 @@
 	.composer-subject:focus,
 	.composer-text:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
 	.sig-note {
@@ -539,12 +539,12 @@
 		cursor: pointer;
 	}
 	.devsend.ok {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.devsend.ok:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.devsend.fail {
 		background: none;
@@ -658,8 +658,8 @@
 	   stays light in both themes. */
 	.chip.sel,
 	.chip.sel:hover {
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		box-shadow: 0 1px 3px rgba(27, 31, 36, 0.18);
 	}
 	.star {
@@ -667,8 +667,10 @@
 		color: #b78900;
 		font-size: 0.75rem;
 	}
+	/* The star sits ON the selected chip's accent fill, so it takes the fill's own
+	   label colour rather than a pinned ink. */
 	.chip.sel .star {
-		color: #14171c;
+		color: var(--on-brand);
 	}
 	.foot {
 		display: flex;
@@ -686,8 +688,8 @@
 		padding: 0.5rem 1.1rem;
 		border: none;
 		border-radius: 10px;
-		background: var(--yellow);
-		color: var(--on-yellow);
+		background: var(--brand);
+		color: var(--on-brand);
 		font-weight: 700;
 		font-size: 0.88rem;
 		cursor: pointer;
@@ -695,7 +697,7 @@
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.send:hover:not(:disabled) {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.send:disabled {
 		opacity: 0.45;

@@ -46,8 +46,7 @@ function readProfile(form: FormData) {
 		licenseExpiresAt: form.get('licenseExpiresAt')?.toString(),
 		insuranceCarrier: form.get('insuranceCarrier')?.toString(),
 		insuranceExpiresAt: form.get('insuranceExpiresAt')?.toString(),
-		notes: form.get('notes')?.toString(),
-		tags: form.get('tags')?.toString()
+		notes: form.get('notes')?.toString()
 	};
 }
 

@@ -5,9 +5,9 @@
 	import { invalidateAll } from '$app/navigation';
 	import { formatPhone, tierLabel, TRADES, type SubcontractorTier } from '$lib/crm';
 	import AlphaRail from '$lib/AlphaRail.svelte';
+	import { smoothScrollIntoView } from '$lib/smooth-scroll';
 	import ContactPanel from '$lib/ContactPanel.svelte';
 	import IdScanner from '$lib/IdScanner.svelte';
-	import TagPicker from '$lib/TagPicker.svelte';
 	import type { SubcontractorScanFields } from '$lib/id-scan';
 	import type { PageData } from './$types';
 
@@ -67,11 +67,13 @@
 			}));
 	});
 	const presentLetters = $derived(new Set(groups.map((g) => g.letter)));
+	/** The rail's own element, so a touch on it never reads as "user took over". */
+	let railEl: HTMLElement | undefined = $state();
 	// In company mode several sections can share a letter — jump to the first.
 	function jumpTo(letter: string) {
 		const target = groups.find((g) => g.letter === letter);
-		if (target)
-			document.getElementById(`sub-sec-${target.key}`)?.scrollIntoView({ block: 'start' });
+		const el = target ? document.getElementById(`sub-sec-${target.key}`) : null;
+		if (el) smoothScrollIntoView(el, { offset: 84, ignore: railEl });
 	}
 
 	// Seeded once per page load (untrack: closing it must not spring back open).
@@ -437,7 +439,7 @@
      between two apps. Colors stay tokenised rather than copied across as hex,
      which is the one place the two files differ on purpose. -->
 <div class="page">
-	<div class="wrap">
+	<div class="wrap page-shell">
 		<header class="head">
 			<h1 class="page-title">Subcontractors</h1>
 			<!-- Only once there is something to count. "0 subcontractors" beside the
@@ -509,7 +511,15 @@
 						<h2 class="dir-label">{group.label}</h2>
 						<div class="grid">
 							{#each group.items as s (s.id)}
-								<article class="card" class:trusted={s.tier === 'trusted'}>
+								<!-- An open profile takes the whole row. Left as one column of a
+								     multi-column grid it would stretch every collapsed sibling
+								     beside it to its own height, so opening one partner would
+								     blow up the two next to it. -->
+								<article
+									class="card"
+									class:trusted={s.tier === 'trusted'}
+									class:span-all={expandedId === s.id}
+								>
 									<div class="card-top">
 										<button
 											type="button"
@@ -539,8 +549,8 @@
 												{#if s.tier === 'trusted'}{@render trustedMedal(s)}{/if}
 											</div>
 											<div class="meta">{s.company ?? s.trade ?? 'No company set'}</div>
-											<!-- Tier and tags live in the expanded profile only — on the collapsed
-										     card they crowded the one line that answers "who is this". -->
+											<!-- Tier lives in the expanded profile only — on the collapsed card it
+										     crowded the one line that answers "who is this". -->
 										</div>
 										<div class="card-actions">
 											<!-- Message the subcontractor (email / text / call) -->
@@ -704,9 +714,6 @@
 																value={editPrefill[s.id]?.address ?? s.address ?? ''}
 															/></label
 														>
-														<div class="wide">
-															<TagPicker value={s.tags} />
-														</div>
 														<label class="wide"
 															>Notes<textarea name="notes" rows="2">{s.notes ?? ''}</textarea
 															></label
@@ -928,7 +935,7 @@
 																</div>
 																<div class="fact">
 																	<dt>Tier</dt>
-																	<!-- The tag the collapsed card no longer carries, spelled out in
+																	<!-- What the collapsed card no longer carries, spelled out in
 																     full where the reader came looking for it. -->
 																	<dd>
 																		<span class="chip {tierChip(s.tier)}">{label(s.tier)}</span>
@@ -982,17 +989,6 @@
 																</div>
 															</dl>
 														</div>
-
-														{#if s.tags.length}
-															<div class="fact-group wide">
-																<div class="fact-head">
-																	<span class="fact-icon" aria-hidden="true">🏷</span>Tags
-																</div>
-																<div class="tag-chips">
-																	{#each s.tags as t (t)}<span class="tag-chip">{t}</span>{/each}
-																</div>
-															</div>
-														{/if}
 													</div>
 												{:else if detailTab === 'orders'}
 													<div class="assigned">
@@ -1075,7 +1071,7 @@
 				{/each}
 			</div>
 			{#if data.subcontractors.length > 0}
-				<AlphaRail present={presentLetters} onjump={jumpTo} />
+				<AlphaRail present={presentLetters} onjump={jumpTo} onrail={(el) => (railEl = el)} />
 			{/if}
 		</div>
 	</div>
@@ -1190,9 +1186,6 @@
 						<span class="lbl">Insurance expires</span>
 						<input name="insuranceExpiresAt" type="date" />
 					</label>
-					<div>
-						<TagPicker />
-					</div>
 				</div>
 				<div class="row-actions end">
 					<button class="btn ghost" type="button" onclick={() => (showAdd = false)}>Cancel</button>
@@ -1332,14 +1325,12 @@
 		background: var(--surface-sunken);
 		min-height: 100%;
 	}
+	/* Width, gutters and gap come from `.page-shell` (app.css), so the directory
+	   widens with every other contractor page instead of holding a column of its
+	   own. The gap it sets is still what puts the space under the title, so the
+	   search row below carries no margin of its own to keep in sync. */
 	.wrap {
-		max-width: 860px;
-		margin: 0 auto;
-		padding: 1.25rem 1rem 2rem;
-		/* The gap sets the space under the title, so the search row below carries
-		   no margin of its own to keep in sync. */
 		display: grid;
-		gap: 1rem;
 	}
 	.head {
 		display: flex;
@@ -1435,8 +1426,8 @@
 	}
 	.search:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
 	.add-btn {
@@ -1445,9 +1436,15 @@
 		height: 2.9rem;
 		font-size: 1.75rem;
 	}
+	/* Partner cards flow into as many columns as fit. `min()` against 100% keeps a
+	   single column below the card's own minimum rather than overflowing it. */
 	.grid {
 		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(23rem, 100%), 1fr));
 		gap: 0.9rem;
+		/* Collapsed rows are short; without this every card in a row grows to match
+		   the tallest one in it. */
+		align-items: start;
 	}
 	/* Global `.card` provides surface styling; the card's own children supply
 	   their padding, so cancel the global padding here. */
@@ -1467,7 +1464,7 @@
 			box-shadow 0.15s ease;
 	}
 	.card.trusted {
-		border-left-color: var(--yellow);
+		border-left-color: var(--brand);
 	}
 	.card:hover {
 		border-color: var(--line-strong);
@@ -1476,7 +1473,7 @@
 			0 8px 22px rgba(27, 31, 36, 0.1);
 	}
 	.card.trusted:hover {
-		border-left-color: var(--yellow-deep);
+		border-left-color: var(--brand-deep);
 	}
 	:global(:root[data-theme='dark']) .card:hover {
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
@@ -1559,14 +1556,10 @@
 	.card-actions .icon-btn {
 		width: 2.1rem;
 		height: 2.1rem;
-		font-size: 1.05rem;
+		font-size: 1.3rem;
 	}
-	/* The profile (ID-card) button reads as "active" while its detail is open. */
-	.card-actions .icon-btn.on {
-		background: #ece7fb;
-		border-color: #cdbff0;
-		color: #4b2fa8;
-	}
+	/* The profile (ID-card) button reads as "active" while its detail is open —
+	   that is `.icon-btn.on` in app.css, brand-driven in both themes. */
 	.chip {
 		font-size: 0.68rem;
 		font-weight: 700;
@@ -1750,9 +1743,6 @@
 		color: var(--fg-muted);
 		font-weight: 500;
 	}
-	.profile .tag-chips {
-		padding: 0.55rem 0.7rem;
-	}
 	/* Insurance expiry carries its own urgency — the only value in the pane that
 	   earns a pill. Colors pinned rather than tokenised: these are status
 	   reds/ambers/greens, not surfaces. */
@@ -1875,7 +1865,7 @@
 	}
 	.scan-btn:hover {
 		border-style: solid;
-		border-color: var(--yellow-deep);
+		border-color: var(--brand-deep);
 		color: inherit;
 	}
 	.fields {
@@ -1919,8 +1909,8 @@
 	.fields select:focus,
 	.fields textarea:focus {
 		outline: none;
-		border-color: var(--yellow-deep);
-		box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.22);
+		border-color: var(--brand-deep);
+		box-shadow: 0 0 0 3px var(--brand-glow);
 		background: var(--field-bg-focus);
 	}
 	.fields input:disabled {
@@ -2078,12 +2068,12 @@
 		background: var(--surface-sunken);
 	}
 	.btn.primary {
-		background: var(--yellow);
+		background: var(--brand);
 		border-color: transparent;
-		color: var(--on-yellow);
+		color: var(--on-brand);
 	}
 	.btn.primary:hover {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.btn.danger {
 		background: #cf222e;
@@ -2127,11 +2117,11 @@
 	.empty-cta {
 		padding: 0.55rem 1.1rem;
 		border-radius: 10px;
-		border: 1px solid var(--yellow-deep);
-		background: var(--yellow);
+		border: 1px solid var(--brand-deep);
+		background: var(--brand);
 		/* Yellow is light in both themes, so its text is pinned dark rather than
 		   following a token that flips. */
-		color: var(--on-yellow);
+		color: var(--on-brand);
 		font-family: inherit;
 		font-size: 0.9rem;
 		font-weight: 800;
@@ -2139,7 +2129,7 @@
 		box-shadow: var(--pop-shadow-sm);
 	}
 	.empty-cta:hover {
-		background: var(--yellow-deep);
+		background: var(--brand-deep);
 	}
 	.modal-backdrop {
 		position: fixed;
@@ -2262,11 +2252,6 @@
 	:global(:root[data-theme='dark']) .hint {
 		color: var(--fg-muted);
 	}
-	:global(:root[data-theme='dark']) .tag {
-		background: var(--surface-sunken);
-		border-color: var(--line);
-		color: var(--fg);
-	}
 	:global(:root[data-theme='dark']) .menu {
 		background: var(--surface);
 		border-color: var(--line);
@@ -2297,19 +2282,14 @@
 		background: linear-gradient(135deg, #2a3038, #20242b);
 		color: #c3c9d4;
 	}
-	:global(:root[data-theme='dark']) .card-actions .icon-btn.on {
-		background: #2e2a44;
-		border-color: #4a3f6b;
-		color: #cabff5;
-	}
 
 	/* Shown in the add modal when a trial has run out of subcontractor slots. */
 	.limit-note {
 		margin: 0;
 		padding: 0.6rem 0.75rem;
 		border-radius: 8px;
-		border: 1.5px solid var(--yellow-deep);
-		background: color-mix(in srgb, var(--yellow) 18%, var(--surface));
+		border: 1.5px solid var(--brand-deep);
+		background: color-mix(in srgb, var(--brand) 18%, var(--surface));
 		color: var(--fg);
 		font-size: 0.83rem;
 		line-height: 1.5;
