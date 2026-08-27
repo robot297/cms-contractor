@@ -1,4 +1,22 @@
 import { test, expect, clickUntil, signUpContractor } from './fixtures/app';
+import type { Page } from '@playwright/test';
+
+/**
+ * Put this contractor's phone navigation back in the top bar.
+ *
+ * The bottom tab bar is the default now, and with the tabs carrying navigation
+ * the hamburger is reduced to sign-out — so the menu these tests are about only
+ * exists once somebody has chosen Top. Signing up and opening the menu used to
+ * be enough; it now has to say which of the two layouts it is testing.
+ */
+async function chooseTopBar(page: Page): Promise<void> {
+	await page.goto('/contractor/settings?tab=workspace');
+	const top = page.locator('label.nav-choice').filter({ hasText: 'Top bar' });
+	await expect(async () => {
+		await top.click();
+		await expect(page.locator('nav.bottombar')).toHaveCount(0, { timeout: 1_000 });
+	}).toPass();
+}
 
 /**
  * The nav chrome. Small surface, but it is on every screen — a menu that will
@@ -10,6 +28,7 @@ test.describe('mobile navigation', () => {
 
 	test('the menu opens, and closes again when you tap off it', async ({ page }) => {
 		await signUpContractor(page);
+		await chooseTopBar(page);
 
 		const menu = page.locator('.nav-collapse.open');
 		await clickUntil(page.getByRole('button', { name: 'Open menu' }), menu);
@@ -24,6 +43,7 @@ test.describe('mobile navigation', () => {
 
 	test('the X still closes it', async ({ page }) => {
 		await signUpContractor(page);
+		await chooseTopBar(page);
 
 		const menu = page.locator('.nav-collapse.open');
 		await clickUntil(page.getByRole('button', { name: 'Open menu' }), menu);
@@ -33,6 +53,7 @@ test.describe('mobile navigation', () => {
 
 	test('following a link closes it too', async ({ page }) => {
 		await signUpContractor(page);
+		await chooseTopBar(page);
 
 		const menu = page.locator('.nav-collapse.open');
 		await clickUntil(page.getByRole('button', { name: 'Open menu' }), menu);
@@ -55,25 +76,22 @@ test.describe('mobile navigation', () => {
 test.describe('navigation placement', () => {
 	test.use({ viewport: { width: 480, height: 900 } });
 
-	test('a contractor can move the phone navigation to the foot of the screen', async ({ page }) => {
+	test('a new contractor gets the bottom bar, and can move it back to the top', async ({
+		page
+	}) => {
 		await signUpContractor(page);
 
-		// Top bar is the default, so there is no tab bar to begin with.
-		await expect(page.locator('nav.bottombar')).toHaveCount(0);
+		// The DEFAULT, not a setting they had to find: the contractor app and the
+		// customer portal both put a phone's navigation at the foot of the screen,
+		// and the two halves of one product disagreeing about that is something you
+		// notice every time you use the view switcher.
+		const bar = page.locator('nav.bottombar');
+		await expect(bar).toBeVisible();
+		await expect(bar.getByRole('link', { name: 'Orders' })).toBeVisible();
 
 		// The settings sections are real links with their own URLs, so the tab is
 		// reachable directly rather than by clicking through to it.
 		await page.goto('/contractor/settings?tab=workspace');
-
-		// The LABEL, because the radio inside it is `.sr-only` and has no box of its
-		// own to press. Retried against the effect rather than clicked once: the
-		// choice saves from an `onchange` handler, and before hydration the label is
-		// visible, enabled, and completely inert — a first click checks the radio in
-		// the DOM, posts nothing, and is then undone the moment Svelte attaches and
-		// re-asserts `checked` from its own state.
-		const bar = page.locator('nav.bottombar');
-		await clickUntil(page.locator('label.nav-choice').filter({ hasText: 'Bottom bar' }), bar);
-		await expect(bar.getByRole('link', { name: 'Orders' })).toBeVisible();
 
 		// The page's foot clears the bar rather than running under it. The
 		// reservation was a hand-totalled constant that had drifted from the bar's
@@ -94,17 +112,24 @@ test.describe('navigation placement', () => {
 		// And the text is not pressed against it either.
 		expect(clearance.textToNav).toBeGreaterThan(24);
 
-		// And it survives a reload, which is what says the choice reached the
-		// database rather than only the component that drew the radio.
-		await page.reload();
-		await expect(page.locator('nav.bottombar')).toBeVisible();
-
-		// Back again, so the preference is a switch and not a one-way door.
-		await page.goto('/contractor/settings?tab=workspace');
+		// Moving it to the top takes the bar away. The LABEL, because the radio
+		// inside it is `.sr-only` and has no box of its own to press — and retried
+		// against the effect rather than clicked once, since the choice saves from
+		// an `onchange` handler and before hydration the label is visible, enabled
+		// and completely inert.
 		const top = page.locator('label.nav-choice').filter({ hasText: 'Top bar' });
 		await expect(async () => {
 			await top.click();
 			await expect(page.locator('nav.bottombar')).toHaveCount(0, { timeout: 1_000 });
 		}).toPass();
+
+		// And it survives a reload, which is what says the choice reached the
+		// database rather than only the component that drew the radio.
+		await page.reload();
+		await expect(page.locator('nav.bottombar')).toHaveCount(0);
+
+		// Back again, so the preference is a switch and not a one-way door.
+		await page.goto('/contractor/settings?tab=workspace');
+		await clickUntil(page.locator('label.nav-choice').filter({ hasText: 'Bottom bar' }), bar);
 	});
 });

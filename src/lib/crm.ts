@@ -439,6 +439,21 @@ export function isFollowUpDays(value: number): value is FollowUpDays {
 export const NAV_PLACEMENTS = ['top', 'bottom'] as const;
 export type NavPlacement = (typeof NAV_PLACEMENTS)[number];
 
+/**
+ * Where a contractor's phone navigation sits until they say otherwise.
+ *
+ * BOTTOM, matching the customer portal — which has always put its tabs at the
+ * foot of the screen and never offered the other option. The two halves of one
+ * product disagreeing about where navigation lives is a thing a contractor
+ * notices every time they use the view switcher, and the reach is the argument
+ * either way: a phone is held low and the thumb is nowhere near the top corner.
+ *
+ * Named rather than repeated so the column default, the layout's fallback and
+ * the settings page's fallback cannot drift apart — they were three copies of
+ * the string 'top'.
+ */
+export const DEFAULT_NAV_PLACEMENT: NavPlacement = 'bottom';
+
 export function isNavPlacement(value: unknown): value is NavPlacement {
 	return (NAV_PLACEMENTS as readonly unknown[]).includes(value);
 }

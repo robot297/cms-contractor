@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { afterNavigate } from '$app/navigation';
@@ -118,6 +118,73 @@
 	 * arriving there already answers "why has nothing happened".
 	 */
 	const tab = $derived<TabId>(tabOverride ?? (data.owesReply ? 'messages' : 'history'));
+
+	/**
+	 * On a phone, Messages is a screen rather than a section.
+	 *
+	 * The strip switches which pane is under it, and nothing else moved: you
+	 * tapped Messages from halfway down an order and the conversation opened
+	 * below the fold, with the newest message at the bottom of a 26rem box and
+	 * the reply field below THAT. Two scrolls to reach the thing you pressed the
+	 * tab for.
+	 *
+	 * So the strip goes to the top of the screen and the pane takes the rest of
+	 * it: heading, thread, composer, one screenful, nothing to scroll to. The
+	 * height is measured rather than written as a `calc()` of hand-totalled
+	 * chrome — the strip wraps to two rows at some widths and the bottom tab bar
+	 * is a setting, so both are only knowable at runtime.
+	 */
+	let tabsEl = $state<HTMLDivElement | null>(null);
+	/** The measured height, or null where the pane should size to its content. */
+	let messagesFill = $state<string | null>(null);
+	/** Below this the strip is on screen and one pane shows at a time. */
+	const TABBED_MAX = 1100;
+
+	function fitMessagesPane() {
+		const strip = tabsEl;
+		if (!strip || window.innerWidth >= TABBED_MAX) {
+			messagesFill = null;
+			return;
+		}
+		// The fixed bottom bar is optional (Settings → Navigation), so ask the page
+		// whether there is one rather than assuming its height either way.
+		const bottomBar = document.querySelector('nav.bottombar');
+		const room =
+			window.innerHeight -
+			strip.getBoundingClientRect().height -
+			(bottomBar?.getBoundingClientRect().height ?? 0) -
+			// The gap under the strip, and a little air under the composer.
+			34;
+		// Too short to be worth pinning — a landscape phone would get a two-line
+		// thread. Below the floor the pane goes back to sizing to its content.
+		messagesFill = room >= 280 ? `${Math.round(room)}px` : null;
+	}
+
+	$effect(() => {
+		if (!tabsEl) return;
+		fitMessagesPane();
+		// The strip's own height changes when it wraps; the window's when the phone
+		// turns or the URL bar collapses.
+		const observer = new ResizeObserver(fitMessagesPane);
+		observer.observe(tabsEl);
+		window.addEventListener('resize', fitMessagesPane);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener('resize', fitMessagesPane);
+		};
+	});
+
+	/**
+	 * Switching tabs puts the strip at the top of the screen, so the pane it just
+	 * switched to is the screen. Only where the strip is doing any switching —
+	 * above 1100px every pane is on screen at once and scrolling the page on a
+	 * click nobody made would be a surprise.
+	 */
+	function pickTab(id: TabId) {
+		tabOverride = id;
+		if (window.innerWidth >= TABBED_MAX) return;
+		tick().then(() => tabsEl?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+	}
 	// Only one of these carries a number, and only when it means something.
 	//
 	// A badge on a tab reads as a notification — as "there is something here for
@@ -146,6 +213,15 @@
 	]);
 	/** Files open in place under the header, the way the customer does. */
 	let filesOpen = $state(false);
+
+	/**
+	 * Whether the order card is showing everything or just the glanceable half.
+	 *
+	 * Closed by default: a job is opened to DO something to it, and the scope, the
+	 * site address, the on-site date and the file count are reference — four rows
+	 * between the header and the work, scrolled past on every visit.
+	 */
+	let detailsOpen = $state(false);
 
 	// ----------------------------------------------------------------- Asks
 	// Things needed FROM the customer. Before this, the only ask the product could
@@ -254,6 +330,7 @@
 	});
 
 	const order = $derived(data.order);
+
 	/**
 	 * The exact sentence the customer is being shown, previewed here.
 	 *
@@ -676,137 +753,338 @@
 				     page whose every other press does something to this job, and
 				     "who is this for" is a fact you read, not a place you go. The
 				     directory is one nav click away for the rare time you want it. -->
-				{#if customer}
-					<div class="head-customer">
-						<div class="cust-identity">
-							{#if customer.avatar}
-								<img class="cust-avatar" src={customer.avatar} alt="" />
-							{:else}
-								<span class="cust-avatar fallback" aria-hidden="true"
-									>{customer.name.charAt(0).toUpperCase()}</span
-								>
-							{/if}
-							<span class="cust-who">
-								<span class="cust-name">{customer.name}</span>
-								<span class="cust-meta">
-									{#if orderLocation}<span class="cust-where"
-											><span aria-hidden="true">📍</span>{orderLocation}</span
-										>{/if}
-									{#if customer.email}<span class="cust-reach">{customer.email}</span>{/if}
+				<!-- The box itself. Everything below is one order's facts, so they share
+				     one surface — the identity row, the two things you glance at, and the
+				     rest behind the toggle. -->
+				<div class="order-box">
+					{#if customer}
+						<div class="head-customer">
+							<div class="cust-identity">
+								{#if customer.avatar}
+									<img class="cust-avatar" src={customer.avatar} alt="" />
+								{:else}
+									<span class="cust-avatar fallback" aria-hidden="true"
+										>{customer.name.charAt(0).toUpperCase()}</span
+									>
+								{/if}
+								<span class="cust-who">
+									<span class="cust-name">{customer.name}</span>
+									<span class="cust-meta">
+										{#if orderLocation}<span class="cust-where"
+												><span aria-hidden="true">📍</span>{orderLocation}</span
+											>{/if}
+										{#if customer.email}<span class="cust-reach">{customer.email}</span>{/if}
+									</span>
 								</span>
-							</span>
-						</div>
+							</div>
 
-						<!-- Reaching them is not editing them, so this stays. Same control,
-						     same panel and same seat as the directory's row. -->
-						{#if customer.email || customer.phone}
-							<div class="cust-contact">
-								<button
-									type="button"
-									class="icon-btn"
-									style="width: 2.5rem; height: 2.5rem; font-size: 1.4rem;"
-									title="Message {customer.name}"
-									aria-label="Message {customer.name}"
-									aria-expanded={contactOpen}
-									onclick={() => (contactOpen = !contactOpen)}>💬</button
-								>
-								{#if contactOpen}
-									<!-- Dimmed click-away scrim so the composer is the focus. -->
+							<!-- Reaching them is not editing them, so this stays. Same control,
+							     same panel and same seat as the directory's row. -->
+							{#if customer.email || customer.phone}
+								<div class="cust-contact">
 									<button
 										type="button"
-										aria-label="Close contact menu"
-										onclick={() => (contactOpen = false)}
-										class="contact-scrim"
-									></button>
-									<div class="contact-pop">
-										<ContactPanel
-											contact={{
-												name: customer.name,
-												email: customer.email,
-												phone: customer.phone,
-												preferredContact: customer.preferredContact
-											}}
-											project={order.projectName}
-											orderId={order.id}
-											conversations={[
-												{
-													orderId: order.id,
-													projectName: order.projectName,
-													thread: data.thread
-												}
-											]}
-											canChat={data.customerLinked}
-											customerId={order.customerId}
-											portal={data.portal}
-											onsent={() => (contactOpen = false)}
-											onclose={() => (contactOpen = false)}
-										/>
-									</div>
-								{/if}
-							</div>
-						{/if}
-					</div>
-				{:else}
-					<!-- An order whose customer record has gone. The name still rides on the
-					     order itself, so the header says who it was for rather than nothing. -->
-					<span class="cust-name orphan">{order.customerName}</span>
-				{/if}
-			</div>
-
-			<!-- Everything you glance at or reach for about this order, in ONE wrapping
-			     row: when to chase it, and the files on it. Each is a label, its
-			     value, and the control that edits it. These were three separate
-			     full-width blocks, which on a phone meant three lines of mostly empty
-			     space; as flex items they pack onto as few lines as the width allows
-			     and wrap only when they must. Who's on the job lives in Workers. -->
-			<dl class="order-facts">
-				<div class="fact">
-					<dt>Follow-up</dt>
-					<dd>
-						<strong class="fact-value" class:due={order.followUpDue}
-							>{fmtDate(order.nextFollowUpAt)}</strong
-						>
-						<div class="fu-anchor">
-							<button
-								type="button"
-								class="icon-btn"
-								style="width: 1.7rem; height: 1.7rem; font-size: 1.1rem;"
-								title="Snooze or set follow-up"
-								aria-label="Snooze or set follow-up"
-								aria-expanded={snoozeOpen}
-								onclick={() => (snoozeOpen = !snoozeOpen)}>⏰</button
-							>
-							{#if snoozeOpen}
-								{@render followUpPop()}
+										class="icon-btn"
+										style="width: 2.5rem; height: 2.5rem; font-size: 1.4rem;"
+										title="Message {customer.name}"
+										aria-label="Message {customer.name}"
+										aria-expanded={contactOpen}
+										onclick={() => (contactOpen = !contactOpen)}>💬</button
+									>
+									{#if contactOpen}
+										<!-- Dimmed click-away scrim so the composer is the focus. -->
+										<button
+											type="button"
+											aria-label="Close contact menu"
+											onclick={() => (contactOpen = false)}
+											class="contact-scrim"
+										></button>
+										<div class="contact-pop">
+											<ContactPanel
+												contact={{
+													name: customer.name,
+													email: customer.email,
+													phone: customer.phone,
+													preferredContact: customer.preferredContact
+												}}
+												project={order.projectName}
+												orderId={order.id}
+												conversations={[
+													{
+														orderId: order.id,
+														projectName: order.projectName,
+														thread: data.thread
+													}
+												]}
+												canChat={data.customerLinked}
+												customerId={order.customerId}
+												portal={data.portal}
+												onsent={() => (contactOpen = false)}
+												onclose={() => (contactOpen = false)}
+											/>
+										</div>
+									{/if}
+								</div>
 							{/if}
 						</div>
-					</dd>
-				</div>
+					{:else}
+						<!-- An order whose customer record has gone. The name still rides on the
+						     order itself, so the header says who it was for rather than nothing. -->
+						<span class="cust-name orphan">{order.customerName}</span>
+					{/if}
 
-				<!-- Files, reached the same way the customer is: a control on
-				     the header that opens in place. It was a tab, which made a thing you
-				     dip into for one file cost a whole view. -->
-				<div class="fact">
-					<dt>Files</dt>
-					<dd>
-						{#if data.documents.length === 0}
-							<span class="fact-empty">N/A</span>
-						{:else}
-							<span class="fact-value">{data.documents.length}</span>
-						{/if}
+					<!-- ------------------------------------------------ The order, in one box
+				     Who it is for, when it runs, and what is owed — then everything else
+				     behind one toggle.
+
+				     It was three boxes: this card carried the customer, a wrapping row
+				     beside it carried the follow-up and the files, and a Details card in
+				     the rail below carried the scope, the site, the schedule and the visit
+				     date. Every one of them was about THIS ORDER, and the split was by
+				     which feature shipped when rather than by anything a contractor cares
+				     about — so opening a job meant reading three headers to assemble one
+				     answer, and the schedule (the thing you actually look up) was the
+				     furthest down the page.
+
+				     What stays on show is what gets glanced at: who, where, when to chase
+				     it, and the two dates the job runs between. The scope, the site
+				     address, the on-site date and the files are things you open a job TO
+				     DO, not things you read on the way past. -->
+					<dl class="oc-facts">
+						<div class="fact">
+							<dt>Follow-up</dt>
+							<dd>
+								<strong class="fact-value" class:due={order.followUpDue}
+									>{fmtDate(order.nextFollowUpAt)}</strong
+								>
+								<div class="fu-anchor">
+									<button
+										type="button"
+										class="icon-btn"
+										style="width: 1.7rem; height: 1.7rem; font-size: 1.1rem;"
+										title="Snooze or set follow-up"
+										aria-label="Snooze or set follow-up"
+										aria-expanded={snoozeOpen}
+										onclick={() => (snoozeOpen = !snoozeOpen)}>⏰</button
+									>
+									{#if snoozeOpen}
+										{@render followUpPop()}
+									{/if}
+								</div>
+							</dd>
+						</div>
+
+						<!-- The two dates as one span, not two facts. They describe one stretch
+					     of time and are read together; stacked as separate rows they were
+					     two unrelated dates that happened to be adjacent. -->
+						<div class="fact">
+							<dt>Runs</dt>
+							<dd>
+								{#if order.startDate || order.targetDate}
+									<span class="fact-value">{fmtShortDate(order.startDate)}</span>
+									<span class="fact-arrow" aria-hidden="true">→</span>
+									<span class="fact-value" class:det-late={targetOverdue}
+										>{fmtShortDate(order.targetDate)}</span
+									>
+									{#if targetOverdue}<span class="det-late-flag">overdue</span>{/if}
+								{:else}
+									<span class="fact-empty">Not set</span>
+								{/if}
+							</dd>
+						</div>
+					</dl>
+
+					<!-- The rest, folded. Closed by default because a job is opened to do
+					     something to it, and four more rows of reference between the header
+					     and the work is four rows you scroll past every time.
+
+					     RIGHT-ALIGNED, opposite the facts it belongs to. It is a control
+					     rather than a fact, and sitting at the left margin it read as a
+					     third column of the row above — a label with no value under it. -->
+					<div class="oc-more">
 						<button
 							type="button"
-							class="icon-btn"
-							class:on={filesOpen}
-							style="width: 1.7rem; height: 1.7rem; font-size: 1.05rem;"
-							title={filesOpen ? 'Close files' : 'Files on this order'}
-							aria-label={filesOpen ? 'Close files' : 'Files on this order'}
-							aria-expanded={filesOpen}
-							onclick={() => (filesOpen = !filesOpen)}>📎</button
+							class="oc-more-btn"
+							aria-expanded={detailsOpen}
+							aria-controls="order-detail"
+							onclick={() => (detailsOpen = !detailsOpen)}
 						>
-					</dd>
+							{detailsOpen ? 'Fewer details' : 'More details'}
+							<span class="oc-chev" class:open={detailsOpen} aria-hidden="true">▾</span>
+						</button>
+					</div>
+
+					{#if detailsOpen}
+						<div class="oc-detail" id="order-detail">
+							{#if editingDetails}
+								<form
+									method="POST"
+									action="?/setOrderDetails"
+									use:enhance={closeDetailsEditor}
+									class="det-form"
+								>
+									<label class="inv-field">
+										<span>Scope of work</span>
+										<textarea
+											name="description"
+											rows="4"
+											placeholder="Tear out the old cedar, re-frame the two rotten joists, 16x20 with a railing…"
+											bind:value={detDescription}></textarea>
+									</label>
+
+									<div class="det-dates">
+										<label class="inv-field">
+											<span>Starts</span>
+											<input type="date" name="startDate" bind:value={detStart} />
+										</label>
+										<label class="inv-field">
+											<span>Target finish</span>
+											<input type="date" name="targetDate" bind:value={detTarget} />
+										</label>
+									</div>
+
+									<!-- Off by default. Most jobs happen at the customer's own address,
+									     and a second address always on screen invites someone to retype
+									     the one already on the customer record. -->
+									<label class="det-check">
+										<input type="checkbox" bind:checked={detSiteOn} />
+										<span>The work is at a different address</span>
+									</label>
+									{#if detSiteOn}
+										<!-- Plain fields rather than <AddressFields>: that component hard-codes
+										     the input names `city` / `state` / `postalCode` for the customer
+										     form and has no address line at all, so reusing it here would post
+										     the wrong keys and drop the street. -->
+										<label class="inv-field">
+											<span>Street</span>
+											<input
+												name="siteAddress"
+												bind:value={detAddress}
+												placeholder="1180 Alder Street"
+											/>
+										</label>
+										<div class="det-site-row">
+											<label class="inv-field grow">
+												<span>City</span>
+												<input name="siteCity" bind:value={detCity} />
+											</label>
+											<label class="inv-field det-state">
+												<span>State</span>
+												<input name="siteState" bind:value={detState} maxlength="2" />
+											</label>
+											<label class="inv-field det-zip">
+												<span>ZIP</span>
+												<input name="sitePostalCode" bind:value={detPostal} inputmode="numeric" />
+											</label>
+										</div>
+									{:else}
+										<!-- Cleared on save when the box is unticked, so unticking it really
+										     does hand the job back to the customer's address instead of
+										     leaving a stale one behind. -->
+										<input type="hidden" name="siteAddress" value="" />
+										<input type="hidden" name="siteCity" value="" />
+										<input type="hidden" name="siteState" value="" />
+										<input type="hidden" name="sitePostalCode" value="" />
+									{/if}
+
+									<div class="inv-pay-actions">
+										<button type="button" class="inv-btn" onclick={() => (editingDetails = false)}
+											>Cancel</button
+										>
+										<button type="submit" class="inv-btn primary">Save details</button>
+									</div>
+								</form>
+							{:else if hasDetails}
+								{#if order.description}
+									<p class="det-scope">{order.description}</p>
+								{/if}
+								<!-- The schedule as a span rather than two rows of a definition list.
+								     Two dates that describe one stretch of time should be read
+								     together — stacked as "Starts …" over "Target …" they were two
+								     unrelated facts that happened to be adjacent. -->
+								{#if order.startDate || order.targetDate}
+									<div class="det-schedule">
+										<div class="det-when">
+											<span class="det-when-label">Starts</span>
+											<span class="det-when-value">{fmtShortDate(order.startDate)}</span>
+										</div>
+										<span class="det-arrow" aria-hidden="true"></span>
+										<div class="det-when">
+											<span class="det-when-label">Target</span>
+											<span class="det-when-value" class:det-late={targetOverdue}>
+												{fmtShortDate(order.targetDate)}
+											</span>
+										</div>
+										{#if targetOverdue}
+											<span class="det-late-flag">overdue</span>
+										{/if}
+									</div>
+								{/if}
+
+								{#if siteLine}
+									<div class="det-site">
+										<span class="det-site-label">Site</span>
+										<span>{siteLine}</span>
+									</div>
+								{/if}
+
+								<!-- The day the crew turns up, which is the one date here that gets
+								     changed on the morning it applies to — so it is settable in one
+								     press rather than through the details form. It is what the
+								     dashboard's "on site today" list is a query over. -->
+								<div class="det-visit">
+									<span class="det-site-label">On site</span>
+									<span class="det-visit-value">
+										{order.visitDate ? fmtShortDate(order.visitDate) : 'Not scheduled'}
+									</span>
+									<form method="POST" action="?/setVisitDate" use:enhance class="det-visit-form">
+										<input type="date" name="date" value={toDateInput(order.visitDate)} />
+										<button type="submit" class="inv-btn">Set</button>
+									</form>
+									{#if !order.visitDate}
+										<form method="POST" action="?/setVisitDate" use:enhance>
+											<input type="hidden" name="date" value={toDateInput(new Date())} />
+											<button type="submit" class="inv-btn">Today</button>
+										</form>
+									{/if}
+								</div>
+							{:else}
+								<p class="det-empty">
+									Nothing recorded yet — what the job is, where it happens, when it runs.
+								</p>
+							{/if}
+
+							<!-- Files, in the box everything else about this order lives in. It was
+						     a fact in the header row with a 📎 beside it, which put "how many
+						     files" on permanent display — a number nobody needs until the
+						     moment they want the file itself. -->
+							<div class="det-visit">
+								<span class="det-site-label">Files</span>
+								<span class="det-visit-value">
+									{data.documents.length === 0 ? 'None yet' : data.documents.length}
+								</span>
+								<button
+									type="button"
+									class="inv-btn"
+									class:on={filesOpen}
+									aria-expanded={filesOpen}
+									onclick={() => (filesOpen = !filesOpen)}
+								>
+									{filesOpen ? 'Close' : 'Open files'}
+								</button>
+							</div>
+
+							{#if !editingDetails}
+								<div class="oc-detail-actions">
+									<button type="button" class="inv-btn" onclick={openDetailsEditor}>
+										{hasDetails ? 'Edit details' : 'Add details'}
+									</button>
+								</div>
+							{/if}
+						</div>
+					{/if}
 				</div>
-			</dl>
+			</div>
 
 			{#if filesOpen}
 				<InlineEditor title="Files" onclose={() => (filesOpen = false)}>
@@ -1067,163 +1345,7 @@
 
 		<div class="workspace">
 			<div class="col-rail">
-				<!-- ------------------------------------------------------- Details
-				     What the job is, where it happens and when. The order carried a name
-				     and a type and nothing else, so the answer to "what are we actually
-				     building" lived in a timeline note or in someone's head. Edited as one
-				     panel rather than field by field: these are filled in together, at the
-				     start, and five separate inline editors would be five times the
-				     chrome for one sitting's work. -->
-				<section class="card details" aria-labelledby="details-head">
-					<div class="det-head">
-						<h2 id="details-head">Details</h2>
-						{#if !editingDetails}
-							<button type="button" class="inv-btn" onclick={openDetailsEditor}>
-								{hasDetails ? 'Edit' : 'Add details'}
-							</button>
-						{/if}
-					</div>
-
-					{#if editingDetails}
-						<form
-							method="POST"
-							action="?/setOrderDetails"
-							use:enhance={closeDetailsEditor}
-							class="det-form"
-						>
-							<label class="inv-field">
-								<span>Scope of work</span>
-								<textarea
-									name="description"
-									rows="4"
-									placeholder="Tear out the old cedar, re-frame the two rotten joists, 16x20 with a railing…"
-									bind:value={detDescription}></textarea>
-							</label>
-
-							<div class="det-dates">
-								<label class="inv-field">
-									<span>Starts</span>
-									<input type="date" name="startDate" bind:value={detStart} />
-								</label>
-								<label class="inv-field">
-									<span>Target finish</span>
-									<input type="date" name="targetDate" bind:value={detTarget} />
-								</label>
-							</div>
-
-							<!-- Off by default. Most jobs happen at the customer's own address,
-							     and a second address always on screen invites someone to retype
-							     the one already on the customer record. -->
-							<label class="det-check">
-								<input type="checkbox" bind:checked={detSiteOn} />
-								<span>The work is at a different address</span>
-							</label>
-							{#if detSiteOn}
-								<!-- Plain fields rather than <AddressFields>: that component hard-codes
-								     the input names `city` / `state` / `postalCode` for the customer
-								     form and has no address line at all, so reusing it here would post
-								     the wrong keys and drop the street. -->
-								<label class="inv-field">
-									<span>Street</span>
-									<input
-										name="siteAddress"
-										bind:value={detAddress}
-										placeholder="1180 Alder Street"
-									/>
-								</label>
-								<div class="det-site-row">
-									<label class="inv-field grow">
-										<span>City</span>
-										<input name="siteCity" bind:value={detCity} />
-									</label>
-									<label class="inv-field det-state">
-										<span>State</span>
-										<input name="siteState" bind:value={detState} maxlength="2" />
-									</label>
-									<label class="inv-field det-zip">
-										<span>ZIP</span>
-										<input name="sitePostalCode" bind:value={detPostal} inputmode="numeric" />
-									</label>
-								</div>
-							{:else}
-								<!-- Cleared on save when the box is unticked, so unticking it really
-								     does hand the job back to the customer's address instead of
-								     leaving a stale one behind. -->
-								<input type="hidden" name="siteAddress" value="" />
-								<input type="hidden" name="siteCity" value="" />
-								<input type="hidden" name="siteState" value="" />
-								<input type="hidden" name="sitePostalCode" value="" />
-							{/if}
-
-							<div class="inv-pay-actions">
-								<button type="button" class="inv-btn" onclick={() => (editingDetails = false)}
-									>Cancel</button
-								>
-								<button type="submit" class="inv-btn primary">Save details</button>
-							</div>
-						</form>
-					{:else if hasDetails}
-						{#if order.description}
-							<p class="det-scope">{order.description}</p>
-						{/if}
-						<!-- The schedule as a span rather than two rows of a definition list.
-						     Two dates that describe one stretch of time should be read
-						     together — stacked as "Starts …" over "Target …" they were two
-						     unrelated facts that happened to be adjacent. -->
-						{#if order.startDate || order.targetDate}
-							<div class="det-schedule">
-								<div class="det-when">
-									<span class="det-when-label">Starts</span>
-									<span class="det-when-value">{fmtShortDate(order.startDate)}</span>
-								</div>
-								<span class="det-arrow" aria-hidden="true"></span>
-								<div class="det-when">
-									<span class="det-when-label">Target</span>
-									<span class="det-when-value" class:det-late={targetOverdue}>
-										{fmtShortDate(order.targetDate)}
-									</span>
-								</div>
-								{#if targetOverdue}
-									<span class="det-late-flag">overdue</span>
-								{/if}
-							</div>
-						{/if}
-
-						{#if siteLine}
-							<div class="det-site">
-								<span class="det-site-label">Site</span>
-								<span>{siteLine}</span>
-							</div>
-						{/if}
-
-						<!-- The day the crew turns up, which is the one date here that gets
-						     changed on the morning it applies to — so it is settable in one
-						     press rather than through the details form. It is what the
-						     dashboard's "on site today" list is a query over. -->
-						<div class="det-visit">
-							<span class="det-site-label">On site</span>
-							<span class="det-visit-value">
-								{order.visitDate ? fmtShortDate(order.visitDate) : 'Not scheduled'}
-							</span>
-							<form method="POST" action="?/setVisitDate" use:enhance class="det-visit-form">
-								<input type="date" name="date" value={toDateInput(order.visitDate)} />
-								<button type="submit" class="inv-btn">Set</button>
-							</form>
-							{#if !order.visitDate}
-								<form method="POST" action="?/setVisitDate" use:enhance>
-									<input type="hidden" name="date" value={toDateInput(new Date())} />
-									<button type="submit" class="inv-btn">Today</button>
-								</form>
-							{/if}
-						</div>
-					{:else}
-						<p class="det-empty">
-							Nothing recorded yet — what the job is, where it happens, when it runs.
-						</p>
-					{/if}
-				</section>
-
-				<div class="tabs" role="tablist" aria-label="Order sections">
+				<div class="tabs" role="tablist" aria-label="Order sections" bind:this={tabsEl}>
 					{#each TABS as t (t.id)}
 						<button
 							type="button"
@@ -1233,7 +1355,7 @@
 							aria-controls={`panel-${t.id}`}
 							class="tab"
 							class:on={tab === t.id}
-							onclick={() => (tabOverride = t.id)}
+							onclick={() => pickTab(t.id)}
 						>
 							{t.label}{#if t.pending > 0}<span class="tab-count as-pending">{t.pending}</span>{/if}
 						</button>
@@ -1959,6 +2081,8 @@
 				<div
 					class="pane pane-messages"
 					class:on={tab === 'messages'}
+					class:fill={messagesFill != null && data.customerLinked}
+					style:--messages-fill={messagesFill ?? undefined}
 					role="tabpanel"
 					id="panel-messages"
 					aria-labelledby="tab-messages"
@@ -3206,24 +3330,32 @@
 	   The People directory's row, on this page. Same photo-or-initial, same name,
 	   same 💬 in the same seat — a person should not be drawn three different ways
 	   in one product. */
-	/* A card of its own rather than two lines of text under the title.
+	/* The order's own box.
 
-	   It had no box at all and sat on the page's own ground, which on a phone put
-	   an avatar a quarter of a rem from the screen edge — the gutter is 0.6rem
-	   there and the row was pulled left of it to line its picture up with the
-	   title. Flush against the glass, it read as something that had slipped rather
-	   than something that had been placed. Its own surface gives it room on the
-	   inside and keeps it honestly within the page's margin on the outside. */
+	   The chrome used to be on the customer row, which was the only thing in it.
+	   It now holds three things — who the job is for, the two facts you glance at,
+	   and the fold — so the surface belongs to the box and the customer row is
+	   just its first line.
+
+	   Keeping the box (rather than letting these sit on the page's ground) is what
+	   stops the avatar landing a quarter of a rem off the screen edge on a phone:
+	   the gutter is 0.8rem there, and content flush against the glass reads as
+	   something that slipped rather than something that was placed. */
+	.order-box {
+		display: grid;
+		min-width: 0;
+		padding: 0.6rem 0.7rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-card);
+		background: var(--surface);
+		box-shadow: var(--card-shadow);
+	}
 	.head-customer {
 		display: flex;
 		align-items: center;
 		gap: 0.6rem;
 		min-width: 0;
-		padding: 0.55rem 0.65rem;
-		border: 1px solid var(--line);
-		border-radius: var(--radius-card);
-		background: var(--surface);
-		box-shadow: var(--card-shadow);
+		padding-bottom: 0.55rem;
 	}
 	/* The identity half. Not a link and not a button: every other press on this
 	   page does something to the job, and "who is this for" is a fact you read. */
@@ -3307,12 +3439,82 @@
 	   width where they shared a line you could not tell where one ended and the
 	   next began — "FOLLOW-UP 20 Aug FILES 3" reads as one sentence. The label's
 	   colour is what separates it from its value. */
-	.order-facts {
+	/* The glanceable half, inside the card rather than beside it. A rule above it
+	   rather than a gap alone: identity and schedule are two different questions
+	   and the card is now answering both. */
+	.oc-facts {
 		display: flex;
 		flex-wrap: wrap;
+		align-items: center;
 		min-width: 0;
-		gap: 0.4rem;
+		gap: 0.35rem 1rem;
 		margin: 0;
+		padding-top: 0.55rem;
+		border-top: 1px solid var(--line);
+	}
+	/* The arrow between the two dates — what makes them one span of time rather
+	   than two dates filed next to each other. */
+	.fact-arrow {
+		color: var(--fg-muted);
+		font-size: 0.85rem;
+	}
+
+	/* The disclosure. A quiet row, because it is a way IN to reference material
+	   rather than an action on the job — and pushed right, where a card's controls
+	   live, rather than left where its facts do. */
+	.oc-more {
+		display: flex;
+		justify-content: flex-end;
+		padding-top: 0.5rem;
+	}
+	.oc-more-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0;
+		border: none;
+		background: none;
+		color: var(--fg-muted);
+		font-family: inherit;
+		font-size: 0.78rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.oc-more-btn:hover {
+		color: var(--fg);
+	}
+	.oc-more-btn:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
+		border-radius: 4px;
+	}
+	.oc-chev {
+		font-size: 0.65rem;
+		transition: transform 0.15s ease;
+	}
+	.oc-chev.open {
+		transform: rotate(180deg);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.oc-chev {
+			transition: none;
+		}
+	}
+	/* The opened half. Same internal rhythm the Details card had — a rule between
+	   blocks rather than a gap alone — since it is the same content. */
+	.oc-detail {
+		display: grid;
+		padding-top: 0.6rem;
+		border-top: 1px solid var(--line);
+	}
+	.oc-detail > * + * {
+		margin-top: 0.75rem;
+		padding-top: 0.75rem;
+		border-top: 1px solid var(--line);
+	}
+	.oc-detail-actions {
+		display: flex;
+		justify-content: flex-end;
 	}
 	/* Plain text, not chips. Follow-up / Files each used to sit in its own
 	   bordered, filled, rounded box — boxes across the header, each framing about
@@ -3605,8 +3807,8 @@
 		.order-head {
 			gap: 0.6rem;
 		}
-		.order-facts {
-			gap: 0.35rem;
+		.oc-facts {
+			gap: 0.3rem 0.75rem;
 		}
 		.fact {
 			padding: 0.28rem 0.4rem 0.28rem 0.55rem;
@@ -3675,37 +3877,6 @@
 	   letter-spaced labels inside one small card (Details, Starts, Target, Site),
 	   each drawing as much attention as the value it introduced. One eyebrow per
 	   card is a signpost; four is shouting. */
-	.details {
-		gap: 0;
-	}
-	/* Every block after the first is separated by a rule and its own space,
-	   rather than by a gap alone. */
-	.details > * + * {
-		margin-top: 0.85rem;
-		padding-top: 0.85rem;
-		border-top: 1px solid var(--line);
-	}
-	/* The head is the exception — a heading with a rule immediately under it is a
-	   box lid, which is the look this card is getting away from. */
-	.details > .det-head + * {
-		border-top: none;
-		padding-top: 0;
-		margin-top: 0.7rem;
-	}
-	.det-head {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 1rem;
-	}
-	.det-head h2 {
-		margin: 0;
-		font-size: 0.78rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: var(--fg-muted);
-	}
 	.det-scope {
 		margin: 0;
 		font-size: 0.95rem;
@@ -4668,6 +4839,24 @@
 	.pane:not(.on) {
 		display: none;
 	}
+	/* The phone's Messages screen: a column of exactly the height `fitMessagesPane`
+	   measured, with the thread taking whatever the heading and the composer leave.
+	   Only ever set below 1100px — above it the class is cleared, because there the
+	   pane is a column beside the rail and has a page to grow down.
+
+	   `.on` is in the selector to outrank `.pane:not(.on) { display: none }` above,
+	   which carries the same two-class weight and comes first. Without it this rule
+	   would win on source order and DISPLAY the Messages pane while another tab is
+	   selected. */
+	.pane-messages.on.fill {
+		height: var(--messages-fill);
+		display: flex;
+		flex-direction: column;
+		/* Hand the sizing to the thread's own `flex: 1 1 auto` instead of the 26rem
+		   below, which is what put the composer under the fold. */
+		--thread-max-height: none;
+	}
+
 	/* The billing pane wraps a card that draws its own frame, so the pane must not
 	   draw a second one around it. Every other pane IS the card. */
 	.pane-billing {

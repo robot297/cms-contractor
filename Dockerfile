@@ -53,6 +53,24 @@ COPY --from=build /app/scripts ./scripts
 # varlock validates the runtime env against this schema at container start.
 COPY --from=build /app/.env.schema ./.env.schema
 EXPOSE 3000
+
+# Liveness, for whatever is orchestrating this — Coolify reads the image's own
+# HEALTHCHECK, so declaring it here means every host gets it without anyone
+# remembering to tick a box, and docker-compose inherits it too.
+#
+# Probed with node, not curl or wget: this is a -slim base and it has neither.
+# Node 22 has global fetch, so the runtime already in the image is the one
+# dependency-free thing guaranteed to be here.
+#
+# start-period is the load-bearing number. The entrypoint applies migrations
+# before the server listens, so early failures must not count — on a cold
+# database with a backlog of migrations, a 40s grace is the difference between a
+# deploy and a restart loop. Raise it if migrations grow long. Failures during
+# the grace period are free; after it, three in a row mark the container
+# unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+	CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 # Migrate → (optional seed) → start. See scripts/docker-entrypoint.sh.
 # Absolute path so the entrypoint is found regardless of the launch CWD.
 ENTRYPOINT ["sh", "/app/scripts/docker-entrypoint.sh"]

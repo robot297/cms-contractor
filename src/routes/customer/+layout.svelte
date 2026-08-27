@@ -244,7 +244,7 @@
 	</div>
 {/snippet}
 
-<div class="shell">
+<div class="shell" class:messages-screen={isMessages}>
 	<div class="bar">
 		<nav class="nav">
 			<a href={resolve('/customer')} class="brand" onclick={closeMenu}>
@@ -314,7 +314,7 @@
 		</nav>
 	</div>
 
-	<div class="wrap" class:solo={!hasOrders}>
+	<div class="wrap" class:solo={!hasOrders} class:fill={isMessages}>
 		{#if data.bindError}
 			<div class="notice" role="alert">
 				<strong>Couldn’t join that project.</strong>
@@ -916,6 +916,50 @@
 		}
 		.main.m-project > :global(#messages) {
 			display: none;
+		}
+
+		/* Messages is a SCREEN here, not a section you scroll to.
+
+		   Hiding the other sections got the thread to the top of the page; it did
+		   not stop the thread being a fixed 24rem box with the composer underneath
+		   it, so on a shorter phone the box you answer in sat below the fold and
+		   the newest message sat at the bottom of a box you had to scroll the page
+		   to see the end of. Now the card takes the height the bar and the tab bar
+		   leave, and the thread takes what the card's own heading and composer do
+		   not — the last thing said and the box to answer it in are both simply on
+		   screen.
+
+		   Every step below hands a DEFINITE height down, which is the whole trick.
+		   `.shell` is `min-height: 100dvh`, and a floor is not a ceiling: left at
+		   that, a tall thread grows the shell, the wrap grows with it, and "fill the
+		   screen" caps nothing — the chain sizes itself to the content it was meant
+		   to be constraining. Pinning the shell to the screen for this one view is
+		   what makes the heights under it real, and `min-height: 0` at each level is
+		   what lets them shrink past their content so the thread is the one thing
+		   that scrolls. */
+		.shell.messages-screen {
+			height: 100dvh;
+		}
+		.wrap.fill {
+			display: flex;
+			flex-direction: column;
+			min-height: 0;
+		}
+		.wrap.fill .main {
+			flex: 1;
+			min-height: 0;
+			display: flex;
+			flex-direction: column;
+		}
+		.main.m-messages > :global(#messages) {
+			flex: 1;
+			/* Without this the card floors at its content height and overflows the
+			   screen instead of handing the overflow to the thread. */
+			min-height: 0;
+			display: flex;
+			flex-direction: column;
+			/* Hand the sizing to the thread's own `flex: 1 1 auto`. */
+			--thread-max-height: none;
 		}
 	}
 

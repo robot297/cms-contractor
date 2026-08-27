@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PaletteSwitcher from '$lib/PaletteSwitcher.svelte';
 	import ThemeModeButton from '$lib/ThemeModeButton.svelte';
+	import { REVIEW_PLATFORMS, MAX_REVIEW_URL } from '$lib/reviews';
 	import SupportForm from '$lib/SupportForm.svelte';
 	import { onMount, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
@@ -93,6 +94,28 @@
 		async ({ update }: { update: (o?: object) => Promise<void> }) =>
 			await update({ reset: false });
 
+	// Review destinations, one field per platform. Seeded once from the load and
+	// owned locally after that, the same way the signature field is: the form
+	// posts one platform at a time, so re-deriving all eight from `data` on every
+	// action result would blow away whatever is half-typed in the other seven.
+	let reviewUrls = $state(
+		untrack(() => {
+			const seed: Record<string, string> = {};
+			for (const p of REVIEW_PLATFORMS) seed[p.id] = '';
+			for (const link of data.reviewLinks) seed[link.platform] = link.url;
+			return seed;
+		})
+	);
+	// Cleared on the next keystroke, so the tick belongs to what is in the box
+	// rather than sitting there over an edited value.
+	let reviewSaved = $state<string | null>(null);
+	const reviewErr = (id: string) =>
+		form?.action === 'review' && form?.platform === id ? form.message : null;
+	/** How many are actually offered — the card's one-line answer to "is this on?" */
+	const configuredReviews = $derived(
+		REVIEW_PLATFORMS.filter((p) => reviewUrls[p.id]?.trim() !== '').length
+	);
+
 	// Where the phone/tablet nav sits. Saved on the click rather than behind a Save
 	// button: it is a two-way switch whose result is visible the moment it lands,
 	// so a confirm step would be a step for nothing.
@@ -111,7 +134,6 @@
 <div class="wrap">
 	<div class="head">
 		<h1 class="page-title">Settings</h1>
-		<p class="head-sub">Your account, email setup and workspace preferences.</p>
 	</div>
 
 	<nav class="tabs" aria-label="Settings sections">
@@ -171,10 +193,6 @@
 						<dd>{showDate(profile.memberSince)}</dd>
 					</div>
 				</dl>
-				<p class="note">
-					Your name and email come from the account you signed in with. The business name is what
-					customers see on email you send.
-				</p>
 			</section>
 
 			<!-- Account state. Deliberately a summary with a way through, not a second
@@ -329,6 +347,88 @@
 				{/if}
 			</section>
 
+			<!-- Where a finished job gets reviewed.
+			     
+			     The links are the contractor's because only they can produce them:
+			     every one of these platforms hands out a different URL per business,
+			     found in a different corner of a different dashboard. The app cannot
+			     guess them, so it asks once and then does the asking on every job
+			     that completes — which is the part a contractor otherwise has to
+			     remember to do by hand, at the exact moment they are least likely to
+			     (the work is done and they are already on the next site).
+			     
+			     Blank is off. A platform with no link is simply not offered, so the
+			     card doubles as the on/off switch and there is nothing to explain
+			     about the difference between "empty" and "disabled". -->
+			<section class="card">
+				<h2>Reviews</h2>
+				<p class="hint">
+					When you mark a job complete, your customer is offered these links from their portal.
+					{#if configuredReviews === 0}
+						Add at least one to start asking.
+					{:else}
+						Offering {configuredReviews}
+						{configuredReviews === 1 ? 'platform' : 'platforms'}. Clear a box to stop offering it.
+					{/if}
+				</p>
+
+				<ul class="reviews">
+					{#each REVIEW_PLATFORMS as platform (platform.id)}
+						<li class="review">
+							<!-- One form per platform. Eight independent facts, edited one at a
+							     time — a single save-everything form would make a typo in one
+							     a reason for the other seven not to be written.
+							     
+							     `&tab=workspace` on the action, because a form posts to
+							     `?/saveReviewLink` and that REPLACES the query string. With JS the
+							     enhanced fetch never navigates and it does not matter; without it
+							     the browser lands on `/contractor/settings?/saveReviewLink`, which
+							     has no `tab` — so saving a link bounced you to the Account tab.
+							     The tabs are plain links specifically so this page works with JS
+							     off, and a form that breaks that undoes it. -->
+							<form
+								method="POST"
+								action="?/saveReviewLink&tab=workspace"
+								use:enhance={() =>
+									async ({ result, update }) => {
+										await update({ reset: false });
+										if (result.type === 'success') reviewSaved = platform.id;
+									}}
+								class="review-form"
+								data-platform={platform.id}
+							>
+								<input type="hidden" name="platform" value={platform.id} />
+								<label class="review-label" for="review-{platform.id}">
+									<span class="review-name">{platform.label}</span>
+									<span class="fine-print">{platform.hint}</span>
+								</label>
+								<div class="review-row">
+									<input
+										id="review-{platform.id}"
+										class="field-input"
+										name="url"
+										type="url"
+										inputmode="url"
+										autocomplete="off"
+										spellcheck="false"
+										maxlength={MAX_REVIEW_URL}
+										placeholder={platform.example}
+										bind:value={reviewUrls[platform.id]}
+										oninput={() => (reviewSaved = null)}
+									/>
+									<button type="submit" class="cta ghost review-save">Save</button>
+								</div>
+								{#if reviewErr(platform.id)}
+									<p class="err">{reviewErr(platform.id)}</p>
+								{:else if reviewSaved === platform.id}
+									<p class="ok">Saved ✓</p>
+								{/if}
+							</form>
+						</li>
+					{/each}
+				</ul>
+			</section>
+
 			<!-- How long "follow up" means. One number, so it saves on change like the
 			     nav switch rather than behind a button of its own. -->
 			<section class="card">
@@ -383,11 +483,6 @@
 	.head {
 		display: grid;
 		gap: 0.15rem;
-	}
-	.head-sub {
-		margin: 0;
-		font-size: 0.88rem;
-		color: #8b949e;
 	}
 
 	/* The tab bar: one segmented control in the same idiom as the nav rail — a
@@ -714,6 +809,62 @@
 		font-size: 0.85rem;
 		font-weight: 600;
 	}
+	/* The error line's twin. It was being rendered with no rule at all — the nav
+	   card has used `class="err"` since it was written, and it came out as plain
+	   body text with nothing to say it was a failure. */
+	.err {
+		margin: 0;
+		color: var(--danger);
+		font-size: 0.85rem;
+		font-weight: 600;
+	}
+
+	/* ------------------------------------------------------------- Reviews
+	   A list, not a grid: each row is a label, a field and its own Save, and the
+	   rows are independent forms. Stacked so the hint under each name has
+	   somewhere to sit — these URLs are all found in different places and the
+	   hint is doing more work than the label is. */
+	.reviews {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.85rem;
+	}
+	.review-form {
+		display: grid;
+		gap: 0.3rem;
+	}
+	.review-label {
+		display: grid;
+		gap: 0.05rem;
+	}
+	.review-name {
+		font-size: 0.85rem;
+		font-weight: 700;
+	}
+	.review-row {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
+	}
+	.review-row .field-input {
+		flex: 1;
+		min-width: 0;
+	}
+	.review-save {
+		flex: none;
+	}
+	/* The field wins the width on a phone; the button drops under it rather than
+	   squeezing a URL into a third of the screen. */
+	@media (max-width: 30rem) {
+		.review-row {
+			flex-wrap: wrap;
+		}
+		.review-row .field-input {
+			flex-basis: 100%;
+		}
+	}
 
 	.actions {
 		display: flex;
@@ -775,7 +926,6 @@
 	   their light values are hand-picked rather than token-derived. Interactive
 	   pieces carve out .on / :disabled so a bare dark override can't outrank the
 	   state rules on specificity. */
-	:global(:root[data-theme='dark']) .head-sub,
 	:global(:root[data-theme='dark']) .note,
 	:global(:root[data-theme='dark']) .hint,
 	:global(:root[data-theme='dark']) .fine-print,

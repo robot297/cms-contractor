@@ -1,61 +1,88 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
 	<!--
+		The share card.
+
 		Centered on purpose. iMessage (and Slack's compact layout) crop link previews
 		toward the middle, so anything parked on an edge gets cut. Everything here
-		lives inside roughly the central 800x460, well clear of every edge.
+		lives inside roughly the central 800x420, well clear of every edge.
+
+		QUIET on purpose, too. This used to carry the full headline, the accent slab
+		and a two-line subtitle — the whole hero, shrunk. In a message bubble the
+		image is small and the platform prints the title and the domain UNDER it, so
+		all that text arrived as a grey smear with the real title repeating beneath
+		it. A mark, a name and one line is what survives being 300px wide.
+
+		The palette is Voltage's dark set — the app's default, and the one a first
+		visitor lands on. Safety yellow is gone from every theme; a card still
+		wearing it was advertising a product that no longer looks like that.
 
 		static/og.png is the rendered copy that og:image actually points at.
 		Regenerate after editing this file:
 		  python3 -c "import cairosvg; cairosvg.svg2png(url='static/og.svg', \
 		    write_to='static/og.png', output_width=1200, output_height=630, \
-		    background_color='#0b0d11')"
+		    background_color='#060911')"
 	-->
 	<defs>
-		<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-			<stop offset="0" stop-color="#171a21" />
-			<stop offset="1" stop-color="#0b0d11" />
+		<linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+			<stop offset="0" stop-color="#0d1420" />
+			<stop offset="1" stop-color="#060911" />
 		</linearGradient>
-		<radialGradient id="glow" cx="0.5" cy="0.05" r="0.85">
-			<stop offset="0" stop-color="#ffcc00" stop-opacity="0.1" />
-			<stop offset="0.55" stop-color="#ffcc00" stop-opacity="0.03" />
-			<stop offset="1" stop-color="#ffcc00" stop-opacity="0" />
+		<radialGradient id="glow" cx="0.5" cy="0.08" r="0.8">
+			<stop offset="0" stop-color="#2ec9ff" stop-opacity="0.18" />
+			<stop offset="0.55" stop-color="#2ec9ff" stop-opacity="0.05" />
+			<stop offset="1" stop-color="#2ec9ff" stop-opacity="0" />
 		</radialGradient>
+		<linearGradient id="sweep" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0" stop-color="#2ec9ff" />
+			<stop offset="1" stop-color="#8b6cff" />
+		</linearGradient>
 	</defs>
 
 	<rect width="1200" height="630" fill="url(#bg)" />
 	<rect width="1200" height="630" fill="url(#glow)" />
 
-	<!-- Brand lockup: wordmark over a short yellow rule -->
+	<!-- The mark. Drawn rather than set in a font: an icon that depends on a
+	     typeface being installed is an icon that renders as a box on the machine
+	     that does not have it. -->
+	<g transform="translate(600 232)">
+		<rect x="-56" y="-56" width="112" height="112" rx="30" fill="url(#sweep)" />
+		<!-- A "C": a ring with its right side left open. The dash pattern is a
+		     fraction of the circumference (2πr ≈ 213 at r=34), so the gap stays put
+		     at any size, and the rotation places that gap on the right — the stroke
+		     otherwise starts at 3 o'clock and leaves the opening at the bottom,
+		     which reads as a horseshoe rather than a letter. -->
+		<circle
+			cx="0"
+			cy="0"
+			r="34"
+			fill="none"
+			stroke="#04121c"
+			stroke-width="15"
+			stroke-linecap="round"
+			stroke-dasharray="150 63"
+			transform="rotate(53)" />
+	</g>
+
+	<!-- Wordmark. Letterspaced small caps rather than a big title: the platform is
+	     about to print the title itself, and two titles is one too many. -->
 	<text
 		x="600"
-		y="150"
+		y="378"
 		text-anchor="middle"
-		font-size="27"
+		font-size="34"
 		font-weight="700"
 		fill="#ffffff"
-		letter-spacing="7">CONTRACTOR CRM</text>
-	<rect x="562" y="178" width="76" height="5" rx="2.5" fill="#ffcc00" />
+		letter-spacing="9">CONTRACTOR CRM</text>
 
-	<!-- Headline. Second line takes the yellow marker, matching the landing hero. -->
+	<rect x="566" y="410" width="68" height="5" rx="2.5" fill="url(#sweep)" />
+
+	<!-- The one line. Same words as og:description, so the card and the text under
+	     it agree rather than saying two different things about the same product. -->
 	<text
 		x="600"
-		y="318"
+		y="474"
 		text-anchor="middle"
-		font-size="64"
-		font-weight="800"
-		fill="#ffffff">Manage client relationships</text>
-	<rect x="432" y="350" width="336" height="84" rx="14" fill="#ffcc00" />
-	<text
-		x="600"
-		y="410"
-		text-anchor="middle"
-		font-size="64"
-		font-weight="800"
-		fill="#14171c">with ease.</text>
-
-	<!-- Subhead -->
-	<g text-anchor="middle" fill="#c3c9d4" font-size="29" font-weight="400">
-		<text x="600" y="506">Simple, powerful contractor enablement.</text>
-		<text x="600" y="548">Focus more on your projects and less on the tedium.</text>
-	</g>
+		font-size="27"
+		font-weight="400"
+		fill="#b6c4d4">Powerful yet simple client relation management.</text>
 </svg>

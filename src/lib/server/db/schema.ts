@@ -707,8 +707,9 @@ export const contractorSettings = pgTable('contractor_settings', {
 	// links behind the bar's hamburger, 'bottom' moves them to a fixed tab bar like
 	// the customer portal's. A preference, not a capability — the same links either
 	// way, and above the desktop breakpoint the rail in the bar is the nav
-	// regardless. See NAV_PLACEMENTS.
-	navPlacement: text('nav_placement').notNull().default('top'),
+	// regardless. See NAV_PLACEMENTS and DEFAULT_NAV_PLACEMENT, which this default
+	// must stay in step with.
+	navPlacement: text('nav_placement').notNull().default('bottom'),
 	// Getting-started Guide. Only the contractor's own choice is stored — whether a
 	// step is done is always derived from their real Customers / Orders / Invites /
 	// Assignments. See docs/adr/0004-derive-guide-progress-from-domain-data.md.
@@ -729,6 +730,41 @@ export const contractorSettings = pgTable('contractor_settings', {
 		.$onUpdate(() => new Date())
 		.notNull()
 });
+
+/**
+ * Where this contractor asks for reviews, one row per platform they use.
+ *
+ * A table rather than a column on `contractor_settings`, because this is a set
+ * and not a field: a contractor uses two of these or six, the list grows as
+ * platforms come and go, and a column per platform would mean a migration every
+ * time. Keyed by (contractor, platform) so "their Google link" is one row that
+ * is updated in place — there is no such thing as two Google links.
+ *
+ * `platform` is text carrying a `REVIEW_PLATFORMS` id rather than a pg enum, for
+ * the reason the id list documents: dropping a platform from the catalogue must
+ * leave the contractor's pasted URL alone rather than failing a constraint. An
+ * unrecognised row is simply not read.
+ *
+ * No `enabled` flag. A link that exists is offered; removing it is deleting the
+ * row. A boolean would give two ways to mean "don't show this" and the settings
+ * form would have to explain the difference between them.
+ */
+export const reviewLink = pgTable(
+	'review_link',
+	{
+		contractorId: text('contractor_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		platform: text('platform').notNull(),
+		url: text('url').notNull(),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+		updatedAt: timestamp('updated_at')
+			.defaultNow()
+			.$onUpdate(() => new Date())
+			.notNull()
+	},
+	(table) => [primaryKey({ columns: [table.contractorId, table.platform] })]
+);
 
 // A contractor's billing standing. Exactly one row per contractor, provisioned on
 // signup (or lazily on their first contractor page load) and never absent.

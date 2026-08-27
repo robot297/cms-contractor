@@ -109,6 +109,12 @@ export function sentryOptions() {
 		dsn: ENV.SENTRY_DSN!.trim(),
 		environment: ENV.SENTRY_ENVIRONMENT?.trim() || undefined,
 		tracesSampleRate: ENV.SENTRY_TRACES_SAMPLE_RATE ?? 0.1,
+		// The container's own healthcheck, dropped before it is sampled. It runs
+		// every 30s forever, so at the default rate it would spend a few hundred
+		// traces a day proving that a route which returns a literal still returns
+		// it. Errors are unaffected — this drops transactions only, so a healthz
+		// that starts throwing is still reported.
+		ignoreTransactions: ['GET /healthz'],
 		// The scrubbing above is the safety net; this is the thing that stops IPs and
 		// session cookies being attached in the first place. Leave it off.
 		sendDefaultPii: false,

@@ -59,10 +59,16 @@
 	// Social-share (Open Graph / Twitter) card defaults for the whole site. Pages
 	// keep their own <title>; these give a nice preview when a link is shared.
 	const SITE_NAME = 'Contractor CRM';
-	const OG_TITLE = 'Contractor CRM — manage client relationships with ease';
-	const OG_DESCRIPTION =
-		'Simple, powerful contractor enablement. Focus more on your projects and less on the tedium.';
-	const OG_IMAGE_ALT = 'Contractor CRM — manage client relationships with ease';
+	/*
+	 * SHORT on purpose. Apple's link presentation gives the title one line under
+	 * the image and truncates the rest, so "Contractor CRM — manage client
+	 * relationships with ease" arrived in a message as "Contractor CRM — manage
+	 * client relat…". The sentence moved to the description, which is the field
+	 * Slack, X and LinkedIn actually render and iMessage does not miss.
+	 */
+	const OG_TITLE = 'Contractor CRM';
+	const OG_DESCRIPTION = 'Powerful yet simple client relation management.';
+	const OG_IMAGE_ALT = 'Contractor CRM — powerful yet simple client relation management';
 
 	const origin = $derived(data.canonicalOrigin);
 	const ogImage = $derived(`${origin}/og.png`);
@@ -71,6 +77,17 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
+	<!--
+		iOS wants a PNG it can round off itself, and it will not take the SVG above:
+		Safari ignores `rel="icon"` for the home-screen and link-presentation icon
+		and looks for this one. Without it a shared link fell back to a screenshot of
+		the page — which on a landing page is a grey slab of hero — or to nothing.
+		180px is the size Apple asks for and downsamples from.
+	-->
+	<link rel="apple-touch-icon" href="{origin}/apple-touch-icon.png" />
+	<!-- The colour the phone paints its own chrome with while the page is open. -->
+	<meta name="theme-color" content="#0b111a" media="(prefers-color-scheme: dark)" />
+	<meta name="theme-color" content="#eef4fb" media="(prefers-color-scheme: light)" />
 
 	<!-- Open Graph (used by iMessage, Slack, Facebook, LinkedIn…) -->
 	<meta property="og:type" content="website" />

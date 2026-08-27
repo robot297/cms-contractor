@@ -6,7 +6,7 @@ import {
 } from '$lib/server/templates.server';
 import { getLimitStatus, getSubscriptionView } from '$lib/server/billing.server';
 import { isEmailConfigured, isEmailDevToolsEnabled } from '$lib/server/email.server';
-import { isNavPlacement } from '$lib/crm';
+import { DEFAULT_NAV_PLACEMENT, isNavPlacement } from '$lib/crm';
 import { isDemoUser } from '$lib/server/demo.server';
 import { findDevCustomer, isViewAsEnabled } from '$lib/server/view-as.server';
 import { isDevLoginEnabled } from '$lib/server/dev-login.server';
@@ -60,7 +60,9 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		awaitingReply,
 		// Where this contractor keeps their navigation on a phone. Read here rather
 		// than per-page because the bar and the bottom bar are both layout chrome.
-		navPlacement: isNavPlacement(settings.navPlacement) ? settings.navPlacement : 'top',
+		navPlacement: isNavPlacement(settings.navPlacement)
+			? settings.navPlacement
+			: DEFAULT_NAV_PLACEMENT,
 		viewAsEnabled,
 		viewAsCustomer,
 		// The real-session swap needs the seeded accounts as well as the dev-tools
