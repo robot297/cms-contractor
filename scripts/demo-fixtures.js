@@ -9,6 +9,13 @@
 //
 // Follow-ups are expressed as a day offset from seed time (`followUpDays`);
 // each seeder converts that to an absolute Date when it runs. `null` = none.
+//
+// Every seeded address is one of Resend's own test addresses
+// (https://resend.com/docs/dashboard/emails/send-test-emails). `example.com` is
+// a reserved domain the provider rejects with a 422, so a demo contractor who
+// hit "Send" filled the Resend logs with errors. `delivered+<label>@resend.dev`
+// accepts the send and drops it, and the `+label` keeps each fixture address
+// distinct — customer and subcontractor emails are unique per contractor.
 
 /**
  * @typedef {{
@@ -36,7 +43,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'mina',
 		name: 'Mina Patel',
-		email: 'mina.patel@example.com',
+		email: 'delivered+mina.patel@resend.dev',
 		phone: '(555) 201-4477',
 		address: '88 Cedar Lane',
 		city: 'Minneapolis',
@@ -49,7 +56,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'luis',
 		name: 'Luis Ortega',
-		email: 'luis.ortega@example.com',
+		email: 'delivered+luis.ortega@resend.dev',
 		phone: '(555) 332-9080',
 		address: '14 Elm Street',
 		city: 'Minneapolis',
@@ -62,7 +69,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'nina',
 		name: 'Nina Brooks',
-		email: 'nina.brooks@example.com',
+		email: 'delivered+nina.brooks@resend.dev',
 		phone: '(555) 776-1220',
 		address: '901 Oak Avenue',
 		city: 'Saint Paul',
@@ -75,7 +82,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'sam',
 		name: 'Sam Rivera',
-		email: 'sam.rivera@example.com',
+		email: 'delivered+sam.rivera@resend.dev',
 		phone: null,
 		address: null,
 		city: null,
@@ -90,7 +97,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'aisha',
 		name: 'Aisha Khan',
-		email: 'aisha.khan@example.com',
+		email: 'delivered+aisha.khan@resend.dev',
 		phone: '(555) 118-2043',
 		address: '27 Birch Road',
 		city: 'Saint Paul',
@@ -103,7 +110,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'bianca',
 		name: 'Bianca Rossi',
-		email: 'bianca.rossi@example.com',
+		email: 'delivered+bianca.rossi@resend.dev',
 		phone: '(555) 204-8891',
 		address: '3 Willow Court',
 		city: 'Minneapolis',
@@ -116,7 +123,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'caleb',
 		name: 'Caleb Nguyen',
-		email: 'caleb.nguyen@example.com',
+		email: 'delivered+caleb.nguyen@resend.dev',
 		phone: '(555) 660-1177',
 		address: '410 Lakeview Avenue',
 		city: 'Edina',
@@ -129,7 +136,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'divya',
 		name: 'Divya Rao',
-		email: 'divya.rao@example.com',
+		email: 'delivered+divya.rao@resend.dev',
 		phone: null,
 		address: '88 Maple Way',
 		city: 'Saint Paul',
@@ -142,7 +149,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'elena',
 		name: 'Elena Popov',
-		email: 'elena.popov@example.com',
+		email: 'delivered+elena.popov@resend.dev',
 		phone: '(555) 771-3320',
 		address: '15 Harbor St',
 		city: 'Minneapolis',
@@ -155,7 +162,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'grace',
 		name: 'Grace Owusu',
-		email: 'grace.owusu@example.com',
+		email: 'delivered+grace.owusu@resend.dev',
 		phone: '(555) 902-4415',
 		address: '502 Ridgeline Dr',
 		city: 'Edina',
@@ -168,7 +175,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'hank',
 		name: 'Hank Miller',
-		email: 'hank.miller@example.com',
+		email: 'delivered+hank.miller@resend.dev',
 		phone: '(555) 335-7788',
 		address: '9 Foundry Ln',
 		city: 'Saint Paul',
@@ -181,7 +188,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'priya',
 		name: 'Priya Shah',
-		email: 'priya.shah@example.com',
+		email: 'delivered+priya.shah@resend.dev',
 		phone: '(555) 447-9012',
 		address: '221 Orchard Ave',
 		city: 'Minneapolis',
@@ -194,7 +201,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'quentin',
 		name: 'Quentin Blake',
-		email: 'quentin.blake@example.com',
+		email: 'delivered+quentin.blake@resend.dev',
 		phone: null,
 		address: '64 Cannery Row',
 		city: 'Edina',
@@ -207,7 +214,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'tomas',
 		name: 'Tomás Vega',
-		email: 'tomas.vega@example.com',
+		email: 'delivered+tomas.vega@resend.dev',
 		phone: '(555) 613-5540',
 		address: '7 Kiln St',
 		city: 'Saint Paul',
@@ -220,7 +227,7 @@ export const DEMO_CUSTOMERS = [
 	{
 		key: 'wendy',
 		name: 'Wendy Zhao',
-		email: 'wendy.zhao@example.com',
+		email: 'delivered+wendy.zhao@resend.dev',
 		phone: '(555) 288-6603',
 		address: '133 Lakeview Ter',
 		city: 'Minneapolis',
@@ -316,7 +323,7 @@ export const DEMO_SUBCONTRACTORS = [
 	{
 		key: 'rae',
 		name: 'Rae Sparks',
-		email: 'rae.sparks@example.com',
+		email: 'delivered+rae.sparks@resend.dev',
 		phone: '(555) 480-1122',
 		company: 'Sparks Electric',
 		trade: 'Electrical',
@@ -330,7 +337,7 @@ export const DEMO_SUBCONTRACTORS = [
 	{
 		key: 'cody',
 		name: 'Cody Nash',
-		email: 'cody.nash@example.com',
+		email: 'delivered+cody.nash@resend.dev',
 		phone: '(555) 771-3346',
 		company: 'Nash Concrete',
 		trade: 'Concrete',

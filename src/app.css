@@ -1872,89 +1872,13 @@ dialog::backdrop {
 	cursor: default;
 	background: rgba(15, 23, 42, 0.45);
 }
-.contact-pop {
-	position: absolute;
-	right: 0;
-	top: calc(100% + 8px);
-	z-index: 100;
-	/* Wide enough for the composer's normalized pane — 300px squeezed the subject
-	   line and made the body feel like a chat input rather than an email. */
-	width: 360px;
-	max-width: 86vw;
-	background: var(--surface);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-card);
-	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
-	padding: 0.8rem;
-	display: grid;
-	gap: 0.6rem;
-}
-.contact-pop.up {
-	top: auto;
-	bottom: calc(100% + 8px);
-}
-/* The variant that carries a conversation above the composer. Wider because a
-   thread at 360px wraps every line twice, and capped because the dashboard's
-   popover must never grow past the viewport it is anchored in. */
-.contact-pop.wide {
-	width: 440px;
-	max-height: min(80vh, 34rem);
-	overflow-y: auto;
-}
-/* Dark mode used to paint this #20222e, which is LIGHTER than --surface (#1b1f26).
-   Everything inside it — the message bubbles above all — tints itself against
-   --surface, so every child landed darker than its own container and the whole
-   popover read as mud on mud. Using the same surface the children mix from puts
-   the tints back in the range they were designed for; the border and shadow are
-   what separate the popover from the page, which is their job anyway. */
-:root[data-theme='dark'] .contact-pop {
-	background: var(--surface);
-	border-color: var(--line-strong);
-	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
-}
-/* Phones get a bottom sheet instead of a popover.
-
-   `.contact-pop.up` and `.contact-pop.wide` MUST be named here too. Media queries
-   add no specificity, so this block is (0,1,0) while those are (0,2,0) — without
-   it the `.up` variant keeps its `bottom: calc(100% + 8px)`, and once
-   `position: fixed` applies that resolves against the viewport, parking the sheet
-   a full screen above the top edge. The scrim is its own fixed element, so the
-   symptom is a backdrop with nothing on it. `.wide` fails the same way through
-   its `width`, which would survive the sheet's `width: auto` and leave it hanging
-   off the right edge. */
-/* Phones get a centred modal card, and one SIZE — a fixed card rather than one that
-   shrinks to a three-line "Call" tab and grows for the thread, which made switching
-   channels feel like the modal was jumping around. It floats in the middle of the
-   screen (not stretched up from the bottom edge) with a little margin all round, and
-   scrolls inside; short tabs just leave room below rather than resizing the card.
-
-   `.contact-pop.up` and `.contact-pop.wide` MUST be named here too. Media queries add
-   no specificity, so this block is (0,1,0) while those are (0,2,0) — without it the
-   `.up` variant keeps its `bottom: calc(100% + 8px)` and, once `position: fixed`
-   applies, parks the card a full screen above the top edge. */
-@media (max-width: 480px) {
-	.contact-pop,
-	.contact-pop.up,
-	.contact-pop.wide {
-		position: fixed;
-		/* Centred vertically: top edge at the middle, pulled back up by half its own
-		   height. Longhands over `inset` so the `bottom` being corrected stays plain. */
-		top: 50%;
-		bottom: auto;
-		right: 0.75rem;
-		left: 0.75rem;
-		transform: translateY(-50%);
-		width: auto;
-		max-width: none;
-		height: 82vh;
-		max-height: 82vh;
-		/* Content stacks from the top; extra height stays empty rather than
-		   stretching the rows. */
-		align-content: start;
-		overflow-y: auto;
-		border-radius: var(--radius-card);
-	}
-}
+/* `.contact-pop` and its phone-modal block lived here: an anchored popover for the
+   contact panel, turned into a centred card below 480px by a media block that had
+   to re-name every variant to beat its own specificity. Every host now opens
+   `$lib/ContactDialog.svelte` instead — one native `<dialog>`, one size, no
+   anchoring to get wrong — so the popover is gone rather than kept "just in case".
+   `.contact-scrim` above stays: the order workspace's follow-up popover still uses
+   it. */
 
 /* ---------------------------------------------------------------- Status pill
    How a job or a record is doing. One shape, three tones, so the same state

@@ -60,6 +60,8 @@ const THREAD_PREVIEW = 20;
 type ConversationView = {
 	orderId: string;
 	projectName: string | null;
+	/** Whether the job is still live — the picker opens on an open one. */
+	active: boolean;
 	thread: { id: string; authorRole: string; body: string; createdAt: Date }[];
 };
 
@@ -118,6 +120,10 @@ export const load: PageServerLoad = async ({ locals }) => {
 		(conversations[o.customerId!] ??= []).push({
 			orderId: o.id,
 			projectName: o.projectName,
+			// Drives which conversation the panel opens on, and which group it sits
+			// under. A customer with four finished jobs and one in flight is being
+			// messaged about the one in flight.
+			active: isActiveState(o.state as ContractorOrderState),
 			// Newest first for the picker, but each thread reads oldest-first.
 			thread: (threads.get(o.id) ?? []).slice(-THREAD_PREVIEW).map((m) => ({
 				id: m.id,

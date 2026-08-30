@@ -78,6 +78,8 @@ export const DEV_LINKED_CUSTOMER_EMAIL = 'customer@upliftcollective.dev';
  * it is just not what a drive-time fixture should be demonstrating.
  *
  * The ZIPs are real, which matters: coordinates are resolved from them.
+ * Addresses are Resend test addresses for the reason given in
+ * scripts/demo-fixtures.js — sending to `example.com` is a provider 422.
  */
 const CUSTOMERS: SeedCustomer[] = [
 	{
@@ -93,7 +95,7 @@ const CUSTOMERS: SeedCustomer[] = [
 	{
 		key: 'marisol',
 		name: 'Marisol Vega',
-		email: 'marisol.vega@example.com',
+		email: 'delivered+marisol.vega@resend.dev',
 		phone: '(555) 240-8817',
 		address: '1180 Selby Avenue',
 		city: 'Saint Paul',
@@ -103,7 +105,7 @@ const CUSTOMERS: SeedCustomer[] = [
 	{
 		key: 'theo',
 		name: 'Theo Brandt',
-		email: 'theo.brandt@example.com',
+		email: 'delivered+theo.brandt@resend.dev',
 		phone: '(555) 771-3364',
 		address: '58 Woodland Road',
 		city: 'Edina',

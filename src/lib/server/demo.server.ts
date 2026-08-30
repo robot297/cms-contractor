@@ -184,8 +184,8 @@ async function seedDemoData(contractorId: string): Promise<void> {
 	// A couple of pending customer app-invites so the Customers pane's invites
 	// panel has something to show: one still active, one already expired.
 	const demoInvites = [
-		{ key: 'luis', email: 'luis.ortega@example.com', expiresInDays: 1 },
-		{ key: 'nina', email: 'nina.brooks@example.com', expiresInDays: -1 }
+		{ key: 'luis', email: 'delivered+luis.ortega@resend.dev', expiresInDays: 1 },
+		{ key: 'nina', email: 'delivered+nina.brooks@resend.dev', expiresInDays: -1 }
 	];
 	for (const inv of demoInvites) {
 		await db.insert(customerInvite).values({

@@ -38,7 +38,7 @@
 	import DocumentViewer from '$lib/DocumentViewer.svelte';
 	import MessageComposer from '$lib/MessageComposer.svelte';
 	import MessageThread from '$lib/MessageThread.svelte';
-	import ContactPanel from '$lib/ContactPanel.svelte';
+	import ContactDialog from '$lib/ContactDialog.svelte';
 	import InlineEditor from '$lib/InlineEditor.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import type { PageData, ActionData } from './$types';
@@ -792,37 +792,28 @@
 										onclick={() => (contactOpen = !contactOpen)}>💬</button
 									>
 									{#if contactOpen}
-										<!-- Dimmed click-away scrim so the composer is the focus. -->
-										<button
-											type="button"
-											aria-label="Close contact menu"
-											onclick={() => (contactOpen = false)}
-											class="contact-scrim"
-										></button>
-										<div class="contact-pop">
-											<ContactPanel
-												contact={{
-													name: customer.name,
-													email: customer.email,
-													phone: customer.phone,
-													preferredContact: customer.preferredContact
-												}}
-												project={order.projectName}
-												orderId={order.id}
-												conversations={[
-													{
-														orderId: order.id,
-														projectName: order.projectName,
-														thread: data.thread
-													}
-												]}
-												canChat={data.customerLinked}
-												customerId={order.customerId}
-												portal={data.portal}
-												onsent={() => (contactOpen = false)}
-												onclose={() => (contactOpen = false)}
-											/>
-										</div>
+										<ContactDialog
+											contact={{
+												name: customer.name,
+												email: customer.email,
+												phone: customer.phone,
+												preferredContact: customer.preferredContact
+											}}
+											project={order.projectName}
+											orderId={order.id}
+											conversations={[
+												{
+													orderId: order.id,
+													projectName: order.projectName,
+													thread: data.thread
+												}
+											]}
+											canChat={data.customerLinked}
+											customerId={order.customerId}
+											portal={data.portal}
+											onsent={() => (contactOpen = false)}
+											onclose={() => (contactOpen = false)}
+										/>
 									{/if}
 								</div>
 							{/if}

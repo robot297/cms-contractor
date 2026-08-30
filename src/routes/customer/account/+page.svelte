@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import PaletteSwitcher from '$lib/PaletteSwitcher.svelte';
 	import ThemeModeButton from '$lib/ThemeModeButton.svelte';
+	import ThemePreview from '$lib/ThemePreview.svelte';
 	import SupportForm from '$lib/SupportForm.svelte';
 	import type { PageData, ActionData } from './$types';
 
@@ -76,6 +77,10 @@
 				<ThemeModeButton />
 				<PaletteSwitcher />
 			</div>
+			<!-- The same miniature the contractor's settings shows. It comes out in the
+			     PORTAL's colours with no work here: `.shell` repoints --brand at the
+			     customer accent, and the preview reads tokens rather than names. -->
+			<div class="preview-slot"><ThemePreview /></div>
 		</div>
 
 		{#if data.active.length > 0 || data.past.length > 0}
@@ -117,12 +122,8 @@
 		     duplicated, which is the shape of thing that gets fixed on one side and
 		     not the other. Two hosts, one form; the accent differs because the
 		     portal repoints `--brand`, and nothing here has to know that. -->
+		<!-- No label and no blurb. The tab you pressed to get here says Support. -->
 		<div class="group">
-			<span class="group-label">Support</span>
-			<p class="group-hint">
-				Something broken, or something missing? This goes straight to the people who build the app —
-				add a screenshot if it helps.
-			</p>
 			<SupportForm
 				configured={data.support.configured}
 				captchaSiteKey={data.support.captchaSiteKey}
@@ -249,6 +250,10 @@
 	/* One row, wrapping rather than shrinking — at a phone width two pills do not
 	   fit a line, and a squeezed palette trigger loses the name that is the whole
 	   reason it is not just a swatch. */
+	.preview-slot {
+		max-width: 20rem;
+		padding: 0.35rem 0.35rem 0.15rem;
+	}
 	.appearance-row {
 		display: flex;
 		flex-wrap: wrap;

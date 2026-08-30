@@ -22,28 +22,17 @@ import { test, expect, clickUntil, signIn, DEV_CONTRACTOR } from './fixtures/app
  * open their own orders for them.
  */
 async function pickProject(panel: import('@playwright/test').Locator, name: string) {
-	const tab = panel.getByRole('tab', { name });
-	if ((await tab.count()) > 0) {
-		await tab.click();
+	// One control for every case: the per-job tab strip and the ‹ › stepper this
+	// used to walk are both gone, replaced by a native select that can name every
+	// job at once — which on a phone is the difference between "the job from
+	// March" being visible and being four taps away.
+	const select = panel.locator('.proj-pick select');
+	if ((await select.count()) > 0) {
+		await select.selectOption({ label: name });
 		return;
 	}
-	const title = panel.locator('.proj-title');
-	const next = panel.getByRole('button', { name: 'Next project' });
-	const read = async () => ((await title.textContent()) ?? '').trim();
-
-	// Walk forward exactly one cycle. Bounded by the wrap rather than by a
-	// number, because this customer's job count is not fixed: the stepper's list
-	// is every order anybody has opened against them, and the suite adds to it.
-	// A plain loop rather than a retried assertion — stepping is local state, so
-	// each press is instant and a `toPass` would spend its budget on backoff.
-	const start = await read();
-	if (start === name) return;
-	for (;;) {
-		await next.click();
-		const now = await read();
-		if (now === name) return;
-		if (now === start) throw new Error(`"${name}" is not among this customer's jobs`);
-	}
+	// One job, so there is nothing to pick — but it had better be the right one.
+	await expect(panel.locator('.proj-one')).toHaveText(name);
 }
 
 test.describe('dev workspace fixture', () => {
@@ -102,9 +91,9 @@ test.describe('dev workspace fixture', () => {
 		const kitchen = card(page, 'Kitchen remodel');
 		await clickUntil(
 			kitchen.getByRole('button', { name: /^Message / }),
-			page.locator('.contact-pop .chat')
+			page.locator('dialog.contact-dialog .chat')
 		);
-		const pop = page.locator('.contact-pop');
+		const pop = page.locator('dialog.contact-dialog');
 
 		// Opens on Chat, with the reply box right there.
 		await expect(pop.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
@@ -160,7 +149,7 @@ test.describe('dev workspace fixture', () => {
 		const url = page.url();
 		await clickUntil(
 			kitchen.getByRole('button', { name: /^Message / }),
-			page.locator('.contact-pop .chat')
+			page.locator('dialog.contact-dialog .chat')
 		);
 		expect(page.url()).toBe(url);
 	});
@@ -176,13 +165,15 @@ test.describe('dev workspace fixture', () => {
 		const kitchen = card(page, 'Kitchen remodel');
 		await clickUntil(
 			kitchen.getByRole('button', { name: /^Message / }),
-			page.locator('.contact-pop .chat')
+			page.locator('dialog.contact-dialog .chat')
 		);
 		// What the customer actually asked, without a trip to the order page —
 		// which is the point of putting the thread behind this button at all.
-		await expect(page.locator('.contact-pop .chat')).toContainText('when the cabinets land');
+		await expect(page.locator('dialog.contact-dialog .chat')).toContainText(
+			'when the cabinets land'
+		);
 		// And somewhere to answer it.
-		await expect(page.locator('.contact-pop textarea').first()).toBeVisible();
+		await expect(page.locator('dialog.contact-dialog textarea').first()).toBeVisible();
 
 		// Opened on the NEWEST message, not the oldest. The thread scrolls itself;
 		// wrapping it in a second scroll container silently broke that, and the
@@ -193,7 +184,7 @@ test.describe('dev workspace fixture', () => {
 		// box the contractor could only see the top of. Only "is the newest message
 		// actually on screen" catches that — `toBeInViewport` fails on content
 		// clipped by an ancestor, which is exactly the failure.
-		const newest = page.locator('.contact-pop .chat .body').last();
+		const newest = page.locator('dialog.contact-dialog .chat .body').last();
 		await expect(newest).toContainText('is the old sink something');
 		await expect(newest).toBeInViewport();
 	});
@@ -210,7 +201,7 @@ test.describe('dev workspace fixture', () => {
 			page.getByRole('tablist', { name: 'How to reach them' })
 		);
 
-		const panel = page.locator('.contact-pop');
+		const panel = page.locator('dialog.contact-dialog');
 		// All four, not the three the directory used to manage.
 		for (const name of ['Chat', 'Email', 'Text', 'Call']) {
 			await expect(panel.getByRole('tab', { name })).toBeVisible();

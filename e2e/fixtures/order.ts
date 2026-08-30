@@ -136,7 +136,9 @@ export function assignedCrew(page: Page): Locator {
  * simply where the customer is named.
  */
 export async function openContactComposer(page: Page): Promise<Locator> {
-	const composer = page.locator('.contact-pop');
+	// One modal for every surface that reaches somebody — `$lib/ContactDialog.svelte`
+	// — in place of the anchored `.contact-pop` this used to hunt for.
+	const composer = page.locator('dialog.contact-dialog');
 	await clickUntil(
 		page.locator('.head-customer').getByRole('button', { name: /^Message / }),
 		composer

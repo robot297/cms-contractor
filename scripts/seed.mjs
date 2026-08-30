@@ -131,7 +131,7 @@ async function main() {
 	if (luis && !luis.userId) {
 		await sql`
 			insert into customer_invite (id, customer_id, contractor_id, customer_email, token, status, expires_at)
-			values (${randomUUID()}, ${luis.id}, ${contractor.id}, 'luis.ortega@example.com', ${randomUUID()}, 'pending', now() + interval '24 hours')
+			values (${randomUUID()}, ${luis.id}, ${contractor.id}, 'delivered+luis.ortega@resend.dev', ${randomUUID()}, 'pending', now() + interval '24 hours')
 		`;
 	}
 

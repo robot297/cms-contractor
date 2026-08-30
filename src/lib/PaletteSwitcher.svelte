@@ -395,14 +395,30 @@
 		font-size: 0.76rem;
 		color: var(--fg-muted);
 	}
+	/* TWO UP. Thirteen palettes one-per-line is a list you scroll past rather than
+	   compare, and comparing is the whole job — the swatches want to be near each
+	   other. Two columns puts most of the set on screen at once and halves the
+	   scroll. `minmax(0, …)` so a long name shrinks its cell instead of widening
+	   the column and pushing the grid sideways. */
 	.sheet-list {
 		display: grid;
-		gap: 1px;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.35rem;
 	}
-	/* Roomier rows than the desktop menu's: this is a thumb target, and the
+	/* Roomier than the desktop menu's rows: this is a thumb target, and the
 	   swatch is the thing being judged, so it gets to be bigger too. */
 	.sheet-list .opt {
-		padding: 0.6rem 0.55rem;
+		padding: 0.55rem 0.5rem;
+		gap: 0.45rem;
+	}
+	/* Below about 360px a two-up cell is ~147px, and every blurb ellipsises — at
+	   which point it is not a description, it is three words and a "…". The
+	   swatch and the name still answer "which one is this", so the blurb is the
+	   thing that goes rather than the second column. */
+	@media (max-width: 22.5rem) {
+		.sheet-list .blurb {
+			display: none;
+		}
 	}
 	.sheet-list .swatch {
 		width: 30px;

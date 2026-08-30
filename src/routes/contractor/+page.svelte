@@ -4,7 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { followUpLabel, followUpUrgency, portalInfoFor, PROJECT_TYPES } from '$lib/crm';
 	import { toast } from '$lib/toast.svelte';
-	import ContactPanel from '$lib/ContactPanel.svelte';
+	import ContactDialog from '$lib/ContactDialog.svelte';
 	import OrderCard from '$lib/OrderCard.svelte';
 	import Guide from '$lib/Guide.svelte';
 	import TrialNotice from '$lib/TrialNotice.svelte';
@@ -78,18 +78,6 @@
 	// Which due card's contact panel is open. Which TAB it opens on is the panel's
 	// own business now — it knows which channels this customer can be reached on.
 	let contactOpenId: string | null = $state(null);
-
-	/**
-	 * Bring a just-opened popover fully into view.
-	 *
-	 * Anchored popovers are positioned relative to their button, which says
-	 * nothing about whether the result is on screen — a card low in the list opens
-	 * one that runs off the bottom. Measured after a frame so the height includes
-	 * the thread that has just rendered inside it.
-	 */
-	function revealPopover(node: HTMLElement) {
-		requestAnimationFrame(() => node.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
-	}
 </script>
 
 <svelte:head>
@@ -229,40 +217,32 @@
 									{/if}
 								</button>
 								{#if contactOpenId === o.id}
-									<button
-										type="button"
-										aria-label="Close contact menu"
-										onclick={() => (contactOpenId = null)}
-										class="contact-scrim"
-									></button>
-									<!-- Opens DOWNWARD: this panel carries a conversation, and opening a
-								     tall box upward from a card near the top of the page put its
-								     newest message — the thing it exists to show — above the top of
-								     the screen. -->
-									<div class="contact-pop wide" {@attach revealPopover}>
-										<ContactPanel
-											contact={{
-												name: o.customerName,
-												email: o.customerEmail,
-												phone: o.customerPhone,
-												preferredContact: o.customerPreferredContact
-											}}
-											project={o.projectName ?? ''}
-											orderId={o.id}
-											conversations={[
-												{ orderId: o.id, projectName: o.projectName, thread: o.thread }
-											]}
-											canChat={o.customerLinked}
-											customerId={o.customerId}
-											portal={portalInfoFor({
-												linked: o.customerLinked,
-												customerId: o.customerId,
-												invites: data.invites
-											})}
-											onsent={() => (contactOpenId = null)}
-											onclose={() => (contactOpenId = null)}
-										/>
-									</div>
+									<!-- One modal, the same one every surface opens. It used to be an
+									     anchored popover that had to be scrolled into view after
+									     opening, because a card low in the list opened one that ran
+									     off the bottom of the screen. -->
+									<ContactDialog
+										contact={{
+											name: o.customerName,
+											email: o.customerEmail,
+											phone: o.customerPhone,
+											preferredContact: o.customerPreferredContact
+										}}
+										project={o.projectName ?? ''}
+										orderId={o.id}
+										conversations={[
+											{ orderId: o.id, projectName: o.projectName, thread: o.thread }
+										]}
+										canChat={o.customerLinked}
+										customerId={o.customerId}
+										portal={portalInfoFor({
+											linked: o.customerLinked,
+											customerId: o.customerId,
+											invites: data.invites
+										})}
+										onsent={() => (contactOpenId = null)}
+										onclose={() => (contactOpenId = null)}
+									/>
 								{/if}
 							</div>
 						{/snippet}

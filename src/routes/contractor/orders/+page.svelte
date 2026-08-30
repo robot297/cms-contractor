@@ -4,7 +4,7 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { customerLocation, portalInfoFor, PROJECT_TYPES, type PortalInfo } from '$lib/crm';
-	import ContactPanel from '$lib/ContactPanel.svelte';
+	import ContactDialog from '$lib/ContactDialog.svelte';
 	import OrderCard from '$lib/OrderCard.svelte';
 	import type { PageData, ActionData } from './$types';
 
@@ -50,7 +50,6 @@
 
 	// Contact dialog, driven off the already-loaded customer directory. The body
 	// is the shared ContactComposer (message + channel picker).
-	let customerDialog: HTMLDialogElement | undefined = $state();
 	let customerDetail: (typeof data.customers)[number] | null = $state(null);
 	// The project of the order the composer was opened from, so `{{project}}`
 	// resolves in email templates.
@@ -80,7 +79,6 @@
 		contactCustomerId = id;
 		contactPortal = portalInfoFor({ linked, customerId: id, invites: data.invites });
 		contactInfoOpen = false;
-		if (customerDetail) customerDialog?.showModal();
 	}
 
 	// New order modal
@@ -265,87 +263,84 @@
 	</section>
 </div>
 
-<!-- Contact dialog -->
-<dialog
-	bind:this={customerDialog}
-	style="border: none; border-radius: 16px; padding: 0; max-width: 420px; width: 92vw; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);"
->
-	{#if customerDetail}
-		{@const c = customerDetail}
-		<div style="display: grid; gap: 0.7rem; padding: 1.25rem;">
-			<div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
-				<div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0;">
-					<h2 style="margin: 0; font-size: 1.1rem; overflow-wrap: anywhere;">{c.name}</h2>
-					<button
-						type="button"
-						class="info-btn"
-						class:on={contactInfoOpen}
-						title="Customer details"
-						aria-label="Customer details"
-						aria-expanded={contactInfoOpen}
-						onclick={() => (contactInfoOpen = !contactInfoOpen)}
-					>
-						<svg
-							width="14"
-							height="14"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2.2"
-							stroke-linecap="round"
-							aria-hidden="true"
-						>
-							<circle cx="12" cy="12" r="10" />
-							<line x1="12" y1="11" x2="12" y2="16.5" />
-							<circle cx="12" cy="7.5" r="0.5" fill="currentColor" />
-						</svg>
-					</button>
-				</div>
-				<button
-					type="button"
-					onclick={() => customerDialog?.close()}
-					style="border: none; background: none; font-size: 1.2rem; cursor: pointer; color: #57606a;"
-					>✕</button
+<!-- Reaching a customer, in the same modal every other surface opens. It used to
+     be a hand-styled `<dialog>` here and an anchored popover everywhere else, so
+     the same panel came in two sizes with two sets of chrome around it. What is
+     genuinely this page's own — the customer's details, behind the ⓘ — goes in as
+     the header and detail slots rather than as a second wrapper. -->
+{#if customerDetail}
+	{@const c = customerDetail}
+	<ContactDialog
+		contact={c}
+		project={contactProject}
+		orderId={contactOrderId}
+		conversations={contactCanChat && contactOrderId
+			? [
+					{
+						orderId: contactOrderId,
+						projectName: contactProject,
+						thread: data.threads[contactOrderId] ?? []
+					}
+				]
+			: []}
+		canChat={contactCanChat}
+		customerId={contactCustomerId}
+		portal={contactPortal}
+		onsent={() => (customerDetail = null)}
+		onclose={() => (customerDetail = null)}
+	>
+		{#snippet headerExtra()}
+			<button
+				type="button"
+				class="info-btn"
+				class:on={contactInfoOpen}
+				title="Customer details"
+				aria-label="Customer details"
+				aria-expanded={contactInfoOpen}
+				onclick={() => (contactInfoOpen = !contactInfoOpen)}
+			>
+				<svg
+					width="14"
+					height="14"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2.2"
+					stroke-linecap="round"
+					aria-hidden="true"
 				>
-			</div>
+					<circle cx="12" cy="12" r="10" />
+					<line x1="12" y1="11" x2="12" y2="16.5" />
+					<circle cx="12" cy="7.5" r="0.5" fill="currentColor" />
+				</svg>
+			</button>
+		{/snippet}
+		{#snippet details()}
 			{#if contactInfoOpen}
 				<div class="contact-info" transition:slide={{ duration: 180 }}>
 					<div style="word-break: break-word;">
-						<span style="color: #57606a;">Email:</span>
+						<span style="color: var(--fg-muted);">Email:</span>
 						{c.email}
 					</div>
-					{#if c.phone}<div><span style="color: #57606a;">Phone:</span> {c.phone}</div>{/if}
-					{#if c.address}<div><span style="color: #57606a;">Address:</span> {c.address}</div>{/if}
+					{#if c.phone}<div><span style="color: var(--fg-muted);">Phone:</span> {c.phone}</div>{/if}
+					{#if c.address}
+						<div><span style="color: var(--fg-muted);">Address:</span> {c.address}</div>
+					{/if}
 					{#if c.notes}
-						<div style="margin-top: 0.3rem; color: #57606a; white-space: pre-wrap;">{c.notes}</div>
+						<div style="margin-top: 0.3rem; color: var(--fg-muted); white-space: pre-wrap;">
+							{c.notes}
+						</div>
 					{/if}
 					<a
 						href={resolve('/contractor/people')}
-						style="justify-self: start; font-size: 0.85rem; color: #0969da;">Manage in people →</a
+						style="justify-self: start; font-size: 0.85rem; color: var(--brand-deep);"
+						>Manage in people →</a
 					>
 				</div>
 			{/if}
-			<ContactPanel
-				contact={c}
-				project={contactProject}
-				orderId={contactOrderId}
-				conversations={contactCanChat && contactOrderId
-					? [
-							{
-								orderId: contactOrderId,
-								projectName: contactProject,
-								thread: data.threads[contactOrderId] ?? []
-							}
-						]
-					: []}
-				canChat={contactCanChat}
-				customerId={contactCustomerId}
-				portal={contactPortal}
-				onsent={() => customerDialog?.close()}
-			/>
-		</div>
-	{/if}
-</dialog>
+		{/snippet}
+	</ContactDialog>
+{/if}
 
 <!-- New order modal -->
 <dialog bind:this={newOrderDialog} class="neworder">

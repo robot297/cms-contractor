@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PaletteSwitcher from '$lib/PaletteSwitcher.svelte';
 	import ThemeModeButton from '$lib/ThemeModeButton.svelte';
+	import ThemePreview from '$lib/ThemePreview.svelte';
 	import { REVIEW_PLATFORMS, MAX_REVIEW_URL } from '$lib/reviews';
 	import SupportForm from '$lib/SupportForm.svelte';
 	import { onMount, untrack } from 'svelte';
@@ -300,6 +301,11 @@
 					<ThemeModeButton />
 					<PaletteSwitcher />
 				</div>
+				<!-- What the two controls above actually do, as a picture. Two swatches
+				     in a menu cannot show geometry, type or the atmosphere behind the
+				     app, and those are three quarters of what separates these themes —
+				     so the answer used to be "switch it and go and look". -->
+				<ThemePreview />
 			</section>
 
 			<!-- Where the nav sits on a phone. Chrome rather than configuration, so it
@@ -455,12 +461,9 @@
 		</div>
 	{:else if tab === 'support'}
 		<div class="tab-panel">
+			<!-- No heading and no blurb. The tab you pressed to get here says Support,
+			     and the form says what it is by being a form. -->
 			<section class="card">
-				<h2>Report an issue</h2>
-				<p class="hint">
-					Something broken, or something missing? This files it with us directly — add a screenshot
-					if it helps.
-				</p>
 				<SupportForm
 					configured={data.support.configured}
 					captchaSiteKey={data.support.captchaSiteKey}
@@ -715,6 +718,13 @@
 	   the palette picker. They were stacked, which put a heading over a lone
 	   control twice and made the palette read as an afterthought under the theme.
 	   Wraps rather than shrinks — at a phone width two pills do not fit a line. */
+	/* The preview sits under the controls at a readable size rather than spanning
+	   a 760px settings column — it is a thumbnail of the app, and stretched to
+	   full width it stops reading as one. */
+	.card :global(.preview) {
+		max-width: 22rem;
+		margin-top: 0.7rem;
+	}
 	.appearance-row {
 		display: flex;
 		flex-wrap: wrap;

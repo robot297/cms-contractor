@@ -173,8 +173,11 @@
 				update({ reset: false })}
 		class="card"
 	>
-		<fieldset class="type">
-			<legend>What’s this about?</legend>
+		<!-- No legend. The two segments say "Issue" and "Feature", which is the
+		     whole question — a heading above them restated it in more words. The
+		     group still carries a name for a screen reader, where the segments are
+		     read one at a time and the pair is not visible as a pair. -->
+		<fieldset class="type" aria-label="What this is about">
 			<div class="segmented">
 				{#each FEEDBACK_TYPES as t (t)}
 					<!-- "Issue", not "Bug". Someone who is not sure whether what they hit
@@ -192,7 +195,7 @@
 
 		<label class="field">
 			Summary
-			<input name="title" maxlength="140" placeholder="Short summary" required bind:value={title} />
+			<input name="title" maxlength="140" required bind:value={title} />
 			{#if fieldErr('title')}<span class="err">{fieldErr('title')}</span>{/if}
 		</label>
 
@@ -317,15 +320,6 @@
 		border: none;
 		padding: 0;
 		margin: 0;
-	}
-	.type legend {
-		font-size: 0.78rem;
-		font-weight: 800;
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-		color: #444;
-		margin-bottom: 0.5rem;
-		padding: 0;
 	}
 	.segmented {
 		display: grid;
@@ -547,9 +541,6 @@
 	}
 
 	/* Dark theme */
-	:global(:root[data-theme='dark']) .type legend {
-		color: var(--fg-muted);
-	}
 	/* Segments and buttons are token-driven above, so dark needs no override for
 	   them — and a bare dark rule here would outrank the .selected / .primary
 	   states on specificity. Only non-token text colors are mapped. */

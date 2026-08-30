@@ -34,7 +34,18 @@
 	 * a panel opened on somebody who has three jobs in flight has three
 	 * conversations to choose between rather than one merged inbox.
 	 */
-	type Conversation = { orderId: string; projectName: string | null; thread: Message[] };
+	type Conversation = {
+		orderId: string;
+		projectName: string | null;
+		thread: Message[];
+		/**
+		 * Whether the job is still live. Optional, and absent counts as live: the
+		 * three call sites that pass a SINGLE conversation are already on the job
+		 * in question, and forcing them to answer a question the picker asks would
+		 * be ceremony for a control they never render.
+		 */
+		active?: boolean;
+	};
 
 	let {
 		contact,
@@ -48,6 +59,12 @@
 		inviteAction = '?/sendInvite',
 		revokeAction = '?/revokeInvite',
 		rows = 2,
+		/**
+		 * Whether the panel draws the contact's name itself. Off inside
+		 * `ContactDialog`, which puts the name in the modal's own header — two of
+		 * them, one under the other, is what the orders list used to show.
+		 */
+		heading = true,
 		onsent,
 		onclose,
 		oninvited
@@ -72,6 +89,7 @@
 		/** Form action for withdrawing a pending invite. */
 		revokeAction?: string;
 		rows?: number;
+		heading?: boolean;
 		onsent?: () => void;
 		/** When provided, the panel shows a header with a close (✕) button. */
 		onclose?: () => void;
@@ -128,18 +146,28 @@
 		};
 	};
 
-	/** Which job is being talked about. Defaults to the first, which is the newest. */
+	const isLive = (c: Conversation) => c.active !== false;
+	/** Open jobs and finished ones, each newest-first as the server sent them. */
+	const liveConversations = $derived(conversations.filter(isLive));
+	const pastConversations = $derived(conversations.filter((c) => !isLive(c)));
+
+	/**
+	 * Which job is being talked about.
+	 *
+	 * Defaults to the newest LIVE one rather than the newest full stop. A customer
+	 * with four finished jobs and one in flight is being messaged about the one in
+	 * flight — opening on a job that closed last spring means every reply starts
+	 * with re-picking, and a reply sent without noticing goes onto a dead thread
+	 * the customer has no reason to look at. Falls back to the newest of anything
+	 * when nothing is live.
+	 */
 	let pickedOrderId = $state<string | null>(null);
 	const conversation = $derived(
-		conversations.find((c) => c.orderId === pickedOrderId) ?? conversations[0] ?? null
+		conversations.find((c) => c.orderId === pickedOrderId) ??
+			liveConversations[0] ??
+			conversations[0] ??
+			null
 	);
-	/** Step to the previous/next job when there are too many to show as tabs. */
-	function stepProject(dir: 1 | -1) {
-		if (!conversation) return;
-		const i = conversations.findIndex((c) => c.orderId === conversation.orderId);
-		const n = conversations.length;
-		pickedOrderId = conversations[(i + dir + n) % n].orderId;
-	}
 	/** Emails are attributed to the job on show when there is one to attribute to. */
 	const composerOrderId = $derived(conversation?.orderId ?? orderId);
 
@@ -201,12 +229,15 @@
 </script>
 
 <div class="panel">
-	<div class="head">
-		<span class="who">{contact.name}</span>
-		{#if onclose}
-			<button type="button" class="close" aria-label="Close" onclick={() => onclose?.()}>✕</button>
-		{/if}
-	</div>
+	{#if heading}
+		<div class="head">
+			<span class="who">{contact.name}</span>
+			{#if onclose}
+				<button type="button" class="close" aria-label="Close" onclick={() => onclose?.()}>✕</button
+				>
+			{/if}
+		</div>
+	{/if}
 
 	{#if tabs.length > 1}
 		<div class="tabs" role="tablist" aria-label="How to reach them">
@@ -234,45 +265,44 @@
 		</p>
 	{:else if tab === 'chat'}
 		{#if chatAvailable && conversation}
-			<!-- Which job the chat is about — a customer's threads are per order, so the
-			     answer has to land on the right one. Two or three jobs get a tab each;
-			     more than that steps through with arrows. Either way the project is
-			     always named, so a reply is never sent into an unlabelled thread. -->
-			{#if conversations.length > 1 && conversations.length <= 3}
-				<div class="proj-tabs" role="tablist" aria-label="Which job to talk about">
-					{#each conversations as c (c.orderId)}
-						<button
-							type="button"
-							role="tab"
-							aria-selected={c.orderId === conversation.orderId}
-							class="proj-tab"
-							class:on={c.orderId === conversation.orderId}
-							onclick={() => (pickedOrderId = c.orderId)}
-						>
-							{c.projectName ?? 'Untitled project'}
-						</button>
-					{/each}
-				</div>
+			<!-- Which job the chat is about — a customer's threads are per order, so
+			     the answer has to land on the right one.
+			     
+			     A select, and one control for every case. It used to be two: a tab
+			     each for two or three jobs, and single-step ‹ › arrows beyond that.
+			     Both broke on a phone. The tabs put three full project names in a row
+			     inside a 338px panel, and the arrows made "the job from March" four
+			     taps away with no way to see what you were stepping past.
+			     
+			     Grouped, because the grouping is the useful part: the open jobs are
+			     what you are almost certainly writing about, and the finished ones
+			     stay reachable underneath rather than being mixed in by date. -->
+			{#if conversations.length > 1}
+				<label class="proj-pick">
+					<span class="sr-only">Which job to talk about</span>
+					<select bind:value={() => conversation.orderId, (v) => (pickedOrderId = v)}>
+						{#if pastConversations.length === 0}
+							{#each liveConversations as c (c.orderId)}
+								<option value={c.orderId}>{c.projectName ?? 'Untitled project'}</option>
+							{/each}
+						{:else}
+							{#if liveConversations.length > 0}
+								<optgroup label="Open">
+									{#each liveConversations as c (c.orderId)}
+										<option value={c.orderId}>{c.projectName ?? 'Untitled project'}</option>
+									{/each}
+								</optgroup>
+							{/if}
+							<optgroup label="Finished">
+								{#each pastConversations as c (c.orderId)}
+									<option value={c.orderId}>{c.projectName ?? 'Untitled project'}</option>
+								{/each}
+							</optgroup>
+						{/if}
+					</select>
+				</label>
 			{:else}
-				<div class="proj-nav" class:has-arrows={conversations.length > 3}>
-					{#if conversations.length > 3}
-						<button
-							type="button"
-							class="proj-arrow"
-							aria-label="Previous project"
-							onclick={() => stepProject(-1)}>‹</button
-						>
-					{/if}
-					<span class="proj-title">{conversation.projectName ?? 'Untitled project'}</span>
-					{#if conversations.length > 3}
-						<button
-							type="button"
-							class="proj-arrow"
-							aria-label="Next project"
-							onclick={() => stepProject(1)}>›</button
-						>
-					{/if}
-				</div>
+				<p class="proj-one">{conversation.projectName ?? 'Untitled project'}</p>
 			{/if}
 			<div class="chat">
 				<MessageThread
@@ -367,7 +397,28 @@
 
 <style>
 	.panel {
-		display: grid;
+		/* A column rather than a grid: given a host with a height — which is every
+		   host now, since the panel only ever opens inside `ContactDialog` — the
+		   conversation takes what the tabs, the job picker and the composer leave,
+		   instead of the thread being a fixed box with the reply field under it.
+		   Where the host has no height of its own this collapses to the same stack
+		   it always was. */
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		/* The 0 floor, not just `min-width: 0`.
+		
+		   A grid's implicit column is `auto`, which sizes to MAX-CONTENT — so the
+		   panel took its width from the widest thing in it (the four-channel tab
+		   strip, ~476px) and then everything inside inherited that as the width to
+		   truncate against. `min-width: 0` on the panel does not help: the panel was
+		   never being squeezed, it was growing. The result was a 476px panel in a
+		   364px popover, so the whole contact pane scrolled sideways on a phone and
+		   `.proj-title`'s ellipsis never fired — it had 391px to play with.
+		   
+		   Same idiom, same reason as the order page's cards: see the note on `.main`
+		   in the customer layout. The 0 floor has to hold at every level or the one
+		   at the bottom never gets to truncate. */
 		gap: 0.6rem;
 		min-width: 0;
 	}
@@ -452,50 +503,41 @@
 	}
 
 	/* Which job the chat is about. Two or three get a tab each; more step with arrows. */
-	.proj-tabs {
-		display: flex;
-		gap: 0.25rem;
-		padding: 0.2rem;
-		border: 1px solid var(--line);
-		border-radius: 10px;
-		background: var(--surface-sunken);
-	}
-	.proj-tab {
-		flex: 1;
+	/* The job picker. A native select on purpose: it is the one control that gets
+	   a phone-sized list of jobs right without any layout of its own — the OS
+	   sheet handles the overflow, the grouping and the long names, none of which a
+	   custom row of buttons managed inside a 338px panel. */
+	.proj-pick {
+		display: block;
 		min-width: 0;
-		padding: 0.35rem 0.5rem;
-		border: none;
-		border-radius: 7px;
-		background: none;
-		color: var(--fg-muted);
-		font: inherit;
-		font-size: 0.8rem;
-		font-weight: 700;
-		cursor: pointer;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
 	}
-	/* The active job is coloured in with the app accent, matching the channel tabs —
-	   a subtle raised tint didn't read clearly as "this is the one you're viewing". */
-	.proj-tab.on {
-		background: var(--brand);
-		color: var(--on-brand);
-		box-shadow: var(--pop-shadow-sm);
-	}
-	.proj-nav {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-	.proj-nav.has-arrows {
-		padding: 0.25rem 0.3rem;
-		border: 1px solid var(--line);
+	.proj-pick select {
+		display: block;
+		width: 100%;
+		max-width: 100%;
+		box-sizing: border-box;
+		padding: 0.4rem 0.55rem;
+		border: 1px solid var(--line-strong);
 		border-radius: 10px;
 		background: var(--surface-sunken);
+		color: var(--fg);
+		font-family: inherit;
+		font-size: 0.82rem;
+		font-weight: 700;
+		/* A select will not ellipsis its own text, so a long project name would set
+		   the control's min-content width and push the panel wide again — the exact
+		   failure this whole change is fixing. `width: 100%` plus this keeps it
+		   inside whatever column it is given. */
+		text-overflow: ellipsis;
 	}
-	.proj-title {
-		flex: 1;
+	.proj-pick select:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 1px;
+	}
+	/* One job needs no picker, but the thread still has to say which job it is —
+	   a reply must never be sent into an unlabelled conversation. */
+	.proj-one {
+		margin: 0;
 		min-width: 0;
 		font-size: 0.82rem;
 		font-weight: 700;
@@ -504,41 +546,36 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.proj-nav.has-arrows .proj-title {
-		text-align: center;
-	}
-	.proj-arrow {
-		flex: none;
-		display: grid;
-		place-items: center;
-		width: 1.8rem;
-		height: 1.8rem;
-		border: 1px solid var(--line-strong);
-		border-radius: 8px;
-		background: var(--surface);
-		color: var(--fg);
-		font-size: 1.05rem;
-		line-height: 1;
-		cursor: pointer;
-	}
-	.proj-arrow:hover {
-		border-color: var(--fg-muted);
+	/* Present for the screen reader, invisible to the eye — the select's own value
+	   is what a sighted user reads. Not `display: none`, which would take it out
+	   of the a11y tree along with the label it provides. */
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		margin: -1px;
+		padding: 0;
+		border: 0;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 
 	.chat {
-		--thread-max-height: 14rem;
+		/* The conversation is the tall thing in the panel, so it is the thing that
+		   flexes; `none` hands the sizing to the thread's own `flex: 1 1 auto`. The
+		   14rem it used to stop at is the fallback for a host with no height to
+		   give — the thread's own default is close enough that neither needs one. */
+		flex: 1 1 auto;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		--thread-max-height: none;
 		/* Who is who. Without these both sides fall back to `transparent` and every
 		   bubble is the same colourless wash — the bug that made the dashboard's
 		   thread look flat while the order page's did not. */
 		--thread-mine-hue: var(--who-contractor);
 		--thread-theirs-hue: var(--who-customer);
-	}
-	/* The phone modal is a tall centred card, so the thread gets to use that height
-	   instead of stopping at the popover's 14rem and leaving the card half empty. */
-	@media (max-width: 480px) {
-		.chat {
-			--thread-max-height: 48vh;
-		}
 	}
 
 	/* After a reply lands: a quiet confirmation and a way back, so a send doesn't

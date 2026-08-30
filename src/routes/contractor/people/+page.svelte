@@ -15,7 +15,7 @@
 	import AddressFields from '$lib/AddressFields.svelte';
 	import AlphaRail from '$lib/AlphaRail.svelte';
 	import { smoothScrollIntoView } from '$lib/smooth-scroll';
-	import ContactPanel from '$lib/ContactPanel.svelte';
+	import ContactDialog from '$lib/ContactDialog.svelte';
 	import ContactImport from '$lib/ContactImport.svelte';
 	import {
 		PERSON_ROLES,
@@ -640,42 +640,31 @@
 											>
 										{/if}
 										{#if contactOpenId === c.key}
-											<!-- Dimmed click-away scrim so the composer is the focus. -->
-											<button
-												type="button"
-												aria-label="Close message composer"
-												onclick={() => (contactOpenId = null)}
-												class="contact-scrim"
-											></button>
-											<div class="contact-pop">
-												<!-- Chat, the invite and the conversation picker all belong to the
-												     CUSTOMER record: a thread hangs off an order, and only a customer
-												     has one. Somebody who is only crew still gets email, text and
-												     call — the panel drops the tab it cannot honour rather than
-												     offering a dead one. -->
-												<ContactPanel
-													contact={{
-														name: c.name,
-														email: c.email ?? '',
-														phone: c.phone,
-														preferredContact: c.customer?.preferredContact ?? 'email'
-													}}
-													conversations={c.customer
-														? (data.conversations[c.customer.id] ?? [])
-														: []}
-													canChat={c.customer ? isLinked(c.customer) : false}
-													customerId={c.customer?.id ?? null}
-													portal={c.customer
-														? portalInfoFor({
-																linked: isLinked(c.customer),
-																customerId: c.customer.id,
-																invites: data.invites
-															})
-														: null}
-													onsent={() => (contactOpenId = null)}
-													onclose={() => (contactOpenId = null)}
-												/>
-											</div>
+											<!-- Chat, the invite and the conversation picker all belong to the
+											     CUSTOMER record: a thread hangs off an order, and only a customer
+											     has one. Somebody who is only crew still gets email, text and
+											     call — the panel drops the tab it cannot honour rather than
+											     offering a dead one. -->
+											<ContactDialog
+												contact={{
+													name: c.name,
+													email: c.email ?? '',
+													phone: c.phone,
+													preferredContact: c.customer?.preferredContact ?? 'email'
+												}}
+												conversations={c.customer ? (data.conversations[c.customer.id] ?? []) : []}
+												canChat={c.customer ? isLinked(c.customer) : false}
+												customerId={c.customer?.id ?? null}
+												portal={c.customer
+													? portalInfoFor({
+															linked: isLinked(c.customer),
+															customerId: c.customer.id,
+															invites: data.invites
+														})
+													: null}
+												onsent={() => (contactOpenId = null)}
+												onclose={() => (contactOpenId = null)}
+											/>
 										{/if}
 									</div>
 

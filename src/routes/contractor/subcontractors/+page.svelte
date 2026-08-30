@@ -6,7 +6,7 @@
 	import { formatPhone, tierLabel, TRADES, type SubcontractorTier } from '$lib/crm';
 	import AlphaRail from '$lib/AlphaRail.svelte';
 	import { smoothScrollIntoView } from '$lib/smooth-scroll';
-	import ContactPanel from '$lib/ContactPanel.svelte';
+	import ContactDialog from '$lib/ContactDialog.svelte';
 	import IdScanner from '$lib/IdScanner.svelte';
 	import type { SubcontractorScanFields } from '$lib/id-scan';
 	import type { PageData } from './$types';
@@ -553,8 +553,11 @@
 										     crowded the one line that answers "who is this". -->
 										</div>
 										<div class="card-actions">
-											<!-- Message the subcontractor (email / text / call) -->
-											<div style="position: relative;">
+											<!-- Message the subcontractor (email / text / call). The wrapper
+											     no longer positions anything — the panel opens as a modal in
+											     the top layer — but it keeps the button and its dialog together
+											     as one control in the actions row. -->
+											<div>
 												<button
 													type="button"
 													class="icon-btn"
@@ -565,24 +568,16 @@
 													>💬</button
 												>
 												{#if contactOpenId === s.id}
-													<button
-														type="button"
-														class="contact-scrim"
-														aria-label="Close message composer"
-														onclick={() => (contactOpenId = null)}
-													></button>
-													<div class="contact-pop">
-														<ContactPanel
-															contact={{
-																name: s.name,
-																email: s.email,
-																phone: s.phone,
-																preferredContact: 'email'
-															}}
-															onsent={() => (contactOpenId = null)}
-															onclose={() => (contactOpenId = null)}
-														/>
-													</div>
+													<ContactDialog
+														contact={{
+															name: s.name,
+															email: s.email,
+															phone: s.phone,
+															preferredContact: 'email'
+														}}
+														onsent={() => (contactOpenId = null)}
+														onclose={() => (contactOpenId = null)}
+													/>
 												{/if}
 											</div>
 											<!-- Open the profile / ID-card detail view -->

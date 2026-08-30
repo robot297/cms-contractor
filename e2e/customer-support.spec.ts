@@ -39,7 +39,11 @@ test.describe('customer support', () => {
 
 		await tabs.getByRole('link', { name: 'Support' }).click();
 		await expect(page).toHaveURL(/tab=support/);
-		await expect(page.getByText('Something broken, or something missing?')).toBeVisible();
+		// The form, or the "not set up yet" notice that stands in for it without
+		// GitHub credentials. Asserted on the control rather than on prose: the
+		// blurb this used to look for was removed as fluff, and a test pinned to
+		// copy fails on a wording change that broke nothing.
+		await expect(page.locator('form[action="?/submitSupport"], .notice')).toBeVisible();
 		// The panes are alternatives, not sections stacked on one page.
 		await expect(page.getByText('Appearance')).toHaveCount(0);
 
@@ -60,7 +64,7 @@ test.describe('customer support', () => {
 		await page.getByRole('menuitem', { name: 'Support' }).click();
 
 		await expect(page).toHaveURL(/\/customer\/account\?tab=support/);
-		await expect(page.getByText('Something broken, or something missing?')).toBeVisible();
+		await expect(page.locator('form[action="?/submitSupport"], .notice')).toBeVisible();
 
 		await page.close();
 	});

@@ -65,8 +65,10 @@ export type Palette = (typeof PALETTES)[number];
 /**
  * Name and one-line thesis for each, shown in the switcher.
  *
- * The blurb is not decoration — a column of swatches all read as "a colour" at
- * 10px, and the name alone does not say what you are about to look at.
+ * The blurb is not decoration — a grid of swatches all read as "a colour" at
+ * 10px, and the name alone does not say what you are about to look at. Kept to
+ * two or three words: the phone sheet lists these two-up, so a cell is about
+ * 175px and anything longer is an ellipsis pretending to be a description.
  */
 export const PALETTE_LABELS: Record<Palette, string> = {
 	voltage: 'Voltage',
@@ -85,19 +87,19 @@ export const PALETTE_LABELS: Record<Palette, string> = {
 };
 
 export const PALETTE_BLURBS: Record<Palette, string> = {
-	voltage: 'Electric azure on blue-black',
-	outrun: 'Magenta and cyan over an indigo horizon',
-	circuit: 'Acid mint traces on carbon',
-	overdrive: 'Electric violet bloom on plum',
-	abyss: 'Bioluminescence at depth',
-	vapor: 'Lavender and rose at dusk',
-	halogen: 'Cold light on graphite',
-	blueprint: 'Cyanotype drafting paper',
-	ember: 'Forge orange over cooling iron',
-	timber: 'Pine and cedar on kraft paper',
-	highvis: 'Safety orange on wet asphalt',
-	ledger: 'Ink and rule on accounting paper',
-	nocturne: 'Brass on midnight plum'
+	voltage: 'Azure on black',
+	outrun: 'Magenta and cyan',
+	circuit: 'Mint on carbon',
+	overdrive: 'Violet on plum',
+	abyss: 'Teal at depth',
+	vapor: 'Lavender and rose',
+	halogen: 'Cold on graphite',
+	blueprint: 'Cyanotype paper',
+	ember: 'Orange on iron',
+	timber: 'Pine and cedar',
+	highvis: 'Orange on asphalt',
+	ledger: 'Ink on paper',
+	nocturne: 'Brass on midnight'
 };
 
 /**
