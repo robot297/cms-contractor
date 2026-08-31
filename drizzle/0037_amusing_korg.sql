@@ -1,0 +1,1 @@
+ALTER TABLE "contractor_settings" ALTER COLUMN "nav_placement" SET DEFAULT 'bottom';

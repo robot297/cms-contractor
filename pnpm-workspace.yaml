@@ -1,10 +1,21 @@
 packages:
   - '.'
 
+# Which dependencies may run postinstall build scripts. pnpm 11 replaced the
+# older onlyBuiltDependencies / ignoredBuiltDependencies lists with this map,
+# and treats anything unlisted as a hard install error (ERR_PNPM_IGNORED_BUILDS)
+# — so every package pnpm asks about has to get an explicit answer here.
 allowBuilds:
-  '@prisma/client': true
-  better-sqlite3: true
+  # esbuild ships a platform binary and genuinely needs its install script.
   esbuild: true
-onlyBuiltDependencies:
-  - better-sqlite3
-  - esbuild
+  # Optional peer deps of drizzle-orm / better-auth for drivers we don't use
+  # (we're on postgres). Their scripts compile a native SQLite binding and
+  # generate a Prisma client — both dead weight in this image.
+  better-sqlite3: false
+  '@prisma/client': false
+  # Downloads the sentry-cli binary, which uploads source maps at build time.
+  # Without it a production stack trace is a list of one-letter names in a
+  # minified chunk, which is most of the value of having Sentry at all. The
+  # upload itself is still opt-in — it only runs when SENTRY_AUTH_TOKEN is set
+  # (see vite.config.ts), so a local build never reaches for the network.
+  '@sentry/cli': true

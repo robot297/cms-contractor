@@ -1,17 +1,17 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: cms-contractor-db
+    container_name: contractor-crm-db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: cms_contractor
+      POSTGRES_DB: contractor-crm
     ports:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d cms_contractor']
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d contractor-crm']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -20,16 +20,30 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: cms-contractor-app
+    container_name: contractor-crm-app
     depends_on:
       db:
         condition: service_healthy
+    # Local secrets (Resend key, EMAIL_FROM, GitHub OAuth…) ride along when the
+    # file exists. Without mail credentials the app cannot send, so email
+    # verification is NOT enforced — any sign-up goes straight in and the
+    # verification link only appears in this container's logs.
+    env_file:
+      - path: .env.local
+        required: false
     environment:
+      # Explicit values beat env_file: the container keeps its own DB host,
+      # origin and port even though .env.local carries dev values for them.
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/cms_contractor
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/contractor-crm
       ORIGIN: http://localhost:3000
       BETTER_AUTH_SECRET: development-secret-change-me
+      # Provision the pre-verified local login (contractor@upliftcollective.dev /
+      # test#123) at boot, so the email-verification gate doesn't require a real
+      # inbox loop against a compose stack. This whole file is a local stack —
+      # never carry this flag onto a reachable deployment.
+      SEED_DEV_LOGIN: 'true'
     ports:
       - '3000:3000'
 

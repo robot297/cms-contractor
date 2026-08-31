@@ -1,0 +1,1 @@
+ALTER TABLE "customer" ADD COLUMN "preferred_contact" text DEFAULT 'email' NOT NULL;

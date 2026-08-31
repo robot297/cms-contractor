@@ -1,0 +1,1 @@
+ALTER TABLE "order_message" ADD COLUMN "topic" text DEFAULT 'general' NOT NULL;

@@ -1,0 +1,1 @@
+ALTER TABLE "contractor_settings" ADD COLUMN "trial_notice_dismissed_at" timestamp;

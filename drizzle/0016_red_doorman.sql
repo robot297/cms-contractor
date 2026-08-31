@@ -1,0 +1,1 @@
+ALTER TABLE "contractor_settings" ADD COLUMN "follow_up_days" integer DEFAULT 7 NOT NULL;

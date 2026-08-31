@@ -1,0 +1,1 @@
+ALTER TABLE "contractor_settings" DROP COLUMN "guide_follow_up_ack_at";

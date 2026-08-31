@@ -1,0 +1,1 @@
+ALTER TABLE "subcontractor" ADD COLUMN "license_expires_at" timestamp;

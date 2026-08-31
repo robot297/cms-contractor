@@ -5,17 +5,25 @@
 /* eslint-disable */
 export type CoercedEnvSchema = {
   /**
-   * **DATABASE_URL**  
+   * **DATABASE_URL** 🔐 _sensitive_  
    * Drizzle  
    * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M24%2021V9h-2v14h8v-2zm-4-6v-4c0-1.103-.897-2-2-2h-6v14h2v-6h1.48l2.335%206h2.145l-2.333-6H18c1.103%200%202-.897%202-2m-6-4h4v4h-4zM8%2023H4c-1.103%200-2-.897-2-2V9h2v12h4V9h2v12c0%201.103-.897%202-2%202%22%2F%3E%3C%2Fsvg%3E)   
    */
   DATABASE_URL: string;
   
   /**
+   * **MIGRATIONS_FOLDER**  
+   * Folder the runtime migrator reads migrations from, relative to the process  
+   * CWD. Only needs setting if the app is launched from outside the app root.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  MIGRATIONS_FOLDER?: string;
+  
+  /**
    * **ORIGIN**  
    * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
    */
-  ORIGIN?: string;
+  ORIGIN: string;
   
   /**
    * **BETTER_AUTH_SECRET** 🔐 _sensitive_  
@@ -27,9 +35,7 @@ export type CoercedEnvSchema = {
   BETTER_AUTH_SECRET?: string;
   
   /**
-   * **GITHUB_CLIENT_ID**  
-   * GitHub OAuth  
-   * https://www.better-auth.com/docs/authentication/github  
+   * **GITHUB_CLIENT_ID** 🔐 _sensitive_  
    * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
    */
   GITHUB_CLIENT_ID?: string;
@@ -40,13 +46,295 @@ export type CoercedEnvSchema = {
    */
   GITHUB_CLIENT_SECRET?: string;
   
+  /**
+   * **GITHUB_REPO**  
+   * Support / feedback → GitHub Issues  
+   * The in-app support page files contractor feedback as issues on this repo.  
+   * Format: "owner/repo" (e.g. "acme/contractor-crm"). Leave blank to disable the  
+   * support form (it degrades to a friendly "not configured" message).  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  GITHUB_REPO: string;
+  
+  /**
+   * **GITHUB_TOKEN** 🔐 _sensitive_  
+   * A token with permission to create issues on GITHUB_REPO — a fine-grained PAT  
+   * with Issues: Read and write, or a classic token with the `repo` scope.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  GITHUB_TOKEN?: string;
+  
+  /**
+   * **GITHUB_LABEL_BUG**  
+   * Labels applied to filed issues, by feedback type. These labels should already  
+   * exist on the repo.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  GITHUB_LABEL_BUG: string;
+  
+  /**
+   * **GITHUB_LABEL_FEATURE**  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  GITHUB_LABEL_FEATURE: string;
+  
+  /**
+   * **TURNSTILE_SITE_KEY**  
+   * Bot protection for the support form — Cloudflare Turnstile (a user-friendly,  
+   * privacy-respecting CAPTCHA). Get keys at https://dash.cloudflare.com → Turnstile.  
+   * Leave both blank to disable the challenge (the form still works; only the  
+   * hidden honeypot guard stays active). The site key is public by design.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  TURNSTILE_SITE_KEY?: string;
+  
+  /**
+   * **TURNSTILE_SECRET_KEY** 🔐 _sensitive_  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  TURNSTILE_SECRET_KEY?: string;
+  
+  /**
+   * **STRIPE_SECRET_KEY** 🔐 _sensitive_  
+   * Billing — Stripe  
+   * One paid subscription, priced per contractor, sold monthly or annually. There  
+   * are no pricing tiers by design (docs/adr/0006-one-plan-priced-per-contractor.md),  
+   * so the app never branches on which plan someone is on.  
+   *   
+   * Leave STRIPE_SECRET_KEY blank in development: billing degrades to trial/comped  
+   * state only, every contractor surface still works, and the subscribe buttons  
+   * report that checkout is unavailable rather than crashing.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  STRIPE_SECRET_KEY?: string;
+  
+  /**
+   * **STRIPE_WEBHOOK_SECRET** 🔐 _sensitive_  
+   * Signing secret for the /api/stripe/webhook endpoint, from the Stripe dashboard  
+   * or `stripe listen`. Events are rejected unless they verify against this.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  STRIPE_WEBHOOK_SECRET?: string;
+  
+  /**
+   * **STRIPE_PRICE_MONTHLY**  
+   * Recurring price IDs (price_...) for the single subscription. The amount lives in  
+   * Stripe, never in code, so changing what you charge needs no deploy.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  STRIPE_PRICE_MONTHLY?: string;
+  
+  /**
+   * **STRIPE_PRICE_ANNUAL**  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  STRIPE_PRICE_ANNUAL?: string;
+  
+  /**
+   * **BILLING_DEV_TOOLS**  
+   * Subscription-state simulator. When "true", the billing page grows a panel that  
+   * forces your own subscription into any state (fresh trial, expiring, expired,  
+   * active, past due, lapsed, comped) so the paywall can be exercised without  
+   * waiting 14 days or failing a real card.  
+   *   
+   * MUST stay off in production — it lets any signed-in contractor comp themselves.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  BILLING_DEV_TOOLS?: string;
+  
+  /**
+   * **RESEND_API_KEY** 🔐 _sensitive_  
+   * Email — Resend  
+   * Contractor messages to their customers are sent by the app, as branded HTML with  
+   * a plain-text alternative, rather than handed to the contractor's mail client  
+   * (docs/adr/0007-the-app-sends-email-mailto-is-the-fallback.md).  
+   *   
+   * Leave RESEND_API_KEY blank in development: the composer falls back to the  
+   * `mailto:` handoff it used before, every surface still works, and nothing reports  
+   * an error. Both variables must be set for sending to switch on — a key without a  
+   * verified from-address only produces a provider rejection on every send.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  RESEND_API_KEY?: string;
+  
+  /**
+   * **EMAIL_FROM**  
+   * The verified sending address, e.g. "hello@mail.example.com". Mail goes out from  
+   * this one address for every contractor, with the display name set to their  
+   * business name and Reply-To set to their own email, so a customer hitting reply  
+   * reaches the contractor. Its domain needs SPF/DKIM at the provider.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  EMAIL_FROM?: string;
+  
+  /**
+   * **EMAIL_DEV_TOOLS**  
+   * Send-outcome simulator. When "true", the contact composer grows a small panel  
+   * that forces the next send to succeed or fail without calling the provider, so  
+   * the confirmation and failure states can be checked without spending a real  
+   * email (or waiting on a real bounce).  
+   *   
+   * While this is on the server sends NO real email: the composer's Send button is  
+   * disabled and the send action refuses anything that isn't a simulation. Turn it  
+   * off (and restart) to send for real again.  
+   *   
+   * Only the provider call is skipped — the billing guard, the order-ownership  
+   * check and the timeline write all still run, so what you see is the real path.  
+   *   
+   * MUST stay off in production — it disables sending and lets any signed-in  
+   * contractor fake a send.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  EMAIL_DEV_TOOLS?: string;
+  
+  /**
+   * **SIGNUPS_ENABLED**  
+   * Self-serve signup. Set to "true" to let anyone create a contractor account  
+   * from the login page; anything else (including unset) hides the Sign up tab and  
+   * refuses the action.  
+   *   
+   * OFF by default, and deliberately: creating an account sends a verification  
+   * email, and until this domain's DKIM is published that mail is unsigned — which  
+   * means it lands in spam, or is dropped outright, and the person who just signed  
+   * up is left holding an account they cannot get into. A signup form that cannot  
+   * deliver its own verification link is worse than no signup form.  
+   *   
+   * Turn it on once DKIM (and SPF/DMARC) resolve for EMAIL_FROM's domain. The demo  
+   * entry and SEED_DEV_LOGIN are unaffected — neither sends mail.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SIGNUPS_ENABLED?: string;
+  
+  /**
+   * **SEED_DEV_LOGIN**  
+   * Set to "true" to provision pre-verified logins at boot, so local development  
+   * doesn't require completing a real email-verification loop against a fresh  
+   * database. Provisions BOTH sides of the product: a contractor, and a customer  
+   * already linked to one of that contractor's customer records with an order and a  
+   * timeline on it — the customer portal is otherwise unreachable without several  
+   * minutes of setup. Credentials live in src/lib/server/dev-login.server.ts.  
+   *   
+   * MUST stay off on any reachable deployment — the credentials are public.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SEED_DEV_LOGIN?: string;
+  
+  /**
+   * **ANTHROPIC_API_KEY** 🔐 _sensitive_  
+   * ID Scan — reading a subcontractor's ID off the card  
+   * A contractor photographs a subcontractor's ID and the Add/Edit form is  
+   * prefilled from it. The primary path decodes the PDF417 barcode on the back of  
+   * a US/CA licence entirely in the browser: exact fields, no image leaves the  
+   * device, no key needed, and it works offline.  
+   *   
+   * This key powers only the FALLBACK — reading a card that has no barcode (a  
+   * trade licence, a foreign ID) by sending the photo to the model. Leave it blank  
+   * and the scanner offers the barcode path alone and says so; nothing errors, and  
+   * no image is ever transmitted. The photo is never written to disk, stored, or  
+   * logged on either path.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  ANTHROPIC_API_KEY?: string;
+  
+  /**
+   * **ID_SCAN_DEV_TOOLS**  
+   * Scan simulator. When "true", the scanner grows a panel that runs a bundled  
+   * fixture payload through the real confirm-and-prefill path, and returns a  
+   * canned vision result without calling the provider — so the whole feature can  
+   * be exercised with no camera, no card, and no API key.  
+   *   
+   * MUST stay off in production — it lets any signed-in contractor fabricate a  
+   * scan result.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  ID_SCAN_DEV_TOOLS?: string;
+  
+  /**
+   * **SENTRY_DSN**  
+   * Error reporting — Sentry  
+   * Unhandled errors on both halves of the app (server load/actions/hooks, and the  
+   * browser) are reported to Sentry so a contractor hitting a bug doesn't have to  
+   * describe it for us to see it.  
+   *   
+   * Leave SENTRY_DSN blank in development: reporting is simply off, every surface  
+   * still works, and errors go to the console as they always have. Nothing about  
+   * the app's behaviour depends on Sentry being reachable.  
+   *   
+   * The DSN is public by design — it identifies the project to report to, it is not  
+   * a credential, and it is deliberately NOT marked @sensitive so varlock inlines it  
+   * into the browser bundle (the client half of the SDK needs it there).  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_DSN?: string;
+  
+  /**
+   * **SENTRY_ENVIRONMENT**  
+   * Which deployment an event came from ("production", "staging", …). Defaults to  
+   * the Node environment when blank, which is right for most cases; set it when one  
+   * NODE_ENV=production image is deployed to more than one environment.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_ENVIRONMENT?: string;
+  
+  /**
+   * **SENTRY_TRACES_SAMPLE_RATE**  
+   * Fraction of requests traced for performance (0 to 1). Errors are ALWAYS sent  
+   * regardless — this only governs the sampling of performance data, which is what  
+   * gets expensive at volume. 0 turns tracing off and keeps error reporting.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M26%2012h-4v2h4v2h-3v2h3v2h-4v2h4a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-7%2010h-6v-4a2%202%200%200%201%202-2h2v-2h-4v-2h4a2%202%200%200%201%202%202v2a2%202%200%200%201-2%202h-2v2h4ZM8%2020v-8H6v1H4v2h2v5H4v2h6v-2z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_TRACES_SAMPLE_RATE?: number;
+  
+  /**
+   * **SENTRY_AUTH_TOKEN** 🔐 _sensitive_  
+   * Source-map upload, so production stack traces name real files and lines instead  
+   * of minified chunks. Build-time only — the app never reads these at runtime, and  
+   * the upload is skipped entirely when the token is blank, so local and CI builds  
+   * that don't need it are unaffected.  
+   * Create the token at Sentry → Settings → Auth Tokens, with project:releases.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_AUTH_TOKEN?: string;
+  
+  /**
+   * **SENTRY_ORG**  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_ORG?: string;
+  
+  /**
+   * **SENTRY_PROJECT**  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  SENTRY_PROJECT?: string;
+  
+  /**
+   * **CUSTOMER_PORTAL_DEV_TOOLS**  
+   * Customer-portal view-as. When "true", the contractor nav grows a "Customer view"  
+   * button that opens the SEEDED dev customer's portal as they would see it, in the  
+   * same session and with no sign-out — so the customer-facing half of the product  
+   * is reachable while building it. Needs SEED_DEV_LOGIN=true to have a target; with  
+   * no seeded customer the button simply does not appear.  
+   *   
+   * The impersonated view is read-only: every write is refused while it is active,  
+   * so no record can claim a customer said something they did not. The signed-in  
+   * user's role is never changed (docs/adr/0002-one-role-per-user.md), ownership of  
+   * the target customer is re-checked on every request, and with this flag unset any  
+   * leftover selection cookie is cleared rather than merely ignored.  
+   *   
+   * MUST stay off in production — it is a development affordance, not an admin or  
+   * support tool. See docs/adr/0008-view-as-is-a-development-affordance.md.  
+   * ![icon](data:image/svg+xml;utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20fill%3D%22%23808080%22%20d%3D%22M29%2022h-5a2.003%202.003%200%200%201-2-2v-6a2%202%200%200%201%202-2h5v2h-5v6h5ZM18%2012h-4V8h-2v14h6a2.003%202.003%200%200%200%202-2v-6a2%202%200%200%200-2-2m-4%208v-6h4v6Zm-6-8H3v2h5v2H4a2%202%200%200%200-2%202v2a2%202%200%200%200%202%202h6v-8a2%202%200%200%200-2-2m0%208H4v-2h4Z%22%2F%3E%3C%2Fsvg%3E)   
+   */
+  CUSTOMER_PORTAL_DEV_TOOLS?: string;
+  
 };
 
-type _CoercedEnvSchema_e46fc18e = CoercedEnvSchema;
+type _CoercedEnvSchema_38816588 = CoercedEnvSchema;
 
 declare module 'varlock/env' {
-  export interface TypedEnvSchema extends Readonly<_CoercedEnvSchema_e46fc18e> {}
-  export interface PublicTypedEnvSchema extends Readonly<Pick<_CoercedEnvSchema_e46fc18e, 'DATABASE_URL' | 'ORIGIN' | 'GITHUB_CLIENT_ID'>> {}
+  export interface TypedEnvSchema extends Readonly<_CoercedEnvSchema_38816588> {}
+  export interface PublicTypedEnvSchema extends Readonly<Pick<_CoercedEnvSchema_38816588, 'MIGRATIONS_FOLDER' | 'ORIGIN' | 'GITHUB_REPO' | 'GITHUB_LABEL_BUG' | 'GITHUB_LABEL_FEATURE' | 'TURNSTILE_SITE_KEY' | 'STRIPE_PRICE_MONTHLY' | 'STRIPE_PRICE_ANNUAL' | 'BILLING_DEV_TOOLS' | 'EMAIL_FROM' | 'EMAIL_DEV_TOOLS' | 'SIGNUPS_ENABLED' | 'SEED_DEV_LOGIN' | 'ID_SCAN_DEV_TOOLS' | 'SENTRY_DSN' | 'SENTRY_ENVIRONMENT' | 'SENTRY_TRACES_SAMPLE_RATE' | 'SENTRY_ORG' | 'SENTRY_PROJECT' | 'CUSTOMER_PORTAL_DEV_TOOLS'>> {}
 }
 
 
@@ -56,17 +344,17 @@ export type EnvSchemaAsStrings = {
       : (CoercedEnvSchema[Property] extends boolean ? ('true' | 'false') : string)
 };
 
-type _EnvSchemaAsStrings_e46fc18e = EnvSchemaAsStrings;
+type _EnvSchemaAsStrings_38816588 = EnvSchemaAsStrings;
 declare global {
 
   // add types for global import.meta.env
-  interface ImportMetaEnv extends _EnvSchemaAsStrings_e46fc18e {}
+  interface ImportMetaEnv extends _EnvSchemaAsStrings_38816588 {}
   interface ImportMeta {
     readonly env: ImportMetaEnv;
   }
 
   // add types for global process.env
   namespace NodeJS {
-    interface ProcessEnv extends _EnvSchemaAsStrings_e46fc18e {}
+    interface ProcessEnv extends _EnvSchemaAsStrings_38816588 {}
   }
 }

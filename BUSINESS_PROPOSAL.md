@@ -1,86 +1,55 @@
-# Business Proposal: Contractor CMS
-## Simple Work Tracking & Client Visibility Platform
+# Business Proposal: Contractor CRM
 
-**Document Date:** July 18, 2026  
-**Status:** Active Development  
-**Version:** 1.0
+## Work Tracking + Client Portal for Independent Contractors
+
+**Document Date:** July 19, 2026
+**Status:** Active Development
+**Version:** 2.0
 
 ---
 
 ## Executive Summary
 
-The **Contractor CMS** is a lightweight work management platform designed to solve a critical pain point: contractors struggle to track their work obligations and communicate project status to clients efficiently. 
+The **Contractor CRM** helps independent contractors track their work and keep clients confidently informed. It centralizes a contractor's customers, orders, and communication in one place, and gives each customer a private portal to see their project's progress.
 
-This proposal outlines the business case, MVP scope, and implementation strategy for a system that enables contractors to centralize work tracking in under 10 minutes while providing clients automatic visibility into their project progress.
+Version 1.0 of this proposal scoped an ultra-minimal, login-free status tracker. As we built and dogfooded it, the product evolved into a lightweight **CRM with a client portal**: contractors manage a real customer directory, invite customers into a portal via magic links, and share status updates and (soon) documents. This document reflects that actual direction.
 
-**Target Customer:** Contractors (construction, consulting, trades, freelance services)  
-**Primary Value:** Reputation protection and client retention through effortless communication  
-**Secondary Value:** Operational efficiency and reduced administrative overhead
+**Target Customer:** Independent contractors and small contractor teams (construction, trades, consulting, freelance services)
+**Primary Value:** Reputation protection and client retention through effortless, professional communication
+**Secondary Value:** Operational efficiency — one home for customers, work, and client comms
 
 ---
 
 ## Problem Statement
 
-### The Current State
-
-Contractors today manage their work through fragmented systems:
-- **Emails** scattered across inboxes (no centralized record)
-- **Memory** (error-prone, doesn't scale)
-- **Spreadsheets** (static, not collaborative)
-- **Note-taking tools** (not designed for project management)
-
-### The Real Cost
-
-**For Contractors:**
-- Forgotten deadlines and missed obligations
-- Time wasted searching for "what do I owe this client?"
-- Scrambling to send status updates when clients ask
-- Reputation damage when communication is poor
-
-**For Clients:**
-- Zero visibility into project progress
-- Must chase contractor via email/phone for updates
-- Anxiety and uncertainty about their work
-- Loss of trust when communication is sporadic
-
-### Why It Matters
-
-Contractors lose business and clients due to poor communication, not poor work quality. A contractor's reputation depends on clients feeling confident their work is progressing. The current ad-hoc approach fails to provide this confidence.
+Contractors lose business due to poor communication, not poor work quality. Today they juggle scattered email, memory, and spreadsheets, which leads to missed follow-ups, time wasted reconstructing "what do I owe this client?", and clients left anxious and chasing updates. The core need: a **low-friction** way to track work _and_ keep clients informed without adding administrative overhead.
 
 ---
 
 ## Solution Overview
 
-### What We're Building
+A focused CRM built around three surfaces:
 
-A **dead-simple work tracking system** that:
+1. **Contractor dashboard** — follow-ups and active orders, one-tap status updates, and notifications.
+2. **Customer directory** — a first-class, contractor-owned list of customers (name, email, phone, address, tags, project notes). Contractors add customers and reuse them across orders.
+3. **Customer portal** — customers accept a magic-link invite and see their order status, timeline, and updates; they can send questions/requests back.
 
-1. **For Contractors:** Provides a centralized dashboard showing all projects/obligations, with a 1-minute status update flow
-2. **For Clients:** Offers automatic visibility into project progress via shareable links (no login required)
+The bet is unchanged from v1: **communication is the product.** What changed is that delivering trustworthy communication requires real customer records, authenticated client access, and shared artifacts — not just an anonymous status link.
 
-### Why It Works
-
-The system is intentionally minimal—it solves the core problem without adding friction:
-- **No complex workflows** (contractors won't use them)
-- **No features they don't need** (billing, invoicing, time tracking)
-- **No login for clients** (one less barrier to adoption)
-- **5-10 minute total update time** (fits into busy contractor schedules)
-
-### How It Works
+### How it works
 
 ```
-Contractor's Workflow:
-1. Log in to dashboard
-2. See all projects at a glance
-3. Click "Update Status" on any project
-4. Select status: Not Started / In Progress / Completed
-5. Done—clients automatically see the update
+Contractor:
+1. Log in
+2. Add a customer (or reuse an existing one) in the directory
+3. Create an order for that customer
+4. Send a magic-link invite so the customer can follow along
+5. Tap status updates as work progresses — customer is notified
 
-Client's Workflow:
-1. Receive shareable link to their project
-2. Click link (no login needed)
-3. See current status, timeline, last update
-4. Peace of mind
+Customer:
+1. Accept the magic-link invite (becomes a linked account)
+2. Open the portal: current status, timeline, latest update
+3. Ask a question or request service — contractor is notified
 ```
 
 ---
@@ -89,195 +58,94 @@ Client's Workflow:
 
 ### Customer Segments
 
-**Primary:** Individual contractors and small contractor teams  
-- Plumbers, electricians, HVAC contractors
-- Construction contractors
-- Consultants, freelancers
-- Web/software development contractors
-
-**What They Have in Common:**
-- Skilled at their trade
-- Managing 5-20 concurrent projects
-- Poor at business administration
-- Losing clients due to communication gaps
+**Primary:** Individual contractors and small teams — plumbers, electricians, HVAC, general construction, consultants, and freelancers managing 5–20 concurrent projects who are skilled at their trade but stretched thin on administration.
 
 ### Value Proposition
 
-| Stakeholder | Value | Outcome |
-|---|---|---|
-| **Contractor** | Central view of obligations | Never miss a deadline |
-| **Contractor** | 1-minute status updates | Save 2-3 hours/week on communication |
-| **Contractor** | Look professional effortlessly | Improve reputation & repeat business |
-| **Client** | Real-time project visibility | Reduced anxiety, increased trust |
-| **Client** | No chasing for updates | Better experience, recommend contractor |
+| Stakeholder    | Value                         | Outcome                                    |
+| -------------- | ----------------------------- | ------------------------------------------ |
+| **Contractor** | One home for customers + work | Never lose track of a client or obligation |
+| **Contractor** | One-tap status updates        | Save hours/week on client communication    |
+| **Contractor** | Professional client portal    | Improved reputation and repeat business    |
+| **Customer**   | Real-time project visibility  | Reduced anxiety, increased trust           |
+| **Customer**   | A place to ask and be heard   | Better experience, more referrals          |
 
-### Business Metrics
+### Success Metrics
 
-**Success is measured by:**
-1. **Adoption:** Contractors complete 5+ status updates/week
-2. **Impact:** Contractors report improved client satisfaction
-3. **Retention:** Increased repeat business from existing clients
-4. **Referrals:** Clients recommend contractor to others (due to communication)
+1. **Adoption:** contractors log 5+ status updates/week
+2. **Engagement:** invited customers accept and open the portal
+3. **Impact:** contractors report improved client satisfaction
+4. **Retention/Referrals:** more repeat business and client recommendations
 
 ---
 
-## MVP Scope
+## Product Scope
 
-### What's Included (Phase 1)
+### Built / In Progress
 
-**Backend:**
-- Projects table with status, dates, and unique shareable links
-- Quick status update API endpoint
-- Public read-only project view endpoint
-- Auto-generated unique tokens for each project
+- **Authentication & roles** — contractors and customers are distinct roles (better-auth).
+- **Customer directory** — contractor-scoped customer records with name, email (identity), phone, address, tags, and project notes; add-new and reuse-existing.
+- **Orders** — lifecycle states, per-order timeline, one-tap quick updates; orders link to a customer record (single source of truth).
+- **Customer portal** — magic-link invites bind a login to a customer record (by invite token); customers view status/timeline and send requests.
+- **Notifications** — in-app notifications to customers on updates and to contractors on customer requests, with milestone escalation.
 
-**Frontend - Contractor Dashboard:**
-- Projects overview with status and "last updated" timestamps
-- Quick status update modal (3 buttons: Not Started / In Progress / Completed)
-- Share button to copy/generate client links
-- 5-10 minute workflow for full update
+### Next Up
 
-**Frontend - Client View:**
-- Beautiful, mobile-responsive project page
-- Shows: Project status, description, timeline, last update
-- No login required
-- Works on any device
+- **Documents** — contractors upload documents, tag them, share them with a client, and request a response/acknowledgement (see the `customer-documents` change).
+- **Order/update templates** — reusable templates to set up orders and post updates faster.
 
-### What's Intentionally Left Out
+- **Subscription billing** — a 14-day free trial on signup (every feature, capped at 25 active customers, 25 active orders and 3 subcontractors), then one plan at $29 per contractor per month or $290 per year, unlimited. Payment runs through Stripe's hosted checkout and billing portal.
 
-These features are out of scope until we gather client feedback:
-- Contractor authentication (assumes single contractor initially)
-- Time tracking or billing
-- Invoice generation
-- Client account/login portal
-- Email notifications
-- Notes, comments, file uploads
-- Complex reporting
+### Deliberately Deferred
 
-**Rationale:** Adding these features now would complicate the MVP and make it harder for contractors to use. Validate the core value first, then expand.
+- Full accounting/invoicing and time tracking, and any handling of the money that moves between a **contractor and their own customer** — the `Deposit Pending` and `Final Payment Pending` order states remain status labels the contractor sets by hand. (Subscription billing, above, is the only money this product moves.)
+- Heavyweight project management (dependencies, Gantt, resource planning).
+- Multi-tenant enterprise administration, including multi-seat companies: pricing is already expressed per contractor, so a firm buying several logins under one bill is a later change rather than a repricing.
+- Pricing tiers. There is one plan by design — see [ADR-0006](docs/adr/0006-one-plan-priced-per-contractor.md).
 
-## Success Criteria
-
-### MVP Success Means
-
-1. ✓ Contractors use the system consistently (5+ updates/week)
-2. ✓ Contractor can update all projects in <10 minutes
-3. ✓ Clients feel confident in project progress
-4. ✓ Contractors report improved reputation/trust
-5. ✓ Reduced status update emails between contractor and clients
-
-### When We're Done
-
-We move to Phase 2 when:
-- At least 2 contractors have used the MVP for 2+ weeks
-- Feedback shows core value (visibility + reduced communication) is validated
-- No critical issues blocking adoption
+The guiding constraint remains **ruthless simplicity at the point of use**: every feature must reduce, not add, friction for a busy contractor. Richer data is fine as long as the day-to-day flows stay fast.
 
 ---
 
 ## Technical Stack
 
-| Component | Technology |
-|---|---|
-| **Frontend** | Vue.js 3 + Vite |
-| **Routing** | Vue Router 4 |
-| **Backend** | Node.js + Express |
-| **Database** | SQLite |
-| **Deployment** | Containerized (Dev Container included) |
+| Component      | Technology                                             |
+| -------------- | ------------------------------------------------------ |
+| **Framework**  | SvelteKit (Svelte 5)                                   |
+| **Auth**       | better-auth (email/password + GitHub OAuth)            |
+| **Database**   | PostgreSQL via Drizzle ORM                             |
+| **Validation** | Zod (shared client/server schemas)                     |
+| **Deployment** | Node adapter (`@sveltejs/adapter-node`), containerized |
 
-**Why These Choices:**
-- Fast development (Vite HMR, Vue's reactivity)
-- Lightweight and self-contained (no complex infrastructure)
-- Easy to customize (contractors can fork/modify)
-- Low operational overhead (single SQLite file)
+**Why:** SvelteKit's form actions keep the server/client boundary simple; Drizzle + Postgres give us a real relational model for customers, orders, and documents; Zod shares one validation contract across client and server.
 
 ---
 
-## Risk Analysis & Mitigation
+## Risks & Mitigations
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| Contractors don't use it (too much overhead) | High | Keep MVP dead-simple; test with real users early |
-| Clients expect more features than MVP provides | Medium | Be explicit about MVP limitations; gather feedback for Phase 2 |
-| Public links feel insecure | Medium | Can add password protection or expiration in Phase 2 |
-| Contractor forgets to update status | Medium | Dashboard shows "last updated" to nudge them |
-| Complexity scope creep | High | Strictly enforce MVP scope; document Phase 2 wishlist |
-
----
-
-## Assumptions & Dependencies
-
-### Key Assumptions
-- Contractors are motivated by reputation/repeat business
-- Clients will use read-only links (don't need login)
-- 1-minute status updates are sufficient for MVP
-- Contractors have basic internet/device access
-
-### Dependencies
-- Vue Router installation (✓ added to package.json)
-- npm install to add dependencies (✓ completed)
-- Development server (Vite + Express) (✓ running)
-
-### Open Questions (For Phase 2)
-- Do contractors want email reminders to update status?
-- Do clients prefer email notifications or self-serve checking?
-- Should we support multiple contractors on one instance?
-- Are there industry-specific requirements (construction vs. consulting)?
+| Risk                                                      | Impact | Mitigation                                                                                |
+| --------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------- |
+| Feature growth erodes the simplicity that drives adoption | High   | Hold the line on point-of-use simplicity; measure per-flow friction with real contractors |
+| Customers don't accept portal invites                     | Medium | Frictionless magic-link onboarding; contractor controls the invite                        |
+| Document storage/security complexity                      | Medium | Start with local disk + DB metadata; scoped access; migrate to object storage as needed   |
+| Contractor forgets to update status                       | Medium | Dashboard surfaces follow-ups and "needs attention"                                       |
 
 ---
 
-## Go-to-Market Strategy
+## Go-to-Market
 
-### Initial Users
-- 2-3 contractors from your network (dogfooding)
-- Collect detailed feedback on friction points
-- Document what works and what's missing
-
-### Validation
-- Run MVP for 2+ weeks with real contractors
-- Interview clients on their experience
-- Measure adoption rate and NPS
-
-### Future Expansion (Post-MVP)
-- Add features based on feedback
-- Build contractor testimonials/case studies
-- Consider freemium model or light SaaS pricing
-- Expand to multiple contractor support
+- **Dogfood** with 2–3 contractors; collect friction feedback per flow.
+- **Validate** that the portal meaningfully reduces status-chasing email over a 2+ week run.
+- **Expand** features (documents, templates) driven by observed need, not speculation.
 
 ---
 
 ## Conclusion
 
-The Contractor CMS addresses a real, persistent problem: contractors lose business due to poor communication, not poor work quality. By making project visibility effortless for both contractors and clients, we can meaningfully improve contractor reputation and client satisfaction.
-
-The MVP is intentionally scoped to solve the core problem in the simplest way possible. This increases the odds of adoption and provides a solid foundation for Phase 2 enhancements based on real user feedback.
-
-**Next Steps:**
-1. Complete MVP implementation
-2. Deploy to 2-3 test contractors
-3. Collect feedback after 2 weeks
-4. Document findings and refine roadmap
+The Contractor CRM addresses a real, persistent problem — contractors lose business to poor communication. By pairing lightweight work tracking with a genuine customer directory and client portal, we make trustworthy communication effortless. The scope has grown from v1's anonymous status link into a focused CRM, but the thesis is the same: **make the contractor look professional with almost no effort, and clients will stay and refer.**
 
 ---
 
-## Appendix: Feature Comparison
-
-### What Makes This Different From Existing Tools
-
-| Feature | Contractor CMS | Monday.com | Asana | Basecamp |
-|---|---|---|---|---|
-| **Simple interface** | ✓ | ✗ | ✗ | ✓ |
-| **1-minute status update** | ✓ | ✗ | ✗ | ✓ |
-| **Client view (no login)** | ✓ | ✗ | ✗ | Limited |
-| **Designed for contractors** | ✓ | ✗ | ✗ | ✗ |
-| **No complex workflows** | ✓ | ✗ | ✗ | ✓ |
-| **Free/Open** | ✓ | ✗ | ✗ | ✗ |
-| **Customizable** | ✓ | ✗ | ✗ | Limited |
-
-**Existing tools are overbuilt for contractors.** They add complexity that gets in the way of adoption. This system starts minimal and grows based on actual user needs.
-
----
-
-**Document Approved By:** Daniel Obot  
-**Last Updated:** July 18, 2026  
-**Next Review:** After Phase 1 MVP validation
+**Document Approved By:** Daniel Obot
+**Last Updated:** July 19, 2026
+**Supersedes:** v1.0 (July 18, 2026) — anonymous, login-free status-tracker MVP
